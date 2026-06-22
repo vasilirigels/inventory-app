@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+@layer components {
+  /* ── Inputs ── */
+  .input-field {
+    @apply w-full px-3 py-2 text-sm border border-slate-300 rounded-lg
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+           bg-white text-slate-800 placeholder-slate-400 transition;
+  }
+  .input-field-sm {
+    @apply w-full px-2 py-1 text-xs border border-slate-300 rounded-lg
+           focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white transition;
+  }
+
+  /* ── Buttons ── */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2
+           bg-blue-600 hover:bg-blue-700 active:bg-blue-800
+           text-white text-sm font-medium rounded-lg transition-colors shadow-sm;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2
+           bg-slate-100 hover:bg-slate-200 active:bg-slate-300
+           text-slate-700 text-sm font-medium rounded-lg transition-colors;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5
+           bg-red-500 hover:bg-red-600
+           text-white text-xs font-medium rounded-lg transition-colors;
+  }
+  .btn-success {
+    @apply inline-flex items-center gap-2 px-4 py-2
+           bg-emerald-600 hover:bg-emerald-700
+           text-white text-sm font-medium rounded-lg transition-colors shadow-sm;
+  }
+
+  /* ── Cards ── */
+  .card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-5;
+  }
+
+  /* ── Section title ── */
+  .section-title {
+    @apply text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-green  { @apply badge bg-emerald-100 text-emerald-700; }
+  .badge-yellow { @apply badge bg-amber-100 text-amber-700; }
+  .badge-red    { @apply badge bg-red-100 text-red-700; }
+  .badge-blue   { @apply badge bg-blue-100 text-blue-700; }
+  .badge-slate  { @apply badge bg-slate-100 text-slate-600; }
+  .badge-purple { @apply badge bg-purple-100 text-purple-700; }
+
+  /* ── Sidebar nav ── */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg
+           text-sm font-medium transition-colors cursor-pointer select-none w-full text-left;
+  }
+  .nav-active   { @apply bg-blue-600 text-white; }
+  .nav-inactive { @apply text-slate-400 hover:bg-slate-800 hover:text-white; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4;
+  }
+  .modal-box {
+    @apply bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto;
+  }
+  .modal-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-slate-100;
+  }
+  .modal-body {
+    @apply px-6 py-5 space-y-4;
+  }
+  .modal-footer {
+    @apply flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100;
+  }
+
+  /* ── Forms ── */
+  .form-label {
+    @apply block text-xs font-semibold text-slate-600 mb-1;
+  }
+
+  /* ── Tables ── */
+  .table-row { @apply border-b border-slate-100 hover:bg-slate-50 transition-colors; }
+
+  /* ── Legacy compat for existing components ── */
+  .tab-active   { @apply border-b-2 border-blue-500 text-blue-700 font-semibold; }
+  .tab-inactive { @apply text-slate-500 hover:text-slate-700; }
+  .total-row    { @apply bg-blue-50 font-semibold; }
+  .currency-col { @apply text-right; }
+}

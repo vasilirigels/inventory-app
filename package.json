@@ -1,0 +1,33 @@
+{
+  "name": "inventory-app",
+  "version": "1.0.0",
+  "description": "Albanian Jewelry Store Inventory Management",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"node server/index.js\" \"vite\"",
+    "build": "vite build",
+    "start": "node server/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "recharts": "^3.8.1",
+    "sql.js": "^1.14.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.5.0",
+    "concurrently": "^9.2.1",
+    "postcss": "^8.5.15",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^3.4.19",
+    "vite": "^5.4.21"
+  }
+}
