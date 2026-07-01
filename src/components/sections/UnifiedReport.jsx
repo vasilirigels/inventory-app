@@ -263,8 +263,7 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
                   {displayBuckets.map((b, i) => (
                     <tr
                       key={b.key}
-                      onClick={() => effectiveBucket === 'day' && onNavigate && onNavigate('daily', { date: b.date })}
-                      className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'} ${effectiveBucket === 'day' ? 'cursor-pointer hover:bg-yellow-50' : ''}`}
+                      className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}`}
                     >
                       <td className="px-2 py-1.5 sticky left-0 bg-inherit font-medium text-slate-800 whitespace-nowrap">{b.label}</td>
                       <Td value={b.xhiro_lek} className="text-emerald-700" />

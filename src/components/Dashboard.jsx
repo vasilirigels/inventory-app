@@ -131,9 +131,6 @@ export default function Dashboard({ onNavigate }) {
               €{fmt(totalSalesEur, 2)} total · {salesDays} ditë me shitje
             </p>
           </div>
-          <button onClick={() => onNavigate('history')} className="text-xs text-blue-600 hover:underline">
-            Historiku i plotë →
-          </button>
         </div>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
@@ -228,7 +225,6 @@ export default function Dashboard({ onNavigate }) {
               {[
                 { icon: '📦', label: 'Shto Produkt',    page: 'products' },
                 { icon: '👥', label: 'Klientët',         page: 'customers' },
-                { icon: '🔍', label: 'Historiku Shitjeve', page: 'history' },
               ].map(a => (
                 <button key={a.page} onClick={() => onNavigate(a.page)}
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 border border-slate-100 hover:border-blue-200 transition-all text-left">

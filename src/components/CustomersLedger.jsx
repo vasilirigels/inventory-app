@@ -393,8 +393,7 @@ function CustomerDrawer({ customer, onClose, onDelete, onNavigate }) {
                   <tbody>
                     {txWithBalance.map(t => (
                       <tr key={t.id} className={`border-t border-slate-100 ${t.type === 'debt' ? '' : 'bg-emerald-50/30'}`}>
-                        <td className="px-2 py-2 text-slate-700 whitespace-nowrap cursor-pointer hover:text-blue-600"
-                            onClick={() => onNavigate && onNavigate('daily', { date: t.date })}>
+                        <td className="px-2 py-2 text-slate-700 whitespace-nowrap">
                           {fmtDate(t.date)}
                         </td>
                         <td className="px-2 py-2">
