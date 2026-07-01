@@ -712,6 +712,24 @@ app.get('/api/products/lookup', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/products/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const like = `%${q}%`;
+    const rows = queryAll(
+      `SELECT id, name, sku, barcode, category, sell_price, vat_rate, stock, image_path
+         FROM products
+        WHERE active = 1
+          AND (barcode LIKE ? OR sku LIKE ? OR name LIKE ?)
+        ORDER BY (CASE WHEN barcode = ? THEN 0 WHEN sku = ? THEN 1 ELSE 2 END), name
+        LIMIT 12`,
+      [like, like, like, q, q]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.patch('/api/products/:id/stock', async (req, res) => {
   try {
     const { id } = req.params;
@@ -777,13 +795,15 @@ app.post('/api/products', async (req, res) => {
   try {
     const d = req.body;
     run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
         d.cost_price || 0, d.sell_price || 0,
         d.stock || 0, d.min_stock !== undefined ? d.min_stock : 5,
+        d.vat_rate !== undefined && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
+        d.unit || 'copë',
       ]
     );
     res.json({ success: true });
@@ -799,13 +819,15 @@ app.put('/api/products/:id', async (req, res) => {
     run(
       `UPDATE products
        SET name=?, sku=?, barcode=?, category=?, brand=?, description=?,
-           cost_price=?, sell_price=?, stock=?, min_stock=?
+           cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?
        WHERE id=?`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
         d.cost_price || 0, d.sell_price || 0,
         d.stock || 0, d.min_stock !== undefined ? d.min_stock : 5,
+        d.vat_rate !== undefined && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
+        d.unit || 'copë',
         id,
       ]
     );
@@ -821,23 +843,44 @@ app.post('/api/products/import', async (req, res) => {
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: 'Lista e produkteve është bosh' });
     }
+    // Returns one id per input row in the same order; null for skipped rows.
+    // Callers (e.g. FaturaBlerje import) need these ids to attach the freshly
+    // created products as line items.
+    const ids = [];
     let imported = 0;
+    let matched = 0;
     for (const d of products) {
-      if (!d.name || !String(d.name).trim()) continue;
+      if (!d.name || !String(d.name).trim()) { ids.push(null); continue; }
+      const barcode = String(d.barcode || '').trim();
+      const sku     = String(d.sku || '').trim();
+      // Reuse existing product if barcode or SKU matches — otherwise repeat
+      // imports of the same item create duplicate rows in the Products page.
+      // Stock/cost are not overwritten; the invoice save handles that.
+      let existing = null;
+      if (barcode) existing = queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
+      if (!existing && sku) existing = queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]);
+      if (existing) {
+        run('UPDATE products SET active = 1 WHERE id = ?', [existing.id]);
+        ids.push(existing.id);
+        matched++;
+        continue;
+      }
       run(
         `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           String(d.name).trim(),
-          d.sku || '', d.barcode || '',
+          sku, barcode,
           d.category || 'Tjeter', d.brand || '', d.description || '',
           parseFloat(d.cost_price) || 0, parseFloat(d.sell_price) || 0,
           parseInt(d.stock) || 0, parseInt(d.min_stock) || 5,
         ]
       );
+      const row = queryOne('SELECT last_insert_rowid() AS id');
+      ids.push(row?.id || null);
       imported++;
     }
-    res.json({ success: true, imported });
+    res.json({ success: true, imported, matched, ids });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -851,6 +894,2736 @@ app.delete('/api/products/:id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ============================================================
+// EXCHANGE RATES (Banka e Shqipërisë, cached per date in DB)
+// ============================================================
+const SUPPORTED_CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF'];
+const FALLBACK_RATES = { EUR: 99.50, USD: 92.00, GBP: 117.00, CHF: 103.50 };
+
+// Parse Bank of Albania (BSH) daily exchange rate HTML page.
+// Returns { EUR: 99.5, USD: 92.0, ... } meaning 1 unit foreign currency = N LEK.
+function parseBSHHtml(html) {
+  const rates = {};
+  for (const cur of SUPPORTED_CURRENCIES) {
+    // Look for the currency code anywhere followed by a number (typical BSH table cells)
+    const patterns = [
+      new RegExp(`${cur}[\\s\\S]{0,200}?([0-9]{1,4}[.,][0-9]{1,4})`, 'i'),
+      new RegExp(`>\\s*${cur}\\s*<[\\s\\S]{0,400}?>\\s*([0-9]{1,4}[.,][0-9]{1,4})\\s*<`, 'i'),
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m) {
+        const v = parseFloat(m[1].replace(',', '.'));
+        if (v > 1 && v < 1000) { rates[cur] = +v.toFixed(4); break; }
+      }
+    }
+  }
+  return rates;
+}
+
+async function fetchBSHRates() {
+  // 1) Try the official Bank of Albania daily exchange rate page (HTML scrape)
+  const bshUrls = [
+    'https://www.bankofalbania.org/Markets/Daily_exchange_rate.html',
+    'https://www.bankofalbania.org/Markets/Daily_exchange_rate/',
+  ];
+  for (const url of bshUrls) {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GoldShopApp/1.0)' },
+      });
+      if (!res.ok) continue;
+      const html = await res.text();
+      const rates = parseBSHHtml(html);
+      if (Object.keys(rates).length >= 2) return { rates, source: 'BSH' };
+    } catch (_) { /* try next */ }
+  }
+  // 2) Fallback: open exchange rates API (rates derived, not BSH-official)
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/ALL', { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const j = await res.json();
+      if (j && j.rates) {
+        const out = {};
+        for (const c of SUPPORTED_CURRENCIES) {
+          const r = j.rates[c];
+          if (r && r > 0) out[c] = +(1 / r).toFixed(4);
+        }
+        if (Object.keys(out).length === SUPPORTED_CURRENCIES.length) return { rates: out, source: 'open.er-api.com' };
+      }
+    }
+  } catch (_) { /* fall through */ }
+  // 3) Last resort: hardcoded approximate
+  return { rates: { ...FALLBACK_RATES }, source: 'fallback' };
+}
+
+app.get('/api/exchange-rates/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const cached = queryAll('SELECT currency, rate, source FROM exchange_rates WHERE date = ?', [date]);
+    let rates = {};
+    let source = 'cache';
+    if (cached.length >= SUPPORTED_CURRENCIES.length) {
+      for (const r of cached) rates[r.currency] = r.rate;
+      source = cached[0].source || 'cache';
+    } else {
+      const fetched = await fetchBSHRates();
+      rates = fetched.rates;
+      source = fetched.source;
+      for (const [cur, rate] of Object.entries(rates)) {
+        run(
+          'INSERT OR REPLACE INTO exchange_rates (date, currency, rate, source) VALUES (?, ?, ?, ?)',
+          [date, cur, rate, source]
+        );
+      }
+    }
+    rates.LEK = 1;
+    res.json({ date, rates, source });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/exchange-rates/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const { rates } = req.body || {};
+    if (!rates || typeof rates !== 'object') return res.status(400).json({ error: 'rates required' });
+    for (const [cur, rate] of Object.entries(rates)) {
+      if (cur === 'LEK') continue;
+      run(
+        'INSERT OR REPLACE INTO exchange_rates (date, currency, rate, source) VALUES (?, ?, ?, ?)',
+        [date, cur, parseFloat(rate) || 0, 'manual']
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// INVOICES (Fatura Shitje)
+// ============================================================
+function computeLineTotals(it) {
+  const qty   = parseFloat(it.qty) || 0;
+  const price = parseFloat(it.unit_price_no_vat) || 0;
+  const disc  = parseFloat(it.discount_percent) || 0;
+  const vatR  = parseFloat(it.vat_rate) || 0;
+  const gross = qty * price;
+  const subtotal_no_vat = +(gross * (1 - disc / 100)).toFixed(2);
+  const vat_amount     = +(subtotal_no_vat * (vatR / 100)).toFixed(2);
+  const total_with_vat = +(subtotal_no_vat + vat_amount).toFixed(2);
+  return { qty, unit_price_no_vat: price, discount_percent: disc, vat_rate: vatR, subtotal_no_vat, vat_amount, total_with_vat };
+}
+
+function nextInvoiceNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const row = queryOne(
+    "SELECT COUNT(*) AS c FROM invoices WHERE date LIKE ?",
+    [year + '%']
+  );
+  const next = (row?.c || 0) + 1;
+  return `${year}-${String(next).padStart(5, '0')}`;
+}
+
+app.get('/api/invoices/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ invoice_no: nextInvoiceNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/invoices/by-date/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const rows = queryAll(
+      `SELECT i.*,
+         (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
+       FROM invoices i WHERE i.date = ? ORDER BY i.id ASC`,
+      [date]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/invoices/by-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    const rows = queryAll(
+      `SELECT i.*,
+         (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
+       FROM invoices i WHERE i.date BETWEEN ? AND ? ORDER BY i.date ASC, i.id ASC`,
+      [from, to]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const invoice = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    if (!invoice) return res.status(404).json({ error: 'not found' });
+    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id ASC', [id]);
+    const paySum = queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [id])?.s || 0;
+    const raw = (invoice.amount_paid || 0) - paySum;
+    const initial_amount_paid = +(invoice.is_credit_note ? raw : Math.max(0, raw)).toFixed(2);
+    res.json({ ...invoice, items, initial_amount_paid });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+function recomputeInvoiceTotals(items) {
+  let sub = 0, vat = 0, tot = 0;
+  for (const it of items) {
+    sub += it.subtotal_no_vat || 0;
+    vat += it.vat_amount     || 0;
+    tot += it.total_with_vat || 0;
+  }
+  return {
+    subtotal_no_vat: +sub.toFixed(2),
+    total_vat: +vat.toFixed(2),
+    total_with_vat: +tot.toFixed(2),
+  };
+}
+
+function adjustStock(items, sign) {
+  for (const it of items) {
+    if (it.product_id && it.qty) {
+      const delta = sign * (parseInt(it.qty) || 0);
+      if (delta !== 0) {
+        run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+      }
+    }
+  }
+}
+
+// Auto-register a client when an invoice references one that's not in the
+// `clients` table yet. Match by NIPT first (strongest key), then by exact
+// normalized full name. Returns silently — failure must never block the sale.
+function ensureClientExists(name, nipt) {
+  try {
+    const cleanName = (name || '').trim();
+    const cleanNipt = (nipt || '').trim();
+    if (!cleanName && !cleanNipt) return;
+
+    if (cleanNipt) {
+      const byNipt = queryOne('SELECT id FROM clients WHERE nipt = ?', [cleanNipt]);
+      if (byNipt) return;
+    } else {
+      const byName = queryOne(
+        `SELECT id FROM clients
+          WHERE LOWER(TRIM(first_name || ' ' || last_name)) = LOWER(?)`,
+        [cleanName]
+      );
+      if (byName) return;
+    }
+
+    const parts = cleanName.split(/\s+/);
+    const firstName = parts[0] || '';
+    const lastName  = parts.slice(1).join(' ');
+    run(
+      `INSERT INTO clients (nipt, first_name, last_name, address, phone, notes)
+       VALUES (?, ?, ?, '', '', '')`,
+      [cleanNipt, firstName, lastName]
+    );
+  } catch { /* ignore — auto-register is best-effort */ }
+}
+
+app.post('/api/invoices', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date = d.date;
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const invoice_no = (d.invoice_no || '').trim() || nextInvoiceNo(date);
+
+    const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
+    const totals = recomputeInvoiceTotals(items);
+
+    const pm = ['cash', 'bank', 'debt', 'pos', 'mikse'].includes(d.payment_method) ? d.payment_method : 'cash';
+    // Mixed mode lets the cashier split the invoice across cash + POS + bank;
+    // anything not covered automatically becomes amount_due (borxh).
+    const paidCash = pm === 'mikse' ? (parseFloat(d.paid_cash) || 0) : 0;
+    const paidPos  = pm === 'mikse' ? (parseFloat(d.paid_pos)  || 0) : 0;
+    const paidBank = pm === 'mikse' ? (parseFloat(d.paid_bank) || 0) : 0;
+    let amountPaid;
+    if (pm === 'mikse') {
+      amountPaid = +(paidCash + paidPos + paidBank).toFixed(2);
+    } else if (d.amount_paid != null && d.amount_paid !== '') {
+      amountPaid = parseFloat(d.amount_paid) || 0;
+    } else {
+      // Defaults per method when client doesn't send an explicit value
+      amountPaid = (pm === 'cash' || pm === 'pos') ? totals.total_with_vat : 0;
+    }
+    const amountDue = Math.max(0, +(totals.total_with_vat - amountPaid).toFixed(2));
+    const totalDiscount = +items.reduce((s, it) => {
+      const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0);
+      return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
+    }, 0).toFixed(2);
+    ensureClientExists(d.customer_name, d.customer_nipt);
+    run(
+      `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
+        paid_cash, paid_pos, paid_bank, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        date, invoice_no, d.customer_name || '', d.customer_nipt || '',
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        totals.subtotal_no_vat, totalDiscount,
+        totals.total_vat, totals.total_with_vat,
+        pm, amountPaid, amountDue,
+        paidCash, paidPos, paidBank,
+        d.notes || '',
+      ]
+    );
+    const invoice = queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
+    const invoiceId = invoice?.id;
+    for (const it of items) {
+      run(
+        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          invoiceId, it.product_id || null, it.barcode || '', it.name || '',
+          it.qty, it.unit_price_no_vat, it.discount_percent,
+          it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+        ]
+      );
+    }
+    adjustStock(items, -1);
+    res.json({ success: true, id: invoiceId, invoice_no });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const existing = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const oldItems = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+
+    const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
+    const totals = recomputeInvoiceTotals(items);
+
+    const pmU = ['cash', 'bank', 'debt', 'pos', 'mikse'].includes(d.payment_method) ? d.payment_method : 'cash';
+    // The form value represents the INITIAL portion paid at sale time. Any subsequent
+    // payments registered via the Detyrime Klienti modal live in invoice_payments and
+    // must be preserved when the user re-saves the invoice from the editor.
+    const paidCashU = pmU === 'mikse' ? (parseFloat(d.paid_cash) || 0) : 0;
+    const paidPosU  = pmU === 'mikse' ? (parseFloat(d.paid_pos)  || 0) : 0;
+    const paidBankU = pmU === 'mikse' ? (parseFloat(d.paid_bank) || 0) : 0;
+    let formInitialPaid;
+    if (pmU === 'mikse') {
+      formInitialPaid = +(paidCashU + paidPosU + paidBankU).toFixed(2);
+    } else if (d.amount_paid != null && d.amount_paid !== '') {
+      formInitialPaid = parseFloat(d.amount_paid) || 0;
+    } else {
+      formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? totals.total_with_vat : 0;
+    }
+    const existingPaySum = queryOne(
+      'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?',
+      [id]
+    )?.s || 0;
+    const amountPaidU = +(formInitialPaid + existingPaySum).toFixed(2);
+    const amountDueU = Math.max(0, +(totals.total_with_vat - amountPaidU).toFixed(2));
+    const totalDiscountU = +items.reduce((s, it) => {
+      const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0);
+      return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
+    }, 0).toFixed(2);
+    ensureClientExists(d.customer_name, d.customer_nipt);
+    run(
+      `UPDATE invoices SET date=?, customer_name=?, customer_nipt=?, currency=?, exchange_rate=?,
+        subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?,
+        paid_cash=?, paid_pos=?, paid_bank=?, notes=?
+       WHERE id=?`,
+      [
+        d.date || existing.date,
+        d.customer_name || '', d.customer_nipt || '',
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        totals.subtotal_no_vat, totalDiscountU,
+        totals.total_vat, totals.total_with_vat,
+        pmU, amountPaidU, amountDueU,
+        paidCashU, paidPosU, paidBankU, d.notes || '',
+        id,
+      ]
+    );
+    // Restore stock from previous items, then re-deduct
+    adjustStock(oldItems, +1);
+    run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
+    for (const it of items) {
+      run(
+        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id, it.product_id || null, it.barcode || '', it.name || '',
+          it.qty, it.unit_price_no_vat, it.discount_percent,
+          it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+        ]
+      );
+    }
+    adjustStock(items, -1);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    adjustStock(items, +1);
+    run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
+    run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
+    run('DELETE FROM invoices WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Anulim — mark invoice as cancelled, restore stock, void payments
+app.post('/api/invoices/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    if (inv.cancelled) return res.status(400).json({ error: 'Fatura është anuluar tashmë' });
+    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    adjustStock(items, +1);
+    run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
+    run('UPDATE invoices SET cancelled = 1, amount_paid = 0, amount_due = 0 WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Krijo Faturë Kreditore (me minus) — mirror invoice with negative values
+app.post('/api/invoices/:id/credit-note', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    if (inv.cancelled) return res.status(400).json({ error: 'Nuk lëshohet kreditore për faturë të anuluar' });
+    if (inv.is_credit_note) return res.status(400).json({ error: 'Kjo është tashmë një kreditore' });
+    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    const date = (req.body && req.body.date) || new Date().toISOString().slice(0, 10);
+    const baseNo = nextInvoiceNo(date);
+    const invoice_no = `${baseNo}-K`;
+
+    // Stornim: gjithmonë cash, e paguar plotësisht (amount_paid = total, due = 0)
+    const negTotal = -(inv.total_with_vat || 0);
+    run(
+      `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
+        notes, is_credit_note, parent_invoice_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        date, invoice_no, inv.customer_name || '', inv.customer_nipt || '',
+        inv.currency || 'LEK', inv.exchange_rate || 1,
+        -(inv.subtotal_no_vat || 0), -(inv.total_discount || 0),
+        -(inv.total_vat || 0), negTotal,
+        'cash',
+        negTotal, 0,
+        `Stornim për faturën ${inv.invoice_no}`,
+        1, parseInt(id),
+      ]
+    );
+    const created = queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
+    const newId = created?.id;
+    for (const it of items) {
+      run(
+        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          newId, it.product_id || null, it.barcode || '', it.name || '',
+          -(it.qty || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
+          -(it.subtotal_no_vat || 0), it.vat_rate || 0,
+          -(it.vat_amount || 0), -(it.total_with_vat || 0),
+        ]
+      );
+    }
+    // Returning items to stock (qty was negative → stock += positive)
+    adjustStock(items, +1);
+    res.json({ success: true, id: newId, invoice_no });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// INVOICE PAYMENTS — partial payment history per invoice
+// ============================================================
+function recalcInvoicePayments(invoiceId) {
+  // Sum extra payments and rebuild invoice's amount_paid / amount_due
+  const inv = queryOne('SELECT total_with_vat, amount_paid FROM invoices WHERE id = ?', [invoiceId]);
+  if (!inv) return null;
+  const extra = queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [invoiceId]);
+  // amount_paid in invoice = initial_paid + sum(extra payments)
+  // We rely on a stored "initial_paid" snapshot — track via a column or compute from history.
+  // For simplicity: total_paid = initial registration paid + extras. We store the running total.
+  // Strategy: when adding a payment, increment amount_paid; when deleting, decrement.
+  // recalcInvoicePayments isn't strictly needed here, but keep for safety.
+  return inv;
+}
+
+app.get('/api/invoices/:id/payments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    const payments = queryAll('SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY date ASC, id ASC', [id]);
+    // The "initial registration" payment is the portion already in invoice.amount_paid before any extras.
+    const extrasSum = payments.reduce((s, p) => s + (p.amount || 0), 0);
+    const initialPaid = +(Math.max(0, (inv.amount_paid || 0) - extrasSum)).toFixed(2);
+    res.json({
+      invoice: inv,
+      initial_paid: initialPaid,
+      initial_date: inv.date,
+      payments,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/invoices/:id/payments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const amount = parseFloat(d.amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'amount must be > 0' });
+    const date = d.date || new Date().toISOString().slice(0, 10);
+    const pm = ['cash', 'bank', 'debt', 'pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+
+    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'invoice not found' });
+
+    const currentDue = Math.max(0, (inv.total_with_vat || 0) - (inv.amount_paid || 0));
+    if (amount > currentDue + 0.005) {
+      return res.status(400).json({ error: `Shuma e tepruar — borxhi i mbetur është ${currentDue.toFixed(2)}` });
+    }
+
+    run(
+      `INSERT INTO invoice_payments (invoice_id, date, amount, payment_method, notes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, date, amount, pm, d.notes || '']
+    );
+
+    const newPaid = +((inv.amount_paid || 0) + amount).toFixed(2);
+    const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
+    run('UPDATE invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, id]);
+
+    res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/invoice-payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pay = queryOne('SELECT * FROM invoice_payments WHERE id = ?', [id]);
+    if (!pay) return res.status(404).json({ error: 'not found' });
+    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [pay.invoice_id]);
+    if (!inv) return res.status(404).json({ error: 'invoice missing' });
+
+    run('DELETE FROM invoice_payments WHERE id = ?', [id]);
+    const newPaid = +Math.max(0, (inv.amount_paid || 0) - (pay.amount || 0)).toFixed(2);
+    const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
+    run('UPDATE invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.invoice_id]);
+    res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// CLIENT DEBT REPORT — outstanding invoices per client
+// ============================================================
+app.get('/api/client-debts', async (req, res) => {
+  try {
+    const { q, nipt, name, from, to } = req.query;
+    // Detyrime tracks Bank + Debt invoices (and credit notes offsetting them); Cash + POS are paid in full and excluded
+    let sql = `
+      SELECT i.*,
+        (SELECT date   FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
+        (SELECT amount FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
+        (SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = i.id) AS payment_count
+      FROM invoices i
+      WHERE COALESCE(i.cancelled, 0) = 0
+        AND i.payment_method IN ('bank', 'debt')
+        AND (COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0
+             OR COALESCE(i.is_credit_note, 0) = 1)`;
+    const params = [];
+    if (nipt) {
+      sql += ' AND i.customer_nipt = ?';
+      params.push(nipt);
+    } else if (name) {
+      sql += ' AND i.customer_name = ?';
+      params.push(name);
+    } else if (q && q.trim()) {
+      sql += ' AND (i.customer_name LIKE ? OR i.customer_nipt LIKE ?)';
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (from) { sql += ' AND i.date >= ?'; params.push(from); }
+    if (to)   { sql += ' AND i.date <= ?'; params.push(to); }
+    sql += ' ORDER BY i.date DESC, i.id DESC';
+    res.json(queryAll(sql, params));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/client-activity', async (req, res) => {
+  try {
+    const { q, nipt, name, from, to } = req.query;
+    const conds = [];
+    const params = [];
+    if (nipt) {
+      conds.push('customer_nipt = ?');
+      params.push(nipt);
+    } else if (name) {
+      conds.push('customer_name = ?');
+      params.push(name);
+    } else if (q && q.trim()) {
+      conds.push('(customer_name LIKE ? OR customer_nipt LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`);
+    } else {
+      return res.json({ client: null, invoices: [], payments: [], totals: { invoiced: 0, paid: 0, due: 0 } });
+    }
+    if (from) { conds.push('date >= ?'); params.push(from); }
+    if (to)   { conds.push('date <= ?'); params.push(to); }
+    // Exclude cancelled invoices; credit notes are included
+    conds.push('COALESCE(cancelled, 0) = 0');
+    const invoices = queryAll(
+      `SELECT * FROM invoices WHERE ${conds.join(' AND ')} ORDER BY date ASC, id ASC`,
+      params
+    );
+    if (invoices.length === 0) {
+      return res.json({ client: null, invoices: [], payments: [], totals: { invoiced: 0, paid: 0, due: 0 } });
+    }
+    const ids = invoices.map(i => i.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const payParams = [...ids];
+    let payWhere = `p.invoice_id IN (${placeholders})`;
+    if (from) { payWhere += ' AND p.date >= ?'; payParams.push(from); }
+    if (to)   { payWhere += ' AND p.date <= ?'; payParams.push(to); }
+    const payments = queryAll(
+      `SELECT p.*, i.invoice_no, i.date AS invoice_date, i.total_with_vat AS invoice_total
+         FROM invoice_payments p
+         JOIN invoices i ON i.id = p.invoice_id
+        WHERE ${payWhere}
+        ORDER BY p.date ASC, p.id ASC`,
+      payParams
+    );
+    // Use the first invoice to determine the client identity for the header
+    const client = {
+      name: invoices[0].customer_name || '',
+      nipt: invoices[0].customer_nipt || '',
+    };
+    // When filtered by date, paid = sum of payments within range; otherwise use stored amount_paid
+    const invoiced = invoices.reduce((s, i) => s + (i.total_with_vat || 0), 0);
+    let paid;
+    if (from || to) {
+      paid = payments.reduce((s, p) => s + (p.amount || 0), 0);
+    } else {
+      paid = invoices.reduce((s, i) => s + (i.amount_paid || 0), 0);
+    }
+    const due = +(invoiced - paid).toFixed(2);
+    const totals = { invoiced: +invoiced.toFixed(2), paid: +paid.toFixed(2), due };
+    res.json({ client, invoices, payments, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/client-debts/summary', async (req, res) => {
+  try {
+    const onlyDebt = req.query.onlyDebt === '1' || req.query.onlyDebt === 'true';
+    const { from, to } = req.query;
+    // Only Bank + Debt invoices count toward debts; Cash + POS excluded entirely
+    const conds = [
+      "COALESCE(cancelled, 0) = 0",
+      "payment_method IN ('bank','debt')",
+    ];
+    const params = [];
+    if (from) { conds.push('date >= ?'); params.push(from); }
+    if (to)   { conds.push('date <= ?'); params.push(to); }
+    const where = `WHERE ${conds.join(' AND ')}`;
+    const sql = `
+      SELECT
+        COALESCE(NULLIF(customer_nipt, ''), customer_name) AS client_key,
+        customer_name,
+        customer_nipt,
+        currency,
+        COUNT(*) AS invoice_count,
+        SUM(total_with_vat) AS total,
+        SUM(amount_paid) AS paid,
+        SUM(COALESCE(amount_due, total_with_vat - amount_paid)) AS due
+      FROM invoices
+      ${where}
+      GROUP BY client_key, customer_name, customer_nipt, currency
+      ${onlyDebt ? 'HAVING SUM(COALESCE(amount_due, total_with_vat - amount_paid)) > 0' : ''}
+      ORDER BY
+        CASE WHEN customer_name IS NULL OR customer_name = '' THEN 1 ELSE 0 END,
+        customer_name COLLATE NOCASE ASC,
+        customer_nipt ASC
+    `;
+    res.json(queryAll(sql, params));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// SUPPLIERS (FURNITOR)
+// ============================================================
+app.get('/api/suppliers', async (req, res) => {
+  try {
+    res.json(queryAll('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE ASC', []));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/suppliers/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const like = `%${q}%`;
+    res.json(queryAll(
+      `SELECT * FROM suppliers
+        WHERE nipt LIKE ? OR name LIKE ? OR phone LIKE ?
+        ORDER BY name COLLATE NOCASE ASC LIMIT 12`,
+      [like, like, like]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/suppliers', async (req, res) => {
+  try {
+    const d = req.body || {};
+    run(
+      `INSERT INTO suppliers (nipt, name, address, phone, notes) VALUES (?, ?, ?, ?, ?)`,
+      [d.nipt || '', d.name || '', d.address || '', d.phone || '', d.notes || '']
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/suppliers/:id', async (req, res) => {
+  try {
+    const d = req.body || {};
+    run(
+      `UPDATE suppliers SET nipt=?, name=?, address=?, phone=?, notes=? WHERE id=?`,
+      [d.nipt || '', d.name || '', d.address || '', d.phone || '', d.notes || '', req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/suppliers/:id', async (req, res) => {
+  try {
+    run('DELETE FROM suppliers WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// WAREHOUSES (Magazinat) — regjistër i kodeve të magazinave
+// ============================================================
+app.get('/api/warehouses', async (req, res) => {
+  try {
+    res.json(queryAll('SELECT * FROM warehouses ORDER BY code COLLATE NOCASE ASC', []));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/warehouses/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json(queryAll('SELECT * FROM warehouses ORDER BY code COLLATE NOCASE ASC LIMIT 12', []));
+    const like = `%${q}%`;
+    res.json(queryAll(
+      `SELECT * FROM warehouses
+        WHERE code LIKE ? OR name LIKE ?
+        ORDER BY code COLLATE NOCASE ASC LIMIT 12`,
+      [like, like]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/warehouses', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const code = (d.code || '').trim();
+    if (!code) return res.status(400).json({ error: 'Kodi është i detyrueshëm' });
+    const dup = queryOne('SELECT id FROM warehouses WHERE code = ?', [code]);
+    if (dup) return res.status(400).json({ error: `Kodi "${code}" ekziston tashmë` });
+    run(
+      `INSERT INTO warehouses (code, name, address, notes) VALUES (?, ?, ?, ?)`,
+      [code, d.name || '', d.address || '', d.notes || '']
+    );
+    const created = queryOne('SELECT * FROM warehouses WHERE code = ?', [code]);
+    res.json({ success: true, warehouse: created });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/warehouses/:id', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const code = (d.code || '').trim();
+    if (!code) return res.status(400).json({ error: 'Kodi është i detyrueshëm' });
+    const dup = queryOne('SELECT id FROM warehouses WHERE code = ? AND id != ?', [code, req.params.id]);
+    if (dup) return res.status(400).json({ error: `Kodi "${code}" ekziston tashmë` });
+    run(
+      `UPDATE warehouses SET code=?, name=?, address=?, notes=? WHERE id=?`,
+      [code, d.name || '', d.address || '', d.notes || '', req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/warehouses/:id', async (req, res) => {
+  try {
+    run('DELETE FROM warehouses WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// PURCHASE INVOICES (Fatura Blerje)
+// ============================================================
+function computePurchaseLineTotals(it) {
+  const qty   = parseFloat(it.qty) || 0;
+  const price = parseFloat(it.purchase_price_no_vat) || 0;
+  const disc  = parseFloat(it.discount_percent) || 0;
+  const vatR  = parseFloat(it.vat_rate) || 0;
+  const gross = qty * price;
+  const subtotal_no_vat = +(gross * (1 - disc / 100)).toFixed(2);
+  const vat_amount     = +(subtotal_no_vat * (vatR / 100)).toFixed(2);
+  const total_with_vat = +(subtotal_no_vat + vat_amount).toFixed(2);
+  return { qty, purchase_price_no_vat: price, discount_percent: disc, vat_rate: vatR, subtotal_no_vat, vat_amount, total_with_vat };
+}
+
+function nextPurchaseNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const row = queryOne("SELECT COUNT(*) AS c FROM purchase_invoices WHERE date LIKE ?", [year + '%']);
+  const next = (row?.c || 0) + 1;
+  return `B${year}-${String(next).padStart(5, '0')}`;
+}
+
+function adjustPurchaseStock(items, sign) {
+  // sign=+1 when applying purchase (stock up); sign=-1 when reverting
+  for (const it of items) {
+    if (it.product_id && it.qty) {
+      const delta = sign * (parseInt(it.qty) || 0);
+      if (delta !== 0) {
+        run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+      }
+    }
+  }
+}
+
+function applyProductPrices(items) {
+  // Update each product's cost_price + sell_price from the purchase line
+  for (const it of items) {
+    if (!it.product_id) continue;
+    const updates = [];
+    const params = [];
+    if (it.purchase_price_no_vat != null && it.purchase_price_no_vat !== '') {
+      updates.push('cost_price = ?');
+      params.push(parseFloat(it.purchase_price_no_vat) || 0);
+    }
+    if (it.sell_price != null && it.sell_price !== '' && parseFloat(it.sell_price) > 0) {
+      updates.push('sell_price = ?');
+      params.push(parseFloat(it.sell_price) || 0);
+    }
+    if (it.vat_rate != null && it.vat_rate !== '') {
+      updates.push('vat_rate = ?');
+      params.push(parseFloat(it.vat_rate) || 0);
+    }
+    if (it.material === 'flori' || it.material === 'diamant') {
+      updates.push('material = ?');
+      params.push(it.material);
+    }
+    if (updates.length === 0) continue;
+    params.push(it.product_id);
+    run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, params);
+  }
+}
+
+app.get('/api/purchase-invoices/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ invoice_no: nextPurchaseNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    res.json(queryAll(
+      `SELECT pi.*,
+         (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid
+       FROM purchase_invoices pi WHERE pi.date = ? ORDER BY pi.id ASC`,
+      [date]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/purchase-invoices/by-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    res.json(queryAll(
+      `SELECT pi.*,
+         (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid
+       FROM purchase_invoices pi WHERE pi.date BETWEEN ? AND ? ORDER BY pi.date ASC, pi.id ASC`,
+      [from, to]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/purchase-invoices/:id', async (req, res) => {
+  try {
+    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    const items = queryAll(
+      `SELECT pi.*, COALESCE(p.material, '') AS material
+         FROM purchase_items pi
+         LEFT JOIN products p ON p.id = pi.product_id
+        WHERE pi.purchase_id = ?
+        ORDER BY pi.id ASC`,
+      [req.params.id]
+    );
+    const paySum = queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?', [req.params.id])?.s || 0;
+    const initial_amount_paid = +Math.max(0, (inv.amount_paid || 0) - paySum).toFixed(2);
+    res.json({ ...inv, items, initial_amount_paid });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/purchase-invoices', async (req, res) => {
+  try {
+    const d = req.body || {};
+    if (!d.date) return res.status(400).json({ error: 'date required' });
+    const invoice_no = (d.invoice_no || '').trim() || nextPurchaseNo(d.date);
+    const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
+    const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
+    const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
+    const tot = +items.reduce((s, it) => s + it.total_with_vat, 0).toFixed(2);
+    const totalDiscount = +items.reduce((s, it) => {
+      const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.purchase_price_no_vat) || 0);
+      return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
+    }, 0).toFixed(2);
+
+    const pmI = ['cash','bank','debt','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+    let amountPaidI;
+    if (d.amount_paid != null && d.amount_paid !== '') {
+      amountPaidI = parseFloat(d.amount_paid) || 0;
+    } else {
+      amountPaidI = (pmI === 'cash' || pmI === 'pos') ? tot : 0;
+    }
+    const amountDueI = Math.max(0, +(tot - amountPaidI).toFixed(2));
+
+    run(
+      `INSERT INTO purchase_invoices (date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        d.date, invoice_no, d.supplier_name || '', d.supplier_nipt || '',
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        sub, totalDiscount, vat, tot,
+        pmI, amountPaidI, amountDueI,
+        d.notes || '',
+      ]
+    );
+    const created = queryOne('SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?', [d.date, invoice_no]);
+    const newId = created?.id;
+    for (const it of items) {
+      run(
+        `INSERT INTO purchase_items (purchase_id, product_id, barcode, name, qty, purchase_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          newId, it.product_id || null, it.barcode || '', it.name || '',
+          it.qty, it.purchase_price_no_vat, it.discount_percent,
+          it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+          parseFloat(it.sell_price) || 0,
+        ]
+      );
+    }
+    adjustPurchaseStock(items, +1);
+    applyProductPrices(items);
+    res.json({ success: true, id: newId, invoice_no });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/purchase-invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const existing = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const oldItems = queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
+    const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
+    const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
+    const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
+    const tot = +items.reduce((s, it) => s + it.total_with_vat, 0).toFixed(2);
+    const totalDiscount = +items.reduce((s, it) => {
+      const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.purchase_price_no_vat) || 0);
+      return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
+    }, 0).toFixed(2);
+
+    const pmU = ['cash','bank','debt','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+    // The form value represents the INITIAL portion paid at purchase time. Any subsequent
+    // payments registered via the Detyrime Furnitor modal live in purchase_payments and
+    // must be preserved when the user re-saves the invoice from the editor.
+    let formInitialPaid;
+    if (d.amount_paid != null && d.amount_paid !== '') {
+      formInitialPaid = parseFloat(d.amount_paid) || 0;
+    } else {
+      formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? tot : 0;
+    }
+    const existingPaySum = queryOne(
+      'SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?',
+      [id]
+    )?.s || 0;
+    const amountPaidU = +(formInitialPaid + existingPaySum).toFixed(2);
+    const amountDueU = Math.max(0, +(tot - amountPaidU).toFixed(2));
+
+    run(
+      `UPDATE purchase_invoices SET date=?, supplier_name=?, supplier_nipt=?, currency=?, exchange_rate=?,
+        subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?, notes=?
+       WHERE id=?`,
+      [
+        d.date || existing.date,
+        d.supplier_name || '', d.supplier_nipt || '',
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        sub, totalDiscount, vat, tot,
+        pmU, amountPaidU, amountDueU,
+        d.notes || '',
+        id,
+      ]
+    );
+    adjustPurchaseStock(oldItems, -1);
+    run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    for (const it of items) {
+      run(
+        `INSERT INTO purchase_items (purchase_id, product_id, barcode, name, qty, purchase_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id, it.product_id || null, it.barcode || '', it.name || '',
+          it.qty, it.purchase_price_no_vat, it.discount_percent,
+          it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+          parseFloat(it.sell_price) || 0,
+        ]
+      );
+    }
+    adjustPurchaseStock(items, +1);
+    applyProductPrices(items);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/purchase-invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const items = queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
+    adjustPurchaseStock(items, -1);
+    run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    run('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
+    run('DELETE FROM purchase_invoices WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// FLETË HYRJE / FLETË DALJE — inventory adjustment notes
+// ============================================================
+function makeFleteEndpoints(kind, sign) {
+  // kind: 'hyrje' or 'dalje'; sign: +1 for hyrje (adds stock), -1 for dalje (removes)
+  const table  = `flete_${kind}`;
+  const itable = `flete_${kind}_items`;
+  const path   = `/api/flete-${kind}`;
+
+  function nextRefNo(date) {
+    const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+    const prefix = kind === 'hyrje' ? 'H' : 'D';
+    const row = queryOne(`SELECT COUNT(*) AS c FROM ${table} WHERE date LIKE ?`, [year + '%']);
+    const next = (row?.c || 0) + 1;
+    return `${prefix}${year}-${String(next).padStart(5, '0')}`;
+  }
+
+  function adjustStock(items, mult) {
+    for (const it of items) {
+      if (it.product_id && it.qty) {
+        const delta = mult * sign * (parseFloat(it.qty) || 0);
+        if (delta !== 0) {
+          run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+        }
+      }
+    }
+  }
+
+  app.get(`${path}/next-no`, async (req, res) => {
+    try { res.json({ ref_no: nextRefNo(req.query.date) }); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get(`${path}/by-date/:date`, async (req, res) => {
+    try {
+      const rows = queryAll(`SELECT * FROM ${table} WHERE date = ? ORDER BY id ASC`, [req.params.date]);
+      // For each, attach item count and total qty
+      const enriched = rows.map(r => {
+        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE flete_id = ?`, [r.id]);
+        return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
+      });
+      res.json(enriched);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get(`${path}/by-range`, async (req, res) => {
+    try {
+      const { from, to } = req.query;
+      if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+      const rows = queryAll(
+        `SELECT * FROM ${table} WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC`,
+        [from, to]
+      );
+      const enriched = rows.map(r => {
+        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE flete_id = ?`, [r.id]);
+        return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
+      });
+      res.json(enriched);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get(`${path}/:id`, async (req, res) => {
+    try {
+      const head = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      if (!head) return res.status(404).json({ error: 'not found' });
+      const items = queryAll(`SELECT * FROM ${itable} WHERE flete_id = ? ORDER BY id ASC`, [req.params.id]);
+      res.json({ ...head, items });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post(path, async (req, res) => {
+    try {
+      const d = req.body || {};
+      if (!d.date) return res.status(400).json({ error: 'date required' });
+      const ref_no = (d.ref_no || '').trim() || nextRefNo(d.date);
+      run(`INSERT INTO ${table} (date, ref_no, notes) VALUES (?, ?, ?)`,
+        [d.date, ref_no, d.notes || '']);
+      const created = queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
+      const newId = created?.id;
+      const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
+      for (const it of items) {
+        run(
+          `INSERT INTO ${itable} (flete_id, product_id, barcode, name, qty) VALUES (?, ?, ?, ?, ?)`,
+          [newId, it.product_id || null, it.barcode || '', it.name || '', parseFloat(it.qty) || 0]
+        );
+      }
+      adjustStock(items, +1);
+      res.json({ success: true, id: newId, ref_no });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.put(`${path}/:id`, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const d = req.body || {};
+      const existing = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [id]);
+      if (!existing) return res.status(404).json({ error: 'not found' });
+      const oldItems = queryAll(`SELECT * FROM ${itable} WHERE flete_id = ?`, [id]);
+      adjustStock(oldItems, -1); // reverse old
+      run(`UPDATE ${table} SET date=?, notes=? WHERE id=?`,
+        [d.date || existing.date, d.notes || '', id]);
+      run(`DELETE FROM ${itable} WHERE flete_id = ?`, [id]);
+      const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
+      for (const it of items) {
+        run(
+          `INSERT INTO ${itable} (flete_id, product_id, barcode, name, qty) VALUES (?, ?, ?, ?, ?)`,
+          [id, it.product_id || null, it.barcode || '', it.name || '', parseFloat(it.qty) || 0]
+        );
+      }
+      adjustStock(items, +1); // apply new
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete(`${path}/:id`, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const items = queryAll(`SELECT * FROM ${itable} WHERE flete_id = ?`, [id]);
+      adjustStock(items, -1);
+      run(`DELETE FROM ${itable} WHERE flete_id = ?`, [id]);
+      run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+}
+
+makeFleteEndpoints('hyrje', +1);
+makeFleteEndpoints('dalje', -1);
+
+// ============================================================
+// MAGAZINA — fletë hyrje / dalje me kod magazine, monedhë, kurs
+// dhe çmim për njësi (pa TVSH). Hyrje rrit stokun, dalje e zbret.
+// ============================================================
+function makeMagazinaEndpoints(kind, sign) {
+  const table  = `magazina_${kind}`;
+  const itable = `magazina_${kind}_items`;
+  const path   = `/api/magazina-${kind}`;
+
+  function nextRefNo(date) {
+    const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+    const prefix = kind === 'hyrje' ? 'MH' : 'MD';
+    const row = queryOne(`SELECT COUNT(*) AS c FROM ${table} WHERE date LIKE ?`, [year + '%']);
+    const next = (row?.c || 0) + 1;
+    return `${prefix}${year}-${String(next).padStart(5, '0')}`;
+  }
+
+  function computeItem(it) {
+    const qty   = parseFloat(it.qty) || 0;
+    const price = parseFloat(it.unit_price) || 0;
+    const disc  = parseFloat(it.discount_percent) || 0;
+    const subtotal = +((qty * price) * (1 - disc / 100)).toFixed(2);
+    return { qty, price, disc, subtotal };
+  }
+
+  function adjustStock(items, mult) {
+    for (const it of items) {
+      if (it.product_id && it.qty) {
+        const delta = mult * sign * (parseFloat(it.qty) || 0);
+        if (delta !== 0) {
+          run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+        }
+      }
+    }
+  }
+
+  function insertItems(headId, items) {
+    let totalSub = 0, totalDisc = 0;
+    for (const it of items) {
+      const c = computeItem(it);
+      const gross = +((c.qty * c.price)).toFixed(2);
+      totalSub  += c.subtotal;
+      totalDisc += +(gross - c.subtotal).toFixed(2);
+      run(
+        `INSERT INTO ${itable} (magazina_id, product_id, barcode, name, qty, unit_price, discount_percent, subtotal)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [headId, it.product_id || null, it.barcode || '', it.name || '',
+         c.qty, c.price, c.disc, c.subtotal]
+      );
+    }
+    return { subtotal: +totalSub.toFixed(2), total_discount: +totalDisc.toFixed(2) };
+  }
+
+  app.get(`${path}/next-no`, async (req, res) => {
+    try { res.json({ ref_no: nextRefNo(req.query.date) }); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get(`${path}/by-date/:date`, async (req, res) => {
+    try {
+      const rows = queryAll(`SELECT * FROM ${table} WHERE date = ? ORDER BY id ASC`, [req.params.date]);
+      const enriched = rows.map(r => {
+        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE magazina_id = ?`, [r.id]);
+        return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
+      });
+      res.json(enriched);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get(`${path}/by-range`, async (req, res) => {
+    try {
+      const { from, to } = req.query;
+      if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+      const rows = queryAll(
+        `SELECT * FROM ${table} WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC`,
+        [from, to]
+      );
+      const enriched = rows.map(r => {
+        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE magazina_id = ?`, [r.id]);
+        return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
+      });
+      res.json(enriched);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get(`${path}/:id`, async (req, res) => {
+    try {
+      const head = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      if (!head) return res.status(404).json({ error: 'not found' });
+      const items = queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ? ORDER BY id ASC`, [req.params.id]);
+      res.json({ ...head, items });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post(path, async (req, res) => {
+    try {
+      const d = req.body || {};
+      if (!d.date) return res.status(400).json({ error: 'date required' });
+      const ref_no = (d.ref_no || '').trim() || nextRefNo(d.date);
+      const currency = d.currency || 'LEK';
+      const exchange_rate = parseFloat(d.exchange_rate) || 1;
+      run(
+        `INSERT INTO ${table} (date, warehouse_code, ref_no, currency, exchange_rate, subtotal, total_discount, total, notes)
+         VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?)`,
+        [d.date, d.warehouse_code || '', ref_no, currency, exchange_rate, d.notes || '']
+      );
+      const created = queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
+      const newId = created?.id;
+      const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
+      const t = insertItems(newId, items);
+      const total = +(t.subtotal).toFixed(2);
+      run(`UPDATE ${table} SET subtotal=?, total_discount=?, total=? WHERE id=?`,
+        [t.subtotal, t.total_discount, total, newId]);
+      adjustStock(items, +1);
+      res.json({ success: true, id: newId, ref_no });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.put(`${path}/:id`, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const d = req.body || {};
+      const existing = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [id]);
+      if (!existing) return res.status(404).json({ error: 'not found' });
+      const oldItems = queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ?`, [id]);
+      adjustStock(oldItems, -1);
+      const currency = d.currency || existing.currency || 'LEK';
+      const exchange_rate = parseFloat(d.exchange_rate) || 1;
+      run(
+        `UPDATE ${table} SET date=?, warehouse_code=?, currency=?, exchange_rate=?, notes=? WHERE id=?`,
+        [d.date || existing.date, d.warehouse_code || '', currency, exchange_rate, d.notes || '', id]
+      );
+      run(`DELETE FROM ${itable} WHERE magazina_id = ?`, [id]);
+      const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
+      const t = insertItems(id, items);
+      const total = +(t.subtotal).toFixed(2);
+      run(`UPDATE ${table} SET subtotal=?, total_discount=?, total=? WHERE id=?`,
+        [t.subtotal, t.total_discount, total, id]);
+      adjustStock(items, +1);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete(`${path}/:id`, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const items = queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ?`, [id]);
+      adjustStock(items, -1);
+      run(`DELETE FROM ${itable} WHERE magazina_id = ?`, [id]);
+      run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+}
+
+makeMagazinaEndpoints('hyrje', +1);
+makeMagazinaEndpoints('dalje', -1);
+
+// ── Purchase invoice payments (partial supplier payments) ─────────────────────
+app.get('/api/purchase-invoices/:id/payments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    const payments = queryAll(
+      'SELECT * FROM purchase_payments WHERE purchase_id = ? ORDER BY date ASC, id ASC',
+      [id]
+    );
+    const sumExtra = payments.reduce((s, p) => s + (p.amount || 0), 0);
+    const initialPaid = +Math.max(0, (inv.amount_paid || 0) - sumExtra).toFixed(2);
+    res.json({
+      invoice: inv,
+      payments,
+      initial_paid: initialPaid,
+      initial_date: inv.date,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/purchase-invoices/:id/payments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const amount = parseFloat(d.amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'invalid amount' });
+    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    const due = Math.max(0, (inv.total_with_vat || 0) - (inv.amount_paid || 0));
+    if (amount > due + 0.005) return res.status(400).json({ error: `max ${due.toFixed(2)}` });
+    const pm = ['cash','bank','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+    run(
+      `INSERT INTO purchase_payments (purchase_id, date, amount, payment_method, notes) VALUES (?, ?, ?, ?, ?)`,
+      [id, d.date || new Date().toISOString().slice(0, 10), amount, pm, d.notes || '']
+    );
+    const newPaid = +((inv.amount_paid || 0) + amount).toFixed(2);
+    const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
+    run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, id]);
+    res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/purchase-payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pay = queryOne('SELECT * FROM purchase_payments WHERE id = ?', [id]);
+    if (!pay) return res.status(404).json({ error: 'not found' });
+    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [pay.purchase_id]);
+    if (!inv) return res.status(404).json({ error: 'invoice missing' });
+    run('DELETE FROM purchase_payments WHERE id = ?', [id]);
+    const newPaid = +Math.max(0, (inv.amount_paid || 0) - (pay.amount || 0)).toFixed(2);
+    const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
+    run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.purchase_id]);
+    res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// SUPPLIER DEBT REPORT — outstanding purchase invoices per supplier
+// ============================================================
+app.get('/api/supplier-debts', async (req, res) => {
+  try {
+    const { q, nipt, name, from, to } = req.query;
+    let sql = `
+      SELECT pi.*,
+        (SELECT date   FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
+        (SELECT amount FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
+        (SELECT COUNT(*) FROM purchase_payments WHERE purchase_id = pi.id) AS payment_count
+      FROM purchase_invoices pi
+      WHERE pi.payment_method IN ('bank', 'debt')
+        AND COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0`;
+    const params = [];
+    if (nipt) {
+      sql += ' AND pi.supplier_nipt = ?';
+      params.push(nipt);
+    } else if (name) {
+      sql += ' AND pi.supplier_name = ?';
+      params.push(name);
+    } else if (q && q.trim()) {
+      sql += ' AND (pi.supplier_name LIKE ? OR pi.supplier_nipt LIKE ?)';
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (from) { sql += ' AND pi.date >= ?'; params.push(from); }
+    if (to)   { sql += ' AND pi.date <= ?'; params.push(to); }
+    sql += ' ORDER BY pi.date DESC, pi.id DESC';
+    res.json(queryAll(sql, params));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/supplier-debts/summary', async (req, res) => {
+  try {
+    const onlyDebt = req.query.onlyDebt === '1' || req.query.onlyDebt === 'true';
+    const { from, to } = req.query;
+    const conds = ["payment_method IN ('bank','debt')"];
+    const params = [];
+    if (from) { conds.push('date >= ?'); params.push(from); }
+    if (to)   { conds.push('date <= ?'); params.push(to); }
+    const where = `WHERE ${conds.join(' AND ')}`;
+    const sql = `
+      SELECT
+        COALESCE(NULLIF(supplier_nipt, ''), supplier_name) AS supplier_key,
+        supplier_name,
+        supplier_nipt,
+        currency,
+        COUNT(*) AS invoice_count,
+        SUM(total_with_vat) AS total,
+        SUM(amount_paid) AS paid,
+        SUM(COALESCE(amount_due, total_with_vat - amount_paid)) AS due
+      FROM purchase_invoices
+      ${where}
+      GROUP BY supplier_key, supplier_name, supplier_nipt, currency
+      ${onlyDebt ? 'HAVING SUM(COALESCE(amount_due, total_with_vat - amount_paid)) > 0' : ''}
+      ORDER BY
+        CASE WHEN supplier_name IS NULL OR supplier_name = '' THEN 1 ELSE 0 END,
+        supplier_name COLLATE NOCASE ASC,
+        supplier_nipt ASC
+    `;
+    res.json(queryAll(sql, params));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/supplier-activity', async (req, res) => {
+  try {
+    const { q, nipt, name, from, to } = req.query;
+    const conds = [];
+    const params = [];
+    if (nipt) {
+      conds.push('supplier_nipt = ?');
+      params.push(nipt);
+    } else if (name) {
+      conds.push('supplier_name = ?');
+      params.push(name);
+    } else if (q && q.trim()) {
+      conds.push('(supplier_name LIKE ? OR supplier_nipt LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`);
+    } else {
+      return res.json({ supplier: null, invoices: [], payments: [], totals: { invoiced: 0, paid: 0, due: 0 } });
+    }
+    if (from) { conds.push('date >= ?'); params.push(from); }
+    if (to)   { conds.push('date <= ?'); params.push(to); }
+    const invoices = queryAll(
+      `SELECT * FROM purchase_invoices WHERE ${conds.join(' AND ')} ORDER BY date ASC, id ASC`,
+      params
+    );
+    if (invoices.length === 0) {
+      return res.json({ supplier: null, invoices: [], payments: [], totals: { invoiced: 0, paid: 0, due: 0 } });
+    }
+    const ids = invoices.map(i => i.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const payParams = [...ids];
+    let payWhere = `p.purchase_id IN (${placeholders})`;
+    if (from) { payWhere += ' AND p.date >= ?'; payParams.push(from); }
+    if (to)   { payWhere += ' AND p.date <= ?'; payParams.push(to); }
+    const payments = queryAll(
+      `SELECT p.*, pi.invoice_no, pi.date AS invoice_date, pi.total_with_vat AS invoice_total
+         FROM purchase_payments p
+         JOIN purchase_invoices pi ON pi.id = p.purchase_id
+        WHERE ${payWhere}
+        ORDER BY p.date ASC, p.id ASC`,
+      payParams
+    );
+    const supplier = {
+      name: invoices[0].supplier_name || '',
+      nipt: invoices[0].supplier_nipt || '',
+    };
+    const invoiced = invoices.reduce((s, i) => s + (i.total_with_vat || 0), 0);
+    let paid;
+    if (from || to) {
+      paid = payments.reduce((s, p) => s + (p.amount || 0), 0);
+    } else {
+      paid = invoices.reduce((s, i) => s + (i.amount_paid || 0), 0);
+    }
+    const due = +(invoiced - paid).toFixed(2);
+    const totals = { invoiced: +invoiced.toFixed(2), paid: +paid.toFixed(2), due };
+    res.json({ supplier, invoices, payments, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// CLIENTS (KLIENTI)
+// ============================================================
+function clientFullName(c) {
+  return [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
+}
+
+app.get('/api/clients', async (req, res) => {
+  try {
+    const rows = queryAll('SELECT * FROM clients ORDER BY last_name, first_name', []);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/clients/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const like = `%${q}%`;
+    const rows = queryAll(
+      `SELECT * FROM clients
+        WHERE nipt LIKE ? OR first_name LIKE ? OR last_name LIKE ?
+           OR (first_name || ' ' || last_name) LIKE ? OR phone LIKE ?
+        ORDER BY last_name, first_name LIMIT 12`,
+      [like, like, like, like, like]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/clients/:id', async (req, res) => {
+  try {
+    const c = queryOne('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    res.json(c);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/clients', async (req, res) => {
+  try {
+    const d = req.body || {};
+    run(
+      `INSERT INTO clients (nipt, first_name, last_name, address, phone, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [d.nipt || '', d.first_name || '', d.last_name || '', d.address || '', d.phone || '', d.notes || '']
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/clients/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    run(
+      `UPDATE clients SET nipt=?, first_name=?, last_name=?, address=?, phone=?, notes=? WHERE id=?`,
+      [d.nipt || '', d.first_name || '', d.last_name || '', d.address || '', d.phone || '', d.notes || '', id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/clients/:id', async (req, res) => {
+  try {
+    run('DELETE FROM clients WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// INVENTORY SUMMARY — agreguar për çdo produkt:
+//   IN  = fatura blerje + magazina hyrje
+//   OUT = fatura shitje (përjashtuar anuluarat; kreditoret kanë qty negative
+//         dhe absorbohen vetiu te shuma) + magazina dalje
+//   Çmimi mesatar i hyrjes = mesatare e ponderuar nga IN (në LEK)
+// ============================================================
+app.get('/api/inventory-summary', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    // Helpers to apply optional date range to a parent table aliased as `parent`.
+    const dateCond = (parent) => (from && to)
+      ? `AND ${parent}.date BETWEEN ? AND ?`
+      : (from ? `AND ${parent}.date >= ?` : (to ? `AND ${parent}.date <= ?` : ''));
+    const dateParams = () => {
+      if (from && to) return [from, to];
+      if (from) return [from];
+      if (to) return [to];
+      return [];
+    };
+
+    const products = queryAll(
+      `SELECT id, name, sku, barcode, category, unit, stock, cost_price, sell_price
+       FROM products WHERE COALESCE(active, 1) = 1
+       ORDER BY name COLLATE NOCASE ASC`
+    );
+
+    // IN — purchase invoices (price in LEK = price * exchange_rate)
+    const inPurchase = queryAll(
+      `SELECT pi.product_id AS pid,
+              SUM(pi.qty) AS qty,
+              SUM(pi.qty * pi.purchase_price_no_vat * COALESCE(p.exchange_rate, 1)) AS value_no_vat_lek,
+              SUM(pi.vat_amount      * COALESCE(p.exchange_rate, 1)) AS vat_lek,
+              SUM(pi.total_with_vat  * COALESCE(p.exchange_rate, 1)) AS value_with_vat_lek
+       FROM purchase_items pi
+       JOIN purchase_invoices p ON p.id = pi.purchase_id
+       WHERE pi.product_id IS NOT NULL ${dateCond('p')}
+       GROUP BY pi.product_id`,
+      dateParams()
+    );
+
+    // IN — magazina hyrje (pa TVSH → TVSH = 0, me TVSH = pa TVSH)
+    const inMag = queryAll(
+      `SELECT mi.product_id AS pid,
+              SUM(mi.qty) AS qty,
+              SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek
+       FROM magazina_hyrje_items mi
+       JOIN magazina_hyrje m ON m.id = mi.magazina_id
+       WHERE mi.product_id IS NOT NULL ${dateCond('m')}
+       GROUP BY mi.product_id`,
+      dateParams()
+    );
+
+    // OUT — sales (skip cancelled; credit notes have negative qty so they
+    // self-net within the sum)
+    const outSales = queryAll(
+      `SELECT ii.product_id AS pid, SUM(ii.qty) AS qty
+       FROM invoice_items ii
+       JOIN invoices i ON i.id = ii.invoice_id
+       WHERE ii.product_id IS NOT NULL
+         AND COALESCE(i.cancelled, 0) = 0
+         ${dateCond('i')}
+       GROUP BY ii.product_id`,
+      dateParams()
+    );
+
+    // OUT — magazina dalje
+    const outMag = queryAll(
+      `SELECT mi.product_id AS pid, SUM(mi.qty) AS qty
+       FROM magazina_dalje_items mi
+       JOIN magazina_dalje m ON m.id = mi.magazina_id
+       WHERE mi.product_id IS NOT NULL ${dateCond('m')}
+       GROUP BY mi.product_id`,
+      dateParams()
+    );
+
+    const mapBy = (rows, key = 'pid') => {
+      const m = new Map();
+      for (const r of rows) m.set(r[key], r);
+      return m;
+    };
+    const mInPurch = mapBy(inPurchase);
+    const mInMag   = mapBy(inMag);
+    const mOutSale = mapBy(outSales);
+    const mOutMag  = mapBy(outMag);
+
+    const rows = products.map(p => {
+      const ip = mInPurch.get(p.id) || { qty: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 };
+      const im = mInMag.get(p.id)   || { qty: 0, value_no_vat_lek: 0 };
+      const os = mOutSale.get(p.id) || { qty: 0 };
+      const om = mOutMag.get(p.id)  || { qty: 0 };
+
+      const qty_in_purchase    = +(ip.qty || 0);
+      const qty_in_magazina    = +(im.qty || 0);
+      const total_in           = qty_in_purchase + qty_in_magazina;
+
+      const value_in_no_vat_lek   = +((ip.value_no_vat_lek   || 0) + (im.value_no_vat_lek || 0));
+      const vat_in_lek            = +(ip.vat_lek            || 0);
+      const value_in_with_vat_lek = +((ip.value_with_vat_lek || 0) + (im.value_no_vat_lek || 0));
+
+      const qty_out_sales     = +(os.qty || 0);
+      const qty_out_magazina  = +(om.qty || 0);
+      const total_out         = qty_out_sales + qty_out_magazina;
+      const net_qty           = +(total_in - total_out).toFixed(4);
+
+      const avg_price_no_vat_lek   = total_in > 0 ? +(value_in_no_vat_lek   / total_in).toFixed(2) : 0;
+      const avg_price_with_vat_lek = total_in > 0 ? +(value_in_with_vat_lek / total_in).toFixed(2) : 0;
+
+      const total_value_no_vat_lek   = +(net_qty * avg_price_no_vat_lek).toFixed(2);
+      const total_value_with_vat_lek = +(net_qty * avg_price_with_vat_lek).toFixed(2);
+      const total_value_vat_lek      = +(total_value_with_vat_lek - total_value_no_vat_lek).toFixed(2);
+
+      return {
+        id: p.id, name: p.name, sku: p.sku, barcode: p.barcode,
+        category: p.category, unit: p.unit, stock: p.stock,
+        cost_price: p.cost_price, sell_price: p.sell_price,
+        qty_in_purchase, qty_in_magazina, total_in,
+        qty_out_sales, qty_out_magazina, total_out,
+        net_qty,
+        // Legacy aliases (UI ende mund t'i përdorë)
+        avg_price_lek:   avg_price_no_vat_lek,
+        total_value_lek: total_value_no_vat_lek,
+        // Pa TVSH / Me TVSH
+        avg_price_no_vat_lek, avg_price_with_vat_lek,
+        total_value_no_vat_lek, total_value_vat_lek, total_value_with_vat_lek,
+      };
+    });
+
+    const totals = rows.reduce((a, r) => ({
+      total_in:                 a.total_in                 + r.total_in,
+      total_out:                a.total_out                + r.total_out,
+      net_qty:                  a.net_qty                  + r.net_qty,
+      total_value_lek:          a.total_value_lek          + r.total_value_lek,
+      total_value_no_vat_lek:   a.total_value_no_vat_lek   + r.total_value_no_vat_lek,
+      total_value_vat_lek:      a.total_value_vat_lek      + r.total_value_vat_lek,
+      total_value_with_vat_lek: a.total_value_with_vat_lek + r.total_value_with_vat_lek,
+    }), {
+      total_in: 0, total_out: 0, net_qty: 0,
+      total_value_lek: 0,
+      total_value_no_vat_lek: 0, total_value_vat_lek: 0, total_value_with_vat_lek: 0,
+    });
+
+    res.json({ rows, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// ARKA DITORE — bilanci i ditës bazuar tek faturat + shpenzimet
+// ============================================================
+//
+// Formula:
+//   Gjendja e Arkës = Xhiro Totale (Fatura Shitje)
+//                   − Pagesa me Bankë
+//                   − Pagesa me POS
+//                   − Borxhi i Papaguar (amount_due)
+//                   − Shpenzime
+//                   − Fatura Blerje të paguara Kesh
+// Të gjitha vlerat kthehen në LEK duke përdorur exchange_rate të secilës faturë/shpenzim.
+app.get('/api/arka-ditore/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    if (!date) return res.status(400).json({ error: 'date required' });
+
+    // Për çdo faturë, ndaj totalin në 4 pjesë: cash, pos, bank, debt.
+    //   pm='cash'  → cash_part = total
+    //   pm='pos'   → pos_part  = total
+    //   pm='bank'  → bank_part = total
+    //   pm='debt'  → debt_part = total
+    //   pm='mikse' → ndahet nga kolonat paid_cash/paid_pos/paid_bank; pjesa e mbetur (>0) = debt_part
+    // Kjo siguron që pos/banka e marrin totalin edhe nga faturat e pastra pos/bankë.
+    const salesAgg = queryOne(
+      `SELECT
+         COALESCE(SUM(total_with_vat * COALESCE(exchange_rate, 1)), 0) AS xhiro_total,
+         COALESCE(SUM(
+           (CASE
+              WHEN payment_method = 'bank'  THEN total_with_vat
+              WHEN payment_method = 'mikse' THEN COALESCE(paid_bank, 0)
+              ELSE 0 END) * COALESCE(exchange_rate, 1)
+         ), 0) AS paid_bank,
+         COALESCE(SUM(
+           (CASE
+              WHEN payment_method = 'pos'   THEN total_with_vat
+              WHEN payment_method = 'mikse' THEN COALESCE(paid_pos, 0)
+              ELSE 0 END) * COALESCE(exchange_rate, 1)
+         ), 0) AS paid_pos,
+         COALESCE(SUM(
+           (CASE
+              WHEN payment_method = 'debt'  THEN total_with_vat
+              WHEN payment_method = 'mikse' THEN
+                CASE WHEN (total_with_vat - COALESCE(paid_cash, 0) - COALESCE(paid_pos, 0) - COALESCE(paid_bank, 0)) > 0
+                     THEN  total_with_vat - COALESCE(paid_cash, 0) - COALESCE(paid_pos, 0) - COALESCE(paid_bank, 0)
+                     ELSE 0 END
+              ELSE 0 END) * COALESCE(exchange_rate, 1)
+         ), 0) AS amount_due,
+         COUNT(*) AS invoice_count
+       FROM invoices
+       WHERE date = ? AND COALESCE(cancelled, 0) = 0`,
+      [date]
+    ) || {};
+
+    const expAgg = queryOne(
+      `SELECT
+         COALESCE(SUM(COALESCE(amount, 0) * COALESCE(exchange_rate, 1)), 0) AS expenses_lek,
+         COUNT(*) AS expense_count
+       FROM expense_entries
+       WHERE date = ?`,
+      [date]
+    ) || {};
+
+    // Fatura blerje të paguara kesh: payment_method='cash' → amount_paid është kesh.
+    // Për 'mikse' do na duhej një kolonë paid_cash që purchase_invoices ende nuk e ka.
+    const purAgg = queryOne(
+      `SELECT
+         COALESCE(SUM(COALESCE(amount_paid, 0) * COALESCE(exchange_rate, 1)), 0) AS purchase_cash_lek,
+         COUNT(*) AS purchase_count
+       FROM purchase_invoices
+       WHERE date = ? AND payment_method = 'cash'`,
+      [date]
+    ) || {};
+
+    const xhiro_total = +salesAgg.xhiro_total.toFixed(2);
+    const paid_bank   = +salesAgg.paid_bank.toFixed(2);
+    const paid_pos    = +salesAgg.paid_pos.toFixed(2);
+    const amount_due  = +salesAgg.amount_due.toFixed(2);
+    const expenses    = +expAgg.expenses_lek.toFixed(2);
+    const purchase_cash = +purAgg.purchase_cash_lek.toFixed(2);
+
+    const physRow = queryOne(
+      `SELECT COALESCE(opening_lek, 0)          AS opening,
+              COALESCE(physical_cash_lek, 0)    AS phys,
+              COALESCE(closeout_to_safe_lek, 0) AS to_safe
+         FROM daily_records WHERE date = ?`,
+      [date]
+    );
+    const opening_cash        = +((physRow?.opening || 0)).toFixed(2);
+
+    // Cash receipts from sales = total - bank - pos - debt
+    const cash_from_sales = +(xhiro_total - paid_bank - paid_pos - amount_due).toFixed(2);
+    const cash_balance    = +(opening_cash + cash_from_sales - expenses - purchase_cash).toFixed(2);
+
+    const physical_cash       = +((physRow?.phys || 0)).toFixed(2);
+    const closeout_to_safe    = +((physRow?.to_safe || 0)).toFixed(2);
+    const carryover_next_day  = +Math.max(0, physical_cash - closeout_to_safe).toFixed(2);
+    const difference          = +(physical_cash - cash_balance).toFixed(2);
+
+    res.json({
+      date,
+      xhiro_total,
+      paid_bank,
+      paid_pos,
+      amount_due,
+      opening_cash,
+      cash_from_sales,
+      expenses,
+      purchase_cash,
+      cash_balance,
+      physical_cash,
+      difference,
+      closeout_to_safe,
+      carryover_next_day,
+      counts: {
+        invoices: salesAgg.invoice_count || 0,
+        expenses: expAgg.expense_count || 0,
+        purchases_cash: purAgg.purchase_count || 0,
+      },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Mbyllje e ditës: ndaj gjendjen fizike midis kasafortës dhe gjendjes fillestare të ditës pasardhëse.
+//   to_safe: shkruhet tek closeout_to_safe_lek për këtë datë
+//   carry:   physical_cash - to_safe; shkruhet tek opening_lek për datën pasardhëse
+app.post('/api/arka-ditore/:date/closeout', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const toSafe = Math.max(0, parseFloat(req.body?.to_safe_lek) || 0);
+
+    const today = queryOne('SELECT COALESCE(physical_cash_lek, 0) AS phys FROM daily_records WHERE date = ?', [date]);
+    const physical = +(today?.phys || 0);
+    const carry = +Math.max(0, physical - toSafe).toFixed(2);
+
+    // Update today's closeout_to_safe
+    const existsToday = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    if (existsToday) {
+      run('UPDATE daily_records SET closeout_to_safe_lek = ? WHERE date = ?', [toSafe, date]);
+    } else {
+      run('INSERT INTO daily_records (date, closeout_to_safe_lek) VALUES (?, ?)', [date, toSafe]);
+    }
+
+    // Compute next day's date
+    const d = new Date(date + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    const nextDate = d.toISOString().split('T')[0];
+
+    // Write carry-over into next day's opening_lek
+    const existsNext = queryOne('SELECT id FROM daily_records WHERE date = ?', [nextDate]);
+    if (existsNext) {
+      run('UPDATE daily_records SET opening_lek = ? WHERE date = ?', [carry, nextDate]);
+    } else {
+      run('INSERT INTO daily_records (date, opening_lek) VALUES (?, ?)', [nextDate, carry]);
+    }
+
+    res.json({ success: true, to_safe_lek: toSafe, carry_lek: carry, next_date: nextDate });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kasaforta: bilanci kumulativ + historiku i lëvizjeve (derdhje + closeout − tërheqje).
+app.get('/api/kasaforta', async (req, res) => {
+  try {
+    const rows = queryAll(
+      `SELECT date,
+              COALESCE(safe_deposit_lek, 0)     AS safe_deposit,
+              COALESCE(safe_withdraw_lek, 0)    AS safe_withdraw,
+              COALESCE(closeout_to_safe_lek, 0) AS closeout_in
+         FROM daily_records
+         WHERE COALESCE(safe_deposit_lek, 0) > 0
+            OR COALESCE(safe_withdraw_lek, 0) > 0
+            OR COALESCE(closeout_to_safe_lek, 0) > 0
+         ORDER BY date ASC`
+    );
+
+    let running = 0;
+    const history = rows.map(r => {
+      const net = (r.safe_deposit + r.closeout_in) - r.safe_withdraw;
+      running += net;
+      return {
+        date: r.date,
+        deposit_lek:  +r.safe_deposit.toFixed(2),
+        closeout_in:  +r.closeout_in.toFixed(2),
+        withdraw_lek: +r.safe_withdraw.toFixed(2),
+        net_lek:      +net.toFixed(2),
+        balance_lek:  +running.toFixed(2),
+      };
+    });
+
+    res.json({
+      balance_lek: +running.toFixed(2),
+      history: history.reverse(),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// SAFE WITHDRAWALS — Tërheqje nga Kasaforta
+// ============================================================
+// Çdo tërheqje ruhet si rresht më vete me metadata (person, shënim, kohë).
+// Shuma agregate për datë sinkronizohet edhe në daily_records.safe_withdraw_lek/eur
+// që raportet ekzistuese (Kasaforta, permbledhëse) të vazhdojnë të punojnë.
+
+function syncSafeWithdrawTotals(date) {
+  const agg = queryOne(
+    `SELECT COALESCE(SUM(amount_lek), 0) AS lek,
+            COALESCE(SUM(amount_eur), 0) AS eur
+       FROM safe_withdrawals WHERE date = ?`,
+    [date]
+  ) || { lek: 0, eur: 0 };
+  const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  if (existing) {
+    run('UPDATE daily_records SET safe_withdraw_lek = ?, safe_withdraw_eur = ? WHERE date = ?',
+      [+agg.lek.toFixed(2), +agg.eur.toFixed(2), date]);
+  } else {
+    run('INSERT INTO daily_records (date, safe_withdraw_lek, safe_withdraw_eur) VALUES (?, ?, ?)',
+      [date, +agg.lek.toFixed(2), +agg.eur.toFixed(2)]);
+  }
+}
+
+app.get('/api/safe-withdrawals', async (req, res) => {
+  try {
+    const { from, to, limit } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND date >= ?'; params.push(from); }
+    if (to)   { where += ' AND date <= ?'; params.push(to); }
+    const lim = Math.min(parseInt(limit) || 200, 500);
+    const rows = queryAll(
+      `SELECT id, date, amount_lek, amount_eur, person, note, created_at
+         FROM safe_withdrawals
+        WHERE ${where}
+        ORDER BY date DESC, created_at DESC
+        LIMIT ${lim}`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/safe-withdrawals', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date = d.date;
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const lek = parseFloat(d.amount_lek) || 0;
+    const eur = parseFloat(d.amount_eur) || 0;
+    if (lek <= 0 && eur <= 0) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
+    const person = String(d.person || '').trim();
+    const note   = String(d.note   || '').trim();
+    run(
+      `INSERT INTO safe_withdrawals (date, amount_lek, amount_eur, person, note)
+       VALUES (?, ?, ?, ?, ?)`,
+      [date, lek, eur, person, note]
+    );
+    syncSafeWithdrawTotals(date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/safe-withdrawals/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = queryOne('SELECT date FROM safe_withdrawals WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    run('DELETE FROM safe_withdrawals WHERE id = ?', [id]);
+    syncSafeWithdrawTotals(row.date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ruaj gjendjen fizike të arkës (e numëruar dorazi) për një datë.
+app.post('/api/arka-ditore/:date/physical', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const value = parseFloat(req.body?.physical_cash_lek) || 0;
+    const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    if (existing) {
+      run('UPDATE daily_records SET physical_cash_lek = ? WHERE date = ?', [value, date]);
+    } else {
+      run('INSERT INTO daily_records (date, physical_cash_lek) VALUES (?, ?)', [date, value]);
+    }
+    res.json({ success: true, physical_cash_lek: value });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// ITEM REPORTS — Raport Artikuj Shitje / Blerje
+// ============================================================
+//
+// Të dyja raportet kthejnë të njëjtin format kolonash (në LEK):
+//   qty, unit_price_lek (mes.), discount_lek, value_no_vat_lek,
+//   vat_lek, value_with_vat_lek.
+// Çmimi mesatar = vlera bruto (qty × cmim, para zbritjes) / qty.
+
+// Sales items — burimi: Fatura Shitje (invoice_items).
+app.get('/api/reports/sales-items', async (req, res) => {
+  try {
+    const { from, to, q, material } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    const params = [from, to];
+    let where = `i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0`;
+    if (q && q.trim()) {
+      const like = `%${q.trim()}%`;
+      where += ` AND (ii.barcode LIKE ? OR ii.name LIKE ? OR p.sku LIKE ?)`;
+      params.push(like, like, like);
+    }
+    if (material === 'flori' || material === 'diamant') {
+      where += ` AND COALESCE(p.material, '') = ?`;
+      params.push(material);
+    }
+
+    const rows = queryAll(
+      `SELECT
+         COALESCE(ii.product_id, 0) AS product_id,
+         COALESCE(NULLIF(ii.barcode, ''), p.barcode, '') AS barcode,
+         COALESCE(NULLIF(ii.name, ''), p.name, '')       AS name,
+         COALESCE(p.sku, '')      AS sku,
+         COALESCE(p.category, '') AS category,
+         COALESCE(p.material, '') AS material,
+         COALESCE(p.unit, 'copë') AS unit,
+         SUM(ii.qty) AS qty,
+         SUM(ii.qty * ii.unit_price_no_vat * COALESCE(i.exchange_rate, 1)) AS gross_lek,
+         SUM(ii.qty * ii.unit_price_no_vat * (ii.discount_percent / 100.0) * COALESCE(i.exchange_rate, 1)) AS discount_lek,
+         SUM(ii.subtotal_no_vat * COALESCE(i.exchange_rate, 1)) AS value_no_vat_lek,
+         SUM(ii.vat_amount       * COALESCE(i.exchange_rate, 1)) AS vat_lek,
+         SUM(ii.total_with_vat   * COALESCE(i.exchange_rate, 1)) AS value_with_vat_lek,
+         COUNT(DISTINCT i.id) AS docs_count
+       FROM invoice_items ii
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE ${where}
+       GROUP BY COALESCE(ii.product_id, 0),
+                COALESCE(NULLIF(ii.barcode, ''), p.barcode, ''),
+                COALESCE(NULLIF(ii.name, ''), p.name, '')
+       ORDER BY name ASC`,
+      params
+    ).map(r => {
+      const qty       = +(r.qty || 0);
+      const gross     = +(r.gross_lek || 0);
+      const discount  = +(r.discount_lek || 0);
+      const valNoVat  = +(r.value_no_vat_lek || 0);
+      const vat       = +(r.vat_lek || 0);
+      const valWith   = +(r.value_with_vat_lek || 0);
+      return {
+        product_id: r.product_id, barcode: r.barcode, name: r.name,
+        sku: r.sku, category: r.category, material: r.material, unit: r.unit,
+        qty,
+        unit_price_lek:    qty !== 0 ? +(gross / qty).toFixed(2) : 0,
+        discount_lek:      +discount.toFixed(2),
+        value_no_vat_lek:  +valNoVat.toFixed(2),
+        vat_lek:           +vat.toFixed(2),
+        value_with_vat_lek:+valWith.toFixed(2),
+        docs_count:        +(r.docs_count || 0),
+      };
+    });
+
+    const emptyTotals = () => ({ qty: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
+    const addInto = (a, r) => ({
+      qty:                a.qty                + r.qty,
+      discount_lek:       a.discount_lek       + r.discount_lek,
+      value_no_vat_lek:   a.value_no_vat_lek   + r.value_no_vat_lek,
+      vat_lek:            a.vat_lek            + r.vat_lek,
+      value_with_vat_lek: a.value_with_vat_lek + r.value_with_vat_lek,
+    });
+    const totals = rows.reduce(addInto, emptyTotals());
+    const totalsByMaterial = {
+      flori:   rows.filter(r => r.material === 'flori').reduce(addInto, emptyTotals()),
+      diamant: rows.filter(r => r.material === 'diamant').reduce(addInto, emptyTotals()),
+      tjeter:  rows.filter(r => r.material !== 'flori' && r.material !== 'diamant').reduce(addInto, emptyTotals()),
+    };
+
+    res.json({ rows, totals, totalsByMaterial });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Purchase items — burimet: Fatura Blerje (purchase_items) + Magazina Hyrje
+// (magazina_hyrje_items, pa TVSH → trajtohet si TVSH = 0).
+app.get('/api/reports/purchase-items', async (req, res) => {
+  try {
+    const { from, to, q } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    const ql = (q || '').trim();
+    const like = ql ? `%${ql}%` : null;
+
+    // ── Fatura Blerje
+    const purchaseParams = [from, to];
+    let purchaseWhere = `pi.date BETWEEN ? AND ?`;
+    if (like) {
+      purchaseWhere += ` AND (pit.barcode LIKE ? OR pit.name LIKE ? OR p.sku LIKE ?)`;
+      purchaseParams.push(like, like, like);
+    }
+    const purchases = queryAll(
+      `SELECT
+         COALESCE(pit.product_id, 0) AS product_id,
+         COALESCE(NULLIF(pit.barcode, ''), p.barcode, '') AS barcode,
+         COALESCE(NULLIF(pit.name, ''), p.name, '')       AS name,
+         COALESCE(p.sku, '')      AS sku,
+         COALESCE(p.category, '') AS category,
+         COALESCE(p.unit, 'copë') AS unit,
+         SUM(pit.qty) AS qty,
+         SUM(pit.qty * pit.purchase_price_no_vat * COALESCE(pi.exchange_rate, 1)) AS gross_lek,
+         SUM(pit.qty * pit.purchase_price_no_vat * (pit.discount_percent / 100.0) * COALESCE(pi.exchange_rate, 1)) AS discount_lek,
+         SUM(pit.subtotal_no_vat * COALESCE(pi.exchange_rate, 1)) AS value_no_vat_lek,
+         SUM(pit.vat_amount      * COALESCE(pi.exchange_rate, 1)) AS vat_lek,
+         SUM(pit.total_with_vat  * COALESCE(pi.exchange_rate, 1)) AS value_with_vat_lek,
+         COUNT(DISTINCT pi.id) AS docs_count
+       FROM purchase_items pit
+       JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+       LEFT JOIN products p      ON p.id = pit.product_id
+       WHERE ${purchaseWhere}
+       GROUP BY COALESCE(pit.product_id, 0),
+                COALESCE(NULLIF(pit.barcode, ''), p.barcode, ''),
+                COALESCE(NULLIF(pit.name, ''), p.name, '')`,
+      purchaseParams
+    );
+
+    // ── Magazina Hyrje (pa TVSH)
+    const magParams = [from, to];
+    let magWhere = `m.date BETWEEN ? AND ?`;
+    if (like) {
+      magWhere += ` AND (mi.barcode LIKE ? OR mi.name LIKE ? OR p.sku LIKE ?)`;
+      magParams.push(like, like, like);
+    }
+    const mags = queryAll(
+      `SELECT
+         COALESCE(mi.product_id, 0) AS product_id,
+         COALESCE(NULLIF(mi.barcode, ''), p.barcode, '') AS barcode,
+         COALESCE(NULLIF(mi.name, ''), p.name, '')       AS name,
+         COALESCE(p.sku, '')      AS sku,
+         COALESCE(p.category, '') AS category,
+         COALESCE(p.unit, 'copë') AS unit,
+         SUM(mi.qty) AS qty,
+         SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS gross_lek,
+         SUM(mi.qty * mi.unit_price * (mi.discount_percent / 100.0) * COALESCE(m.exchange_rate, 1)) AS discount_lek,
+         SUM(mi.subtotal * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek,
+         COUNT(DISTINCT m.id) AS docs_count
+       FROM magazina_hyrje_items mi
+       JOIN magazina_hyrje m ON m.id = mi.magazina_id
+       LEFT JOIN products p  ON p.id = mi.product_id
+       WHERE ${magWhere}
+       GROUP BY COALESCE(mi.product_id, 0),
+                COALESCE(NULLIF(mi.barcode, ''), p.barcode, ''),
+                COALESCE(NULLIF(mi.name, ''), p.name, '')`,
+      magParams
+    );
+
+    // Bashko sipas (product_id | barcode | name)
+    const keyOf = (r) => `${r.product_id || 0}|${(r.barcode || '').toLowerCase()}|${(r.name || '').toLowerCase()}`;
+    const empty = (r) => ({
+      product_id: r.product_id, barcode: r.barcode, name: r.name,
+      sku: r.sku || '', category: r.category || '', unit: r.unit || 'copë',
+      qty: 0, gross_lek: 0, discount_lek: 0,
+      value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0,
+      docs_count: 0,
+    });
+
+    const map = new Map();
+    for (const r of purchases) {
+      const k = keyOf(r);
+      const e = map.get(k) || empty(r);
+      e.qty                += +(r.qty || 0);
+      e.gross_lek          += +(r.gross_lek || 0);
+      e.discount_lek       += +(r.discount_lek || 0);
+      e.value_no_vat_lek   += +(r.value_no_vat_lek || 0);
+      e.vat_lek            += +(r.vat_lek || 0);
+      e.value_with_vat_lek += +(r.value_with_vat_lek || 0);
+      e.docs_count         += +(r.docs_count || 0);
+      map.set(k, e);
+    }
+    for (const r of mags) {
+      const k = keyOf(r);
+      const e = map.get(k) || empty(r);
+      const valNoVat = +(r.value_no_vat_lek || 0);
+      e.qty                += +(r.qty || 0);
+      e.gross_lek          += +(r.gross_lek || 0);
+      e.discount_lek       += +(r.discount_lek || 0);
+      e.value_no_vat_lek   += valNoVat;
+      // Magazina Hyrje është pa TVSH → vat = 0, total = subtotal
+      e.value_with_vat_lek += valNoVat;
+      e.docs_count         += +(r.docs_count || 0);
+      map.set(k, e);
+    }
+
+    const rows = Array.from(map.values()).map(r => {
+      const qty = r.qty;
+      return {
+        product_id: r.product_id, barcode: r.barcode, name: r.name,
+        sku: r.sku, category: r.category, unit: r.unit,
+        qty,
+        unit_price_lek:    qty !== 0 ? +(r.gross_lek / qty).toFixed(2) : 0,
+        discount_lek:      +r.discount_lek.toFixed(2),
+        value_no_vat_lek:  +r.value_no_vat_lek.toFixed(2),
+        vat_lek:           +r.vat_lek.toFixed(2),
+        value_with_vat_lek:+r.value_with_vat_lek.toFixed(2),
+        docs_count:        r.docs_count,
+      };
+    }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    const totals = rows.reduce((a, r) => ({
+      qty:                a.qty                + r.qty,
+      discount_lek:       a.discount_lek       + r.discount_lek,
+      value_no_vat_lek:   a.value_no_vat_lek   + r.value_no_vat_lek,
+      vat_lek:            a.vat_lek            + r.vat_lek,
+      value_with_vat_lek: a.value_with_vat_lek + r.value_with_vat_lek,
+    }), { qty: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
+
+    res.json({ rows, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Docs që përmbajnë artikullin (për modalin "Hap dokumentat") ──
+// Çelësi i përputhjes: product_id (kur > 0) OSE (barcode + name).
+function buildItemMatchSQL(itemAlias, productId, barcode, name, params) {
+  const pid = parseInt(productId);
+  if (pid > 0) {
+    params.push(pid);
+    return `${itemAlias}.product_id = ?`;
+  }
+  params.push(barcode || '', name || '');
+  return `COALESCE(NULLIF(${itemAlias}.barcode, ''), '') = ? AND COALESCE(NULLIF(${itemAlias}.name, ''), '') = ?`;
+}
+
+app.get('/api/reports/sales-items/docs', async (req, res) => {
+  try {
+    const { from, to, product_id, barcode, name } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    const params = [from, to];
+    const matchSQL = buildItemMatchSQL('ii', product_id, barcode, name, params);
+    const rows = queryAll(
+      `SELECT
+         i.id              AS invoice_id,
+         i.date            AS date,
+         i.invoice_no      AS invoice_no,
+         i.customer_name   AS customer_name,
+         i.customer_nipt   AS customer_nipt,
+         i.currency        AS currency,
+         COALESCE(i.exchange_rate, 1) AS exchange_rate,
+         COALESCE(i.cancelled, 0)     AS cancelled,
+         COALESCE(i.is_credit_note, 0) AS is_credit_note,
+         SUM(ii.qty)                                  AS qty,
+         SUM(ii.qty * ii.unit_price_no_vat * COALESCE(i.exchange_rate, 1)) AS gross_lek,
+         SUM(ii.subtotal_no_vat)                      AS value_no_vat,
+         SUM(ii.vat_amount)                           AS vat,
+         SUM(ii.total_with_vat)                       AS value_with_vat,
+         SUM(ii.subtotal_no_vat * COALESCE(i.exchange_rate, 1)) AS value_no_vat_lek,
+         SUM(ii.total_with_vat  * COALESCE(i.exchange_rate, 1)) AS value_with_vat_lek
+       FROM invoice_items ii
+       JOIN invoices i ON i.id = ii.invoice_id
+       WHERE i.date BETWEEN ? AND ?
+         AND COALESCE(i.cancelled, 0) = 0
+         AND ${matchSQL}
+       GROUP BY i.id
+       ORDER BY i.date ASC, i.id ASC`,
+      params
+    ).map(r => {
+      const qty = +(r.qty || 0);
+      const gross = +(r.gross_lek || 0);
+      return { ...r, unit_price_lek: qty !== 0 ? +(gross / qty).toFixed(2) : 0 };
+    });
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/reports/purchase-items/docs', async (req, res) => {
+  try {
+    const { from, to, product_id, barcode, name } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    // Fatura Blerje
+    const pParams = [from, to];
+    const pMatch  = buildItemMatchSQL('pit', product_id, barcode, name, pParams);
+    const purchases = queryAll(
+      `SELECT
+         'purchase' AS source,
+         pi.id            AS doc_id,
+         pi.date          AS date,
+         pi.invoice_no    AS doc_no,
+         pi.supplier_name AS party_name,
+         pi.supplier_nipt AS party_nipt,
+         pi.currency      AS currency,
+         COALESCE(pi.exchange_rate, 1) AS exchange_rate,
+         SUM(pit.qty)              AS qty,
+         SUM(pit.qty * pit.purchase_price_no_vat * COALESCE(pi.exchange_rate, 1)) AS gross_lek,
+         SUM(pit.subtotal_no_vat)  AS value_no_vat,
+         SUM(pit.vat_amount)       AS vat,
+         SUM(pit.total_with_vat)   AS value_with_vat,
+         SUM(pit.subtotal_no_vat * COALESCE(pi.exchange_rate, 1)) AS value_no_vat_lek,
+         SUM(pit.total_with_vat  * COALESCE(pi.exchange_rate, 1)) AS value_with_vat_lek
+       FROM purchase_items pit
+       JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+       WHERE pi.date BETWEEN ? AND ?
+         AND ${pMatch}
+       GROUP BY pi.id`,
+      pParams
+    );
+
+    // Magazina Hyrje (pa TVSH)
+    const mParams = [from, to];
+    const mMatch  = buildItemMatchSQL('mi', product_id, barcode, name, mParams);
+    const mags = queryAll(
+      `SELECT
+         'magazina' AS source,
+         m.id            AS doc_id,
+         m.date          AS date,
+         m.ref_no        AS doc_no,
+         m.warehouse_code AS party_name,
+         ''              AS party_nipt,
+         m.currency      AS currency,
+         COALESCE(m.exchange_rate, 1) AS exchange_rate,
+         SUM(mi.qty)             AS qty,
+         SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS gross_lek,
+         SUM(mi.subtotal)        AS value_no_vat,
+         0                       AS vat,
+         SUM(mi.subtotal)        AS value_with_vat,
+         SUM(mi.subtotal * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek,
+         SUM(mi.subtotal * COALESCE(m.exchange_rate, 1)) AS value_with_vat_lek
+       FROM magazina_hyrje_items mi
+       JOIN magazina_hyrje m ON m.id = mi.magazina_id
+       WHERE m.date BETWEEN ? AND ?
+         AND ${mMatch}
+       GROUP BY m.id`,
+      mParams
+    );
+
+    const out = [...purchases, ...mags].map(r => {
+      const qty = +(r.qty || 0);
+      const gross = +(r.gross_lek || 0);
+      return { ...r, unit_price_lek: qty !== 0 ? +(gross / qty).toFixed(2) : 0 };
+    }).sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (a.doc_no || '').localeCompare(b.doc_no || '');
+    });
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// SHPENZIME — Zëra (regjistër) + Fleta ditore
+// ============================================================
+
+// Përditëson totalet ditore te daily_records nga zërat e ditës.
+// Çdo zë ka monedhën e vet + kursin manual; agregojmë sipas monedhës.
+// Monedhat jashtë LEK/EUR/USD (p.sh. GBP, CHF) konvertohen në LEK dhe shtohen
+// te expenses_lek për të ruajtur përputhshmërinë me MonthlySummary/EndOfDay.
+function syncExpenseTotals(date) {
+  const groups = queryAll(
+    `SELECT
+       COALESCE(currency, 'LEK') AS cur,
+       COALESCE(SUM(amount), 0) AS amt,
+       COALESCE(SUM(amount * exchange_rate), 0) AS amt_lek
+     FROM expense_entries WHERE date = ?
+     GROUP BY COALESCE(currency, 'LEK')`,
+    [date]
+  );
+  let lek = 0, eur = 0, usd = 0;
+  for (const g of groups) {
+    if (g.cur === 'LEK')      lek += g.amt;
+    else if (g.cur === 'EUR') eur += g.amt;
+    else if (g.cur === 'USD') usd += g.amt;
+    else                      lek += g.amt_lek;
+  }
+  const exists = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  if (exists) {
+    run(
+      `UPDATE daily_records SET expenses_lek = ?, expenses_eur = ?, expenses_usd = ? WHERE date = ?`,
+      [lek, eur, usd, date]
+    );
+  } else {
+    run(
+      `INSERT INTO daily_records (date, expenses_lek, expenses_eur, expenses_usd) VALUES (?, ?, ?, ?)`,
+      [date, lek, eur, usd]
+    );
+  }
+}
+
+// ── Kategoritë e shpenzimeve ─────────────────────────────────
+app.get('/api/expense-categories', async (req, res) => {
+  try {
+    const includeInactive = req.query.all === '1';
+    const where = includeInactive ? '' : 'WHERE COALESCE(active, 1) = 1';
+    res.json(queryAll(`SELECT * FROM expense_categories ${where} ORDER BY name COLLATE NOCASE ASC`));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/expense-categories', async (req, res) => {
+  try {
+    const { name, description } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+    run(
+      `INSERT INTO expense_categories (name, description, active) VALUES (?, ?, 1)`,
+      [name.trim(), description || '']
+    );
+    const row = queryOne('SELECT * FROM expense_categories ORDER BY id DESC LIMIT 1');
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/expense-categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, active } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+    run(
+      `UPDATE expense_categories SET name = ?, description = ?, active = ? WHERE id = ?`,
+      [name.trim(), description || '', active === 0 ? 0 : 1, id]
+    );
+    res.json(queryOne('SELECT * FROM expense_categories WHERE id = ?', [id]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/expense-categories/:id', async (req, res) => {
+  try {
+    run('DELETE FROM expense_categories WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Zërat ditorë (Fleta e Shpenzimeve) ───────────────────────
+const SUPPORTED_EXPENSE_CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+
+function pickCurrency(cur) {
+  const c = String(cur || 'LEK').toUpperCase();
+  return SUPPORTED_EXPENSE_CURRENCIES.includes(c) ? c : 'LEK';
+}
+
+app.get('/api/expense-entries/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const rows = queryAll(
+      `SELECT e.*, c.name AS category_name,
+              (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
+       FROM expense_entries e
+       LEFT JOIN expense_categories c ON c.id = e.category_id
+       WHERE e.date = ?
+       ORDER BY e.id ASC`,
+      [date]
+    );
+    const totals = rows.reduce((a, r) => {
+      const cur = r.currency || 'LEK';
+      a.total_lek += +(r.total_lek || 0);
+      a.by_currency[cur] = (a.by_currency[cur] || 0) + (r.amount || 0);
+      return a;
+    }, { total_lek: 0, by_currency: {} });
+    res.json({ rows, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/expense-entries', async (req, res) => {
+  try {
+    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const cur = pickCurrency(currency);
+    const amt = parseFloat(amount) || 0;
+    const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
+    if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+    run(
+      `INSERT INTO expense_entries (date, category_id, description, currency, amount, exchange_rate,
+         amount_lek, amount_eur, amount_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        date,
+        category_id || null,
+        description || '',
+        cur, amt, rate,
+        // Legacy mirrors për përputhshmëri me kod të vjetër (lexime që preken)
+        cur === 'LEK' ? amt : 0,
+        cur === 'EUR' ? amt : 0,
+        cur === 'USD' ? amt : 0,
+      ]
+    );
+    syncExpenseTotals(date);
+    const row = queryOne(
+      `SELECT e.*, c.name AS category_name,
+              (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
+       FROM expense_entries e LEFT JOIN expense_categories c ON c.id = e.category_id
+       ORDER BY e.id DESC LIMIT 1`
+    );
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/expense-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
+    const existing = queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const cur = pickCurrency(currency);
+    const amt = parseFloat(amount) || 0;
+    const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
+    if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+    run(
+      `UPDATE expense_entries SET date = ?, category_id = ?, description = ?,
+         currency = ?, amount = ?, exchange_rate = ?,
+         amount_lek = ?, amount_eur = ?, amount_usd = ?
+       WHERE id = ?`,
+      [
+        date || existing.date,
+        category_id || null,
+        description || '',
+        cur, amt, rate,
+        cur === 'LEK' ? amt : 0,
+        cur === 'EUR' ? amt : 0,
+        cur === 'USD' ? amt : 0,
+        id,
+      ]
+    );
+    syncExpenseTotals(existing.date);
+    if (date && date !== existing.date) syncExpenseTotals(date);
+    res.json(queryOne(
+      `SELECT e.*, c.name AS category_name,
+              (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
+       FROM expense_entries e LEFT JOIN expense_categories c ON c.id = e.category_id
+       WHERE e.id = ?`, [id]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/expense-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
+    run('DELETE FROM expense_entries WHERE id = ?', [id]);
+    if (existing) syncExpenseTotals(existing.date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Raporti i Shpenzimeve ────────────────────────────────────
+app.get('/api/reports/expenses', async (req, res) => {
+  try {
+    const { from, to, category_id, currency } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    const params = [from, to];
+    let where = `e.date BETWEEN ? AND ?`;
+    if (category_id) {
+      where += ` AND e.category_id = ?`;
+      params.push(parseInt(category_id));
+    }
+    if (currency) {
+      where += ` AND COALESCE(e.currency, 'LEK') = ?`;
+      params.push(String(currency).toUpperCase());
+    }
+
+    const entries = queryAll(
+      `SELECT e.*, c.name AS category_name,
+              (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
+       FROM expense_entries e
+       LEFT JOIN expense_categories c ON c.id = e.category_id
+       WHERE ${where}
+       ORDER BY e.date ASC, e.id ASC`,
+      params
+    );
+
+    const rows = entries.map(e => ({
+      ...e,
+      currency: e.currency || 'LEK',
+      amount: +(e.amount || 0),
+      exchange_rate: +(e.exchange_rate || 1),
+      total_lek: +(e.total_lek || 0),
+    }));
+
+    const totals = rows.reduce((a, r) => {
+      a.total_lek += r.total_lek;
+      a.by_currency[r.currency] = (a.by_currency[r.currency] || 0) + r.amount;
+      return a;
+    }, { total_lek: 0, by_currency: {} });
+    totals.total_lek = +totals.total_lek.toFixed(2);
+
+    // Përmbledhje sipas zërit (kategorisë)
+    const byCat = new Map();
+    for (const r of rows) {
+      const key = r.category_id || 0;
+      const name = r.category_name || '(pa zër)';
+      const cur = byCat.get(key) || { category_id: key || null, category_name: name, count: 0, total_lek: 0 };
+      cur.count += 1;
+      cur.total_lek += r.total_lek;
+      byCat.set(key, cur);
+    }
+    const by_category = Array.from(byCat.values())
+      .map(c => ({ ...c, total_lek: +c.total_lek.toFixed(2) }))
+      .sort((a, b) => b.total_lek - a.total_lek);
+
+    res.json({ rows, totals, by_category });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Raport Xhiro Ditore (nga Faturat e Shitjes) ──────────────
+app.get('/api/reports/daily-turnover', async (req, res) => {
+  try {
+    const { from, to, payment_method, currency } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    const params = [from, to];
+    let where = `i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0`;
+    if (payment_method) {
+      where += ` AND COALESCE(i.payment_method, 'cash') = ?`;
+      params.push(payment_method);
+    }
+    if (currency) {
+      where += ` AND COALESCE(i.currency, 'LEK') = ?`;
+      params.push(String(currency).toUpperCase());
+    }
+
+    // Çdo faturë: konvertuar në LEK me kursin e vet.
+    const invoices = queryAll(
+      `SELECT
+         i.id, i.date, i.invoice_no, i.currency,
+         COALESCE(i.exchange_rate, 1)     AS exchange_rate,
+         COALESCE(i.payment_method, 'cash') AS pm,
+         COALESCE(i.is_credit_note, 0)    AS is_credit_note,
+         COALESCE(i.subtotal_no_vat, 0)   AS sub,
+         COALESCE(i.total_discount, 0)    AS disc,
+         COALESCE(i.total_vat, 0)         AS vat,
+         COALESCE(i.total_with_vat, 0)    AS tot,
+         COALESCE(i.amount_paid, 0)
+           - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)
+           AS init_paid
+       FROM invoices i
+       WHERE ${where}
+       ORDER BY i.date ASC, i.id ASC`,
+      params
+    );
+
+    const byDate = new Map();
+    for (const inv of invoices) {
+      const rate = +(inv.exchange_rate || 1);
+      const subLek = inv.sub * rate;
+      const vatLek = inv.vat * rate;
+      const totLek = inv.tot * rate;
+      const grossLek = (inv.sub + inv.disc) * rate;
+      const discLek = inv.disc * rate;
+      const paidLek = (inv.init_paid || 0) * rate;
+      const dueLek = totLek - paidLek;
+
+      const day = byDate.get(inv.date) || {
+        date: inv.date, count: 0, credit_count: 0,
+        gross_lek: 0, disc_lek: 0, sub_lek: 0, vat_lek: 0, tot_lek: 0,
+        paid_lek: 0, due_lek: 0,
+        cash_lek: 0, pos_lek: 0, bank_lek: 0, debt_lek: 0,
+      };
+      day.count += 1;
+      if (inv.is_credit_note) day.credit_count += 1;
+      day.gross_lek += grossLek;
+      day.disc_lek  += discLek;
+      day.sub_lek   += subLek;
+      day.vat_lek   += vatLek;
+      day.tot_lek   += totLek;
+      day.paid_lek  += paidLek;
+      day.due_lek   += dueLek;
+      // Klasifikim sipas mënyrës së pagesës: cash/pos llogariten të paguara plotësisht;
+      // bank dhe debt mbajnë vlerën e tërë te kategoria përkatëse.
+      if (inv.pm === 'cash') day.cash_lek += totLek;
+      else if (inv.pm === 'pos')  day.pos_lek += totLek;
+      else if (inv.pm === 'bank') day.bank_lek += totLek;
+      else if (inv.pm === 'debt') day.debt_lek += totLek;
+      else day.cash_lek += totLek;
+      byDate.set(inv.date, day);
+    }
+
+    const rows = Array.from(byDate.values())
+      .map(d => {
+        // Cash total = Total − POS − Bankë − Pa Paguar (kapja e cash-it real:
+        // përfshin pjesën e paguar të borxhit te momenti i regjistrimit).
+        const total_cash_lek = +(d.tot_lek - d.pos_lek - d.bank_lek - d.due_lek).toFixed(2);
+        return {
+          ...d,
+          gross_lek: +d.gross_lek.toFixed(2),
+          disc_lek:  +d.disc_lek.toFixed(2),
+          sub_lek:   +d.sub_lek.toFixed(2),
+          vat_lek:   +d.vat_lek.toFixed(2),
+          tot_lek:   +d.tot_lek.toFixed(2),
+          paid_lek:  +d.paid_lek.toFixed(2),
+          due_lek:   +d.due_lek.toFixed(2),
+          cash_lek:  +d.cash_lek.toFixed(2),
+          pos_lek:   +d.pos_lek.toFixed(2),
+          bank_lek:  +d.bank_lek.toFixed(2),
+          debt_lek:  +d.debt_lek.toFixed(2),
+          total_cash_lek,
+        };
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    const totals = rows.reduce((a, r) => ({
+      count:     a.count     + r.count,
+      credit_count: a.credit_count + r.credit_count,
+      gross_lek: a.gross_lek + r.gross_lek,
+      disc_lek:  a.disc_lek  + r.disc_lek,
+      sub_lek:   a.sub_lek   + r.sub_lek,
+      vat_lek:   a.vat_lek   + r.vat_lek,
+      tot_lek:   a.tot_lek   + r.tot_lek,
+      paid_lek:  a.paid_lek  + r.paid_lek,
+      due_lek:   a.due_lek   + r.due_lek,
+      cash_lek:  a.cash_lek  + r.cash_lek,
+      pos_lek:   a.pos_lek   + r.pos_lek,
+      bank_lek:  a.bank_lek  + r.bank_lek,
+      debt_lek:  a.debt_lek  + r.debt_lek,
+      total_cash_lek: a.total_cash_lek + r.total_cash_lek,
+    }), {
+      count: 0, credit_count: 0,
+      gross_lek: 0, disc_lek: 0, sub_lek: 0, vat_lek: 0, tot_lek: 0,
+      paid_lek: 0, due_lek: 0,
+      cash_lek: 0, pos_lek: 0, bank_lek: 0, debt_lek: 0,
+      total_cash_lek: 0,
+    });
+
+    res.json({ rows, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ============================================================

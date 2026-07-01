@@ -194,10 +194,7 @@ export default function MonthlyReport({ month: initialMonth, onNavigate }) {
                 )}
                 {perDay.map((d, i) => (
                   <tr key={d.date} className={`border-b border-slate-100 hover:bg-yellow-50 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}`}>
-                    <td
-                      className="px-2 py-1.5 sticky left-0 bg-inherit cursor-pointer text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
-                      onClick={() => onNavigate && onNavigate('daily', { date: d.date })}
-                    >
+                    <td className="px-2 py-1.5 sticky left-0 bg-inherit text-slate-700 font-medium whitespace-nowrap">
                       {formatDate(d.date)}
                     </td>
                     <Td value={d.byType.flori.cope} />

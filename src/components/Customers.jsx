@@ -57,7 +57,7 @@ export default function Customers() {
     <div className="card text-center py-16">
       <div className="text-5xl mb-4">👥</div>
       <h3 className="text-xl font-bold text-slate-700 mb-2">Nuk ka klientë akoma</h3>
-      <p className="text-slate-400 text-sm">Borxhet e klientëve regjistrohen nga Ditari</p>
+      <p className="text-slate-400 text-sm">Borxhet e klientëve regjistrohen nga Fatura Shitje</p>
     </div>
   )
 

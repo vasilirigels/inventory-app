@@ -177,6 +177,332 @@ async function initDB() {
 
   // Add image_path to products if it doesn't exist yet
   try { db.run("ALTER TABLE products ADD COLUMN image_path TEXT DEFAULT ''") } catch (_) {}
+  // Add vat_rate (%) to products if it doesn't exist yet (default 20%)
+  try { db.run("ALTER TABLE products ADD COLUMN vat_rate REAL DEFAULT 20") } catch (_) {}
+  try { db.run("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'copë'") } catch (_) {}
+  // 'flori' | 'diamant' | '' — set when purchase invoice line specifies it
+  try { db.run("ALTER TABLE products ADD COLUMN material TEXT DEFAULT ''") } catch (_) {}
+
+  // Arka Ditore: gjendja fizike e arkës (e numëruar dorazi në fund të ditës)
+  try { db.run("ALTER TABLE daily_records ADD COLUMN physical_cash_lek REAL DEFAULT 0") } catch (_) {}
+  // Mbyllje Dite: pjesa e gjendjes fizike që kalon në kasafortë (LEK).
+  // Pjesa tjetër (physical_cash - closeout_to_safe) shkruhet si opening_lek për ditën pasardhëse.
+  try { db.run("ALTER TABLE daily_records ADD COLUMN closeout_to_safe_lek REAL DEFAULT 0") } catch (_) {}
+
+  // ── Safe withdrawals (Tërheqje nga Kasaforta) ────────────────────────────
+  // Regjistrim individual për çdo tërheqje me metadata (kush, kur, shënim).
+  // Agregati për datë ruhet edhe në daily_records.safe_withdraw_lek/eur për
+  // konsistencë me pamjet ekzistuese (Kasaforta, raportet).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS safe_withdrawals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      amount_lek REAL DEFAULT 0,
+      amount_eur REAL DEFAULT 0,
+      person TEXT DEFAULT '',
+      note TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // ── Sales invoices (Fatura Shitje) ────────────────────────────────────────
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      invoice_no TEXT NOT NULL,
+      customer_name TEXT DEFAULT '',
+      customer_nipt TEXT DEFAULT '',
+      currency TEXT DEFAULT 'LEK',
+      exchange_rate REAL DEFAULT 1,
+      subtotal_no_vat REAL DEFAULT 0,
+      total_discount REAL DEFAULT 0,
+      total_vat REAL DEFAULT 0,
+      total_with_vat REAL DEFAULT 0,
+      payment_method TEXT DEFAULT 'cash',
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  try { db.run("ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT 'cash'") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN amount_paid REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN amount_due REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN cancelled INTEGER DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN is_credit_note INTEGER DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN parent_invoice_id INTEGER") } catch (_) {}
+  // Mixed payment breakdown — populated only when payment_method='mikse'.
+  // Sum across the three columns = amount_paid; anything not covered becomes amount_due (borxh).
+  try { db.run("ALTER TABLE invoices ADD COLUMN paid_cash REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN paid_pos  REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN paid_bank REAL DEFAULT 0") } catch (_) {}
+  // Normalize older credit notes to new convention: amount_paid=0, amount_due=total (negative)
+  try {
+    db.run(`UPDATE invoices SET amount_paid = 0, amount_due = total_with_vat
+            WHERE is_credit_note = 1 AND (amount_due IS NULL OR amount_due = 0)`)
+  } catch (_) {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoice_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      product_id INTEGER,
+      barcode TEXT DEFAULT '',
+      name TEXT DEFAULT '',
+      qty REAL DEFAULT 0,
+      unit_price_no_vat REAL DEFAULT 0,
+      discount_percent REAL DEFAULT 0,
+      subtotal_no_vat REAL DEFAULT 0,
+      vat_rate REAL DEFAULT 20,
+      vat_amount REAL DEFAULT 0,
+      total_with_vat REAL DEFAULT 0,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoice_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      amount REAL NOT NULL,
+      payment_method TEXT DEFAULT 'cash',
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Daily exchange rates cache (1 unit foreign = N LEK)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS exchange_rates (
+      date TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      rate REAL NOT NULL,
+      source TEXT DEFAULT 'BSH',
+      fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (date, currency)
+    )
+  `);
+
+  // Suppliers (FURNITOR)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nipt TEXT DEFAULT '',
+      name TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Customers / Clients (KLIENTI)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nipt TEXT DEFAULT '',
+      first_name TEXT DEFAULT '',
+      last_name TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Purchase invoices (FATURA BLERJE) — header + items
+  db.run(`
+    CREATE TABLE IF NOT EXISTS purchase_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      invoice_no TEXT NOT NULL,
+      supplier_name TEXT DEFAULT '',
+      supplier_nipt TEXT DEFAULT '',
+      currency TEXT DEFAULT 'LEK',
+      exchange_rate REAL DEFAULT 1,
+      subtotal_no_vat REAL DEFAULT 0,
+      total_discount REAL DEFAULT 0,
+      total_vat REAL DEFAULT 0,
+      total_with_vat REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_id INTEGER NOT NULL,
+      product_id INTEGER,
+      barcode TEXT DEFAULT '',
+      name TEXT DEFAULT '',
+      qty REAL DEFAULT 0,
+      purchase_price_no_vat REAL DEFAULT 0,
+      discount_percent REAL DEFAULT 0,
+      subtotal_no_vat REAL DEFAULT 0,
+      vat_rate REAL DEFAULT 20,
+      vat_amount REAL DEFAULT 0,
+      total_with_vat REAL DEFAULT 0,
+      sell_price REAL DEFAULT 0,
+      FOREIGN KEY (purchase_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Supplier-side payment tracking on purchase invoices (mirror of invoices side)
+  try { db.run("ALTER TABLE purchase_invoices ADD COLUMN payment_method TEXT DEFAULT 'cash'") } catch (_) {}
+  try { db.run("ALTER TABLE purchase_invoices ADD COLUMN amount_paid REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE purchase_invoices ADD COLUMN amount_due REAL DEFAULT 0") } catch (_) {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS purchase_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      amount REAL NOT NULL,
+      payment_method TEXT DEFAULT 'cash',
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (purchase_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE
+    )
+  `);
+
+  // ── Fletë Hyrje / Fletë Dalje — inventory adjustment notes (no prices) ──
+  db.run(`
+    CREATE TABLE IF NOT EXISTS flete_hyrje (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      ref_no TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS flete_hyrje_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      flete_id INTEGER NOT NULL,
+      product_id INTEGER,
+      barcode TEXT DEFAULT '',
+      name TEXT DEFAULT '',
+      qty REAL DEFAULT 0,
+      FOREIGN KEY (flete_id) REFERENCES flete_hyrje(id) ON DELETE CASCADE
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS flete_dalje (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      ref_no TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS flete_dalje_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      flete_id INTEGER NOT NULL,
+      product_id INTEGER,
+      barcode TEXT DEFAULT '',
+      name TEXT DEFAULT '',
+      qty REAL DEFAULT 0,
+      FOREIGN KEY (flete_id) REFERENCES flete_dalje(id) ON DELETE CASCADE
+    )
+  `);
+
+  // ── Magazinat (regjistër) — kodi unik për çdo magazinë
+  db.run(`
+    CREATE TABLE IF NOT EXISTS warehouses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // ── Zëra Shpenzimi (regjistër) + zëra ditorë
+  db.run(`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS expense_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      category_id INTEGER,
+      description TEXT DEFAULT '',
+      amount_lek REAL DEFAULT 0,
+      amount_eur REAL DEFAULT 0,
+      amount_usd REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (category_id) REFERENCES expense_categories(id) ON DELETE SET NULL
+    )
+  `);
+  // Modeli i ri: çdo shpenzim ka një monedhë + vlerë + kurs (i vendosur dorazi).
+  try { db.run("ALTER TABLE expense_entries ADD COLUMN currency TEXT DEFAULT 'LEK'") } catch (_) {}
+  try { db.run("ALTER TABLE expense_entries ADD COLUMN amount REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE expense_entries ADD COLUMN exchange_rate REAL DEFAULT 1") } catch (_) {}
+  // Migrim një herësh: rreshtat e vjetër me amount_lek/eur/usd → caktoj monedhën
+  // dominante dhe vlerën.
+  try {
+    db.run(`
+      UPDATE expense_entries
+      SET currency = CASE
+            WHEN amount_lek > 0 THEN 'LEK'
+            WHEN amount_eur > 0 THEN 'EUR'
+            WHEN amount_usd > 0 THEN 'USD'
+            ELSE 'LEK'
+          END,
+          amount = CASE
+            WHEN amount_lek > 0 THEN amount_lek
+            WHEN amount_eur > 0 THEN amount_eur
+            WHEN amount_usd > 0 THEN amount_usd
+            ELSE 0
+          END,
+          exchange_rate = 1
+      WHERE COALESCE(currency, '') = '' OR amount IS NULL OR amount = 0
+    `);
+  } catch (_) {}
+
+  // ── Magazina — fletë hyrje / dalje me kod magazine, monedhë, kurs dhe çmim
+  //    për njësi (pa TVSH). Hyrja rrit stokun, dalja e zbret.
+  for (const kind of ['hyrje', 'dalje']) {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS magazina_${kind} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        warehouse_code TEXT DEFAULT '',
+        ref_no TEXT NOT NULL,
+        currency TEXT DEFAULT 'LEK',
+        exchange_rate REAL DEFAULT 1,
+        subtotal REAL DEFAULT 0,
+        total_discount REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS magazina_${kind}_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        magazina_id INTEGER NOT NULL,
+        product_id INTEGER,
+        barcode TEXT DEFAULT '',
+        name TEXT DEFAULT '',
+        qty REAL DEFAULT 0,
+        unit_price REAL DEFAULT 0,
+        discount_percent REAL DEFAULT 0,
+        subtotal REAL DEFAULT 0,
+        FOREIGN KEY (magazina_id) REFERENCES magazina_${kind}(id) ON DELETE CASCADE
+      )
+    `);
+  }
 
   saveDB();
   return db;

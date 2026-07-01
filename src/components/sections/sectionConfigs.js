@@ -17,16 +17,6 @@ export const SECTION_CONFIGS = {
     description: 'Konvertim i hurdës në vlera monetare.',
     rows: [{ label: 'Hurda', fields: { lek: 'hurda_lek', eur: 'hurda_eur', usd: 'hurda_usd', gbp: 'hurda_gbp', chf: 'hurda_chf', gram: 'hurda_gram' } }],
   },
-  'arka-derdhje': {
-    title: 'Derdhje në Kasafortë',
-    description: 'Para të derdhura nga arka në kasafortë.',
-    rows: [{ label: 'Derdhje', fields: { lek: 'safe_deposit_lek', eur: 'safe_deposit_eur' } }],
-  },
-  'arka-terheqje': {
-    title: 'Tërheqje nga Kasaforta',
-    description: 'Para të tërhequra nga kasaforta për arkë / shpenzime / dorëzime.',
-    rows: [{ label: 'Tërheqje', fields: { lek: 'safe_withdraw_lek', eur: 'safe_withdraw_eur' } }],
-  },
   'arka-kasaforta': {
     title: 'Gjendje Kasaforta',
     description: 'Gjendja e mbartur në kasafortë në fillim të ditës.',

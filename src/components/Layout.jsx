@@ -10,17 +10,6 @@ function nextDay(date) {
   d.setDate(d.getDate() + 1)
   return d.toISOString().split('T')[0]
 }
-function prevMonth(month) {
-  const [y, m] = month.split('-').map(Number)
-  const d = new Date(y, m - 2, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-function nextMonth(month) {
-  const [y, m] = month.split('-').map(Number)
-  const d = new Date(y, m, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
 const ALBANIAN_MONTHS = [
   '', 'Janar', 'Shkurt', 'Mars', 'Prill', 'Maj', 'Qershor',
   'Korrik', 'Gusht', 'Shtator', 'Tetor', 'Nëntor', 'Dhjetor',
@@ -31,8 +20,11 @@ const NAV_GROUPS = [
     label: 'KRYESORE',
     items: [
       { id: 'dashboard', label: 'Dashboard',    icon: '🏠' },
-      { id: 'products',  label: 'Produktet',    icon: '📦' },
-      { id: 'customers', label: 'Klientët',     icon: '👥' },
+      { id: 'products',  label: 'Produktet (Inventar)', icon: '📦' },
+      { id: 'klienti',   label: 'Klienti',      icon: '👤' },
+      { id: 'furnitor',  label: 'Furnitor',     icon: '🏭' },
+      { id: 'zerat-shpenzimeve', label: 'Zërat e Shpenzimeve', icon: '🧾' },
+      { id: 'customers', label: 'Klientët (Borxhe)', icon: '👥' },
     ],
   },
   {
@@ -41,111 +33,45 @@ const NAV_GROUPS = [
       {
         id: 'shitje', label: 'Shitje', icon: '⬆️',
         children: [
-          { id: 'shitje-flori',   label: 'Shitje Flori' },
-          { id: 'shitje-diamant', label: 'Shitje Diamant' },
-          { id: 'shitje-online',  label: 'Shitje Online & Stafi' },
-          { id: 'shitje-klering', label: 'Pagesë me Klering' },
-          { id: 'kthime-flori',   label: 'Kthime Flori' },
-          { id: 'kthime-diamant', label: 'Kthime Diamant' },
-          { id: 'kthime-online',  label: 'Kthime Online & Stafi' },
+          { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
+          { id: 'shitje-flori',          label: 'Shitje Flori' },
+          { id: 'shitje-diamant',        label: 'Shitje Diamant' },
+          { id: 'shitje-online',         label: 'Shitje Online & Stafi' },
+          { id: 'shitje-klering',        label: 'Pagesë me Klering' },
+          { id: 'kthime-flori',          label: 'Kthime Flori' },
+          { id: 'kthime-diamant',        label: 'Kthime Diamant' },
+          { id: 'kthime-online',         label: 'Kthime Online & Stafi' },
+          { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
         ],
       },
       {
         id: 'blerje', label: 'Blerje', icon: '⬇️',
         children: [
-          { id: 'blerje-flori',     label: 'Hyrje Flori' },
-          { id: 'blerje-diamant',   label: 'Hyrje Diamant' },
-          { id: 'shlyerje-borxhi',  label: 'Shlyerje Borxhi te Produkteve' },
+          { id: 'fatura-blerje',         label: 'FATURA BLERJE' },
+          { id: 'blerje-flori',          label: 'Hyrje Flori' },
+          { id: 'blerje-diamant',        label: 'Hyrje Diamant' },
+          { id: 'shlyerje-borxhi',       label: 'Shlyerje Borxhi te Produkteve' },
+          { id: 'raport-blerje-artikuj', label: 'Raport Blerje Artikuj' },
         ],
       },
       {
-        id: 'inventar', label: 'Inventar', icon: '📁',
+        id: 'magazina', label: 'Magazina', icon: '🏬',
         children: [
-          { id: 'inventar-flori',   label: 'Inventar Flori' },
-          { id: 'inventar-diamant', label: 'Inventar Diamant' },
-          { id: 'inventar-hyrje',   label: 'Hyrje në Inventar' },
-          { id: 'inventar-dalje',   label: 'Dalje nga Inventari' },
-          { id: 'inventar-reale',   label: 'Gjendja Reale & Diferenca' },
+          { id: 'magazinat',             label: 'Regjistri i Magazinave' },
+          { id: 'magazina-hyrje',        label: 'Fletë Hyrje' },
+          { id: 'magazina-dalje',        label: 'Fletë Dalje' },
+          { id: 'inventar-permbledhese', label: 'Përmbledhëse Inventari' },
         ],
       },
       {
         id: 'arka', label: 'Arka', icon: '🧾',
         children: [
-          { id: 'arka-kasaforta',    label: 'Gjendje Kasaforta' },
+          { id: 'arka-ditore',       label: 'Arka Ditore' },
+          { id: 'arka-kasaforta',    label: 'Kasaforta' },
           { id: 'arka-shpenzime',    label: 'Shpenzime' },
           { id: 'arka-konv-valute',  label: 'Konvertim Valute' },
           { id: 'arka-konv-hurda',   label: 'Konvertim Hurda' },
-          { id: 'arka-derdhje',      label: 'Derdhje në Kasafortë' },
           { id: 'arka-terheqje',     label: 'Tërheqje nga Kasaforta' },
-          { id: 'arka-mbyllje',      label: 'Mbyllje Ditore Kasaforta' },
-          { id: 'arka-fund-dite',    label: 'Arka në Fund të Ditës' },
-        ],
-      },
-      {
-        id: 'banka', label: 'Banka', icon: '🏦',
-        children: [
-          { id: 'banka-terheqje',  label: 'Tërheqje nga Banka' },
-          { id: 'banka-depozitim', label: 'Depozitim në Bankë' },
-          { id: 'banka-levizje',   label: 'Lëvizje në Bankë' },
-          { id: 'banka-pb',        label: 'Pagesa me Kartë (PB)' },
-        ],
-      },
-      {
-        id: 'kontabilitet', label: 'Kontabilitet', icon: '📑',
-        children: [
-          { id: 'kont-xhiro',         label: 'Xhiro Neto' },
-          { id: 'kont-borxhe',        label: 'Borxhe Klienti' },
-          { id: 'kont-kthim-borxhi',  label: 'Kthim Borxhi' },
-          { id: 'kont-permbledhese-m',label: 'Përmbledhëse Mujore' },
-          { id: 'kont-permbledhese-v',label: 'Përmbledhëse Vjetore' },
-        ],
-      },
-      {
-        id: 'celje', label: 'Celje', icon: '📄',
-        children: [
-          { id: 'celje-mbartur', label: 'Gjendje e Mbartur' },
-          { id: 'celje-dites',   label: 'Celja e Ditës' },
-        ],
-      },
-      {
-        id: 'asete', label: 'Aktive Afatgjata (Asete)', icon: '🧮',
-        children: [
-          { id: 'asete-fikse',     label: 'Asete Fikse' },
-          { id: 'asete-amortizim', label: 'Amortizim' },
-        ],
-      },
-      {
-        id: 'fiskalizimi', label: 'Fiskalizimi', icon: '🧾',
-        children: [
-          { id: 'fisk-fatura',     label: 'Fatura të Lëshuara' },
-          { id: 'fisk-anuluara',   label: 'Fatura të Anuluara' },
-          { id: 'fisk-raport',     label: 'Raport Ditor Fiskal' },
-        ],
-      },
-      {
-        id: 'burime', label: 'Burime Njerëzore', icon: '👤',
-        children: [
-          { id: 'bnj-biba',  label: 'Tërheqje BIBA' },
-          { id: 'bnj-diana', label: 'Tërheqje DIANA' },
-          { id: 'bnj-stafi', label: 'Shitje brenda Stafit' },
-          { id: 'bnj-paga',  label: 'Stafi & Pagat' },
-        ],
-      },
-      {
-        id: 'prodhim', label: 'Prodhim', icon: '🏭',
-        children: [
-          { id: 'prodhim-porosi', label: 'Porosi Prodhimi' },
-          { id: 'prodhim-hurda',  label: 'Hurda' },
-          { id: 'prodhim-proces', label: 'Punët në Proces' },
-        ],
-      },
-      {
-        id: 'mjete', label: 'Mjete', icon: '⚙️',
-        children: [
-          { id: 'mjete-kursi',   label: 'Kursi i Këmbimit' },
-          { id: 'mjete-backup',  label: 'Backup' },
-          { id: 'mjete-import',  label: 'Importo nga Excel' },
-          { id: 'mjete-settings',label: 'Cilësimet' },
         ],
       },
     ],
@@ -153,10 +79,13 @@ const NAV_GROUPS = [
   {
     label: 'RAPORTE',
     items: [
-      { id: 'daily',         label: 'Ditari',                 icon: '📋' },
-      { id: 'history',       label: 'Historiku',              icon: '🔍' },
+      { id: 'detyrime',      label: 'Borxhe Klientesh',       icon: '⚠️' },
+      { id: 'analize-veprime', label: 'ANALIZE VEPRIME KLIENT', icon: '📈' },
+      { id: 'detyrime-furnitor', label: 'Detyrime Furnitor', icon: '🏭' },
+      { id: 'analize-veprime-furnitor', label: 'ANALIZE VEPRIME FURNITOR', icon: '📉' },
+      { id: 'raport-xhiro-ditore',   label: 'Raport Xhiro Ditore',   icon: '📅' },
+      { id: 'raport-shpenzime',      label: 'Raport Shpenzime',      icon: '💸' },
       { id: 'permbledhese',  label: 'Përmbledhëse',           icon: '📊' },
-      { id: 'summary',       label: 'Permbledhja (Klasik)',   icon: '🗒️' },
       { id: 'marketing',     label: 'Marketingu',             icon: '📣' },
     ],
   },
@@ -164,27 +93,25 @@ const NAV_GROUPS = [
 
 const PAGE_TITLES = {
   dashboard:    'Dashboard',
-  products:     'Produktet',
-  customers:    'Klientët',
-  daily:        'Ditari Ditor',
-  history:      'Historiku i Shitjeve',
-  summary:      'Permbledhja Mujore (Klasik)',
-  'kont-permbledhese-m': 'Përmbledhëse Mujore',
-  'kont-permbledhese-v': 'Përmbledhëse Vjetore',
-  permbledhese:          'Përmbledhëse',
+  products:     'Produktet (Inventar)',
+  klienti:      'Klienti (Regjistri)',
+  furnitor:     'Furnitor (Regjistri)',
+  'zerat-shpenzimeve': 'Zërat e Shpenzimeve (Regjistri)',
+  customers:    'Klientët (Borxhe)',
+  detyrime:     'Detyrime Klienti',
+  'analize-veprime': 'ANALIZE VEPRIME KLIENT',
+  'detyrime-furnitor': 'Detyrime Furnitor',
+  'analize-veprime-furnitor': 'ANALIZE VEPRIME FURNITOR',
+  'raport-xhiro-ditore':   'Raport Xhiro Ditore',
+  'raport-shitje-artikuj': 'Raport Shitje — Artikuj',
+  'raport-blerje-artikuj': 'Raport Blerje — Artikuj',
+  'raport-shpenzime':      'Raport Shpenzime',
+  permbledhese: 'Përmbledhëse',
   marketing:    'Shpenzime Marketingu',
   shitje:       'Shitje',
   blerje:       'Blerje',
-  inventar:     'Inventar',
+  magazina:     'Magazina',
   arka:         'Arka',
-  banka:        'Banka',
-  kontabilitet: 'Kontabilitet',
-  celje:        'Celje',
-  asete:        'Aktive Afatgjata (Asete)',
-  fiskalizimi:  'Fiskalizimi',
-  burime:       'Burime Njerëzore',
-  prodhim:      'Prodhim',
-  mjete:        'Mjete',
 }
 
 function getChildTitle(id) {
@@ -209,14 +136,12 @@ function findParentId(childId) {
 }
 
 export default function Layout({
-  children, page, currentDate, currentMonth,
-  onNavigate, onDateChange, onMonthChange,
+  children, page, currentDate,
+  onNavigate, onDateChange,
 }) {
   const now = new Date()
   const [y, m, d] = currentDate.split('-').map(Number)
   const dateLabel = `${d} ${ALBANIAN_MONTHS[m]} ${y}`
-  const [my, mm] = currentMonth.split('-').map(Number)
-  const monthLabel = `${ALBANIAN_MONTHS[mm]} ${my}`
 
   const parentOfPage = findParentId(page)
   const [openMenus, setOpenMenus] = useState(() => parentOfPage ? { [parentOfPage]: true } : {})
@@ -255,33 +180,52 @@ export default function Layout({
                   const hasChildren = item.children && item.children.length > 0
                   const isOpen = !!openMenus[item.id] || parentOfPage === item.id
                   const isActive = page === item.id || parentOfPage === item.id
+                  // Leaf items render as anchors so cmd/ctrl+click and middle-click open
+                  // the page in a new browser tab.
+                  const handleLeafClick = (e, id) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey) return
+                    e.preventDefault()
+                    onNavigate(id)
+                  }
                   return (
                     <div key={item.id}>
-                      <button
-                        onClick={() => hasChildren ? toggleMenu(item.id) : onNavigate(item.id)}
-                        className={`nav-item w-full ${isActive ? 'nav-active' : 'nav-inactive'}`}
-                      >
-                        <span className="text-base w-5 text-center">{item.icon}</span>
-                        <span className="flex-1 text-left">{item.label}</span>
-                        {hasChildren ? (
+                      {hasChildren ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleMenu(item.id)}
+                          className={`nav-item w-full ${isActive ? 'nav-active' : 'nav-inactive'}`}
+                        >
+                          <span className="text-base w-5 text-center">{item.icon}</span>
+                          <span className="flex-1 text-left">{item.label}</span>
                           <span className={`ml-auto text-xs transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
-                        ) : page === item.id ? (
-                          <span className="ml-auto w-1.5 h-1.5 bg-white/70 rounded-full" />
-                        ) : null}
-                      </button>
+                        </button>
+                      ) : (
+                        <a
+                          href={`#/${item.id}`}
+                          onClick={e => handleLeafClick(e, item.id)}
+                          className={`nav-item w-full ${isActive ? 'nav-active' : 'nav-inactive'}`}
+                        >
+                          <span className="text-base w-5 text-center">{item.icon}</span>
+                          <span className="flex-1 text-left">{item.label}</span>
+                          {page === item.id && (
+                            <span className="ml-auto w-1.5 h-1.5 bg-white/70 rounded-full" />
+                          )}
+                        </a>
+                      )}
                       {hasChildren && isOpen && (
                         <div className="ml-6 mt-0.5 mb-1 space-y-0.5 border-l border-slate-700/60 pl-2">
                           {item.children.map(child => (
-                            <button
+                            <a
                               key={child.id}
-                              onClick={() => onNavigate(child.id)}
+                              href={`#/${child.id}`}
+                              onClick={e => handleLeafClick(e, child.id)}
                               className={`nav-item text-xs py-1.5 w-full ${page === child.id ? 'nav-active' : 'nav-inactive'}`}
                             >
                               <span className="flex-1 text-left">{child.label}</span>
                               {page === child.id && (
                                 <span className="ml-auto w-1.5 h-1.5 bg-white/70 rounded-full" />
                               )}
-                            </button>
+                            </a>
                           ))}
                         </div>
                       )}
@@ -317,7 +261,7 @@ export default function Layout({
             <h2 className="text-base font-bold text-slate-800">{headerTitle}</h2>
 
             {/* Daily date nav — show on any date-driven page */}
-            {(page === 'daily' || (parentOfPage && !['kont-permbledhese-m','kont-permbledhese-v'].includes(page)) || ['arka', 'inventar'].includes(page)) && page !== 'permbledhese' && (
+            {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && (
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => onDateChange(prevDay(currentDate))}
@@ -341,26 +285,6 @@ export default function Layout({
               </div>
             )}
 
-            {/* Monthly nav */}
-            {page === 'summary' && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => onMonthChange(prevMonth(currentMonth))}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
-                >‹</button>
-                <span className="text-sm font-medium text-slate-700 px-1">{monthLabel}</span>
-                <input
-                  type="month"
-                  value={currentMonth}
-                  onChange={e => onMonthChange(e.target.value)}
-                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                />
-                <button
-                  onClick={() => onMonthChange(nextMonth(currentMonth))}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
-                >›</button>
-              </div>
-            )}
           </div>
 
           {/* Right side */}

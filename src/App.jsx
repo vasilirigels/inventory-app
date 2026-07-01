@@ -1,55 +1,47 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Layout from './components/Layout.jsx'
 import Dashboard from './components/Dashboard.jsx'
 import Products from './components/Products.jsx'
 import Customers from './components/Customers.jsx'
 import CustomersLedger from './components/CustomersLedger.jsx'
-import SalesHistory from './components/SalesHistory.jsx'
-import DailyLog from './components/DailyLog.jsx'
-import MonthlySummary from './components/MonthlySummary.jsx'
 import Marketing from './components/Marketing.jsx'
-import Inventory from './components/Inventory.jsx'
 import CashRegister from './components/CashRegister.jsx'
+import ArkaDitore from './components/ArkaDitore.jsx'
+import Kasaforta from './components/Kasaforta.jsx'
+import TerheqjaKasaforta from './components/TerheqjaKasaforta.jsx'
 import SalesSection from './components/SalesSection.jsx'
+import FaturaShitje from './components/FaturaShitje.jsx'
+import FaturaBlerje from './components/FaturaBlerje.jsx'
+import Magazina from './components/Magazina.jsx'
+import Magazinat from './components/Magazinat.jsx'
+import InventarPermbledhese from './components/InventarPermbledhese.jsx'
+import Klienti from './components/Klienti.jsx'
+import Furnitor from './components/Furnitor.jsx'
+import DetyrimetKlienti from './components/DetyrimetKlienti.jsx'
+import AnalizeVeprime from './components/AnalizeVeprime.jsx'
+import DetyrimetFurnitor from './components/DetyrimetFurnitor.jsx'
+import AnalizeVeprimeFurnitor from './components/AnalizeVeprimeFurnitor.jsx'
+import RaportShitjeArtikuj from './components/RaportShitjeArtikuj.jsx'
+import RaportBlerjeArtikuj from './components/RaportBlerjeArtikuj.jsx'
+import ZeratShpenzimeve from './components/ZeratShpenzimeve.jsx'
+import Shpenzime from './components/Shpenzime.jsx'
+import RaportShpenzime from './components/RaportShpenzime.jsx'
+import RaportXhiroDitore from './components/RaportXhiroDitore.jsx'
 import DailyFieldsForm from './components/sections/DailyFieldsForm.jsx'
 import { SECTION_CONFIGS } from './components/sections/sectionConfigs.js'
-import EndOfDay from './components/sections/EndOfDay.jsx'
-import XhiroNeto from './components/sections/XhiroNeto.jsx'
-import DebtsForm from './components/sections/DebtsForm.jsx'
-import BankLevizje from './components/sections/BankLevizje.jsx'
-import PBView from './components/sections/PBView.jsx'
 import InventoryFlow from './components/sections/InventoryFlow.jsx'
-import InventoryReale from './components/sections/InventoryReale.jsx'
 import YearlyReport from './components/sections/YearlyReport.jsx'
 import MonthlyReport from './components/sections/MonthlyReport.jsx'
 import UnifiedReport from './components/sections/UnifiedReport.jsx'
 
 const PARENT_TITLES = {
-  shitje:       'Shitje',
-  blerje:       'Blerje',
-  banka:        'Banka',
-  kontabilitet: 'Kontabilitet',
-  celje:        'Celje',
-  asete:        'Aktive Afatgjata (Asete)',
-  fiskalizimi:  'Fiskalizimi',
-  burime:       'Burime Njerëzore',
-  prodhim:      'Prodhim',
-  mjete:        'Mjete',
+  shitje:   'Shitje',
+  blerje:   'Blerje',
+  magazina: 'Magazina',
 }
 
 const PLACEHOLDER_TITLES = {
   'shitje-klering': 'Pagesë me Klering',
-  'asete-fikse':     'Asete Fikse',
-  'asete-amortizim': 'Amortizim',
-  'fisk-fatura':   'Fatura të Lëshuara',
-  'fisk-anuluara': 'Fatura të Anuluara',
-  'fisk-raport':   'Raport Ditor Fiskal',
-  'bnj-paga':  'Stafi & Pagat',
-  'prodhim-porosi': 'Porosi Prodhimi',
-  'prodhim-hurda':  'Hurda',
-  'prodhim-proces': 'Punët në Proces',
-  'mjete-kursi':    'Kursi i Këmbimit',
-  'mjete-settings': 'Cilësimet',
 }
 
 function ComingSoon({ title }) {
@@ -62,34 +54,48 @@ function ComingSoon({ title }) {
   )
 }
 
-function BackupPage() {
-  return (
-    <div className="max-w-2xl mx-auto">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-lg font-bold text-slate-800 mb-2">Backup i të dhënave</h3>
-        <p className="text-sm text-slate-600 mb-4">Shkarko një kopje të plotë të bazës së të dhënave si skedar .db.</p>
-        <a href="/api/backup" download className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-md">
-          💾 Shkarko Backup
-        </a>
-      </div>
-    </div>
-  )
-}
-
 function getToday() {
   return new Date().toISOString().split('T')[0]
 }
 
+function getPageFromHash() {
+  const h = window.location.hash || ''
+  const m = h.match(/^#\/?([\w-]+)$/)
+  return m ? m[1] : null
+}
+
 function App() {
-  const [page, setPage] = useState('dashboard')
+  const [page, setPage] = useState(() => getPageFromHash() || 'dashboard')
   const [currentDate, setCurrentDate] = useState(getToday())
-  const [currentMonth, setCurrentMonth] = useState(getToday().substring(0, 7))
+  const [openInvoiceId, setOpenInvoiceId] = useState(null)
 
   const navigateTo = (pg, opts = {}) => {
     setPage(pg)
-    if (opts.date)  setCurrentDate(opts.date)
-    if (opts.month) setCurrentMonth(opts.month)
+    if (opts.date)      setCurrentDate(opts.date)
+    if (opts.invoiceId !== undefined) setOpenInvoiceId(opts.invoiceId)
+    const expected = `#/${pg}`
+    if (window.location.hash !== expected) {
+      window.history.pushState(null, '', expected)
+    }
   }
+
+  // Keep `page` in sync with URL hash so back/forward + new-tab links work
+  useEffect(() => {
+    const sync = () => {
+      const p = getPageFromHash()
+      if (p) setPage(p)
+    }
+    window.addEventListener('popstate', sync)
+    window.addEventListener('hashchange', sync)
+    if (!window.location.hash) {
+      window.history.replaceState(null, '', `#/${page}`)
+    }
+    return () => {
+      window.removeEventListener('popstate', sync)
+      window.removeEventListener('hashchange', sync)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Centralized renderer
   const renderPage = () => {
@@ -98,12 +104,30 @@ function App() {
       case 'dashboard': return <Dashboard onNavigate={navigateTo} />
       case 'products':  return <Products />
       case 'customers': return <CustomersLedger onNavigate={navigateTo} />
-      case 'history':   return <SalesHistory onNavigate={navigateTo} />
-      case 'daily':     return <DailyLog date={currentDate} onNavigate={navigateTo} />
-      case 'summary':   return <MonthlySummary month={currentMonth} onNavigate={navigateTo} />
+      case 'klienti':   return <Klienti />
+      case 'furnitor':  return <Furnitor />
+      case 'detyrime':  return <DetyrimetKlienti onNavigate={navigateTo} />
+      case 'analize-veprime': return <AnalizeVeprime onNavigate={navigateTo} />
+      case 'detyrime-furnitor':       return <DetyrimetFurnitor onNavigate={navigateTo} />
+      case 'analize-veprime-furnitor': return <AnalizeVeprimeFurnitor onNavigate={navigateTo} />
+      case 'raport-shitje-artikuj': return <RaportShitjeArtikuj onNavigate={navigateTo} />
+      case 'raport-blerje-artikuj': return <RaportBlerjeArtikuj onNavigate={navigateTo} />
+      case 'zerat-shpenzimeve': return <ZeratShpenzimeve />
+      case 'arka-shpenzime': return <Shpenzime date={currentDate} onNavigate={navigateTo} />
+      case 'raport-shpenzime': return <RaportShpenzime />
+      case 'raport-xhiro-ditore': return <RaportXhiroDitore onNavigate={navigateTo} />
       case 'marketing': return <Marketing />
-      case 'inventar':  return <Inventory date={currentDate} />
       case 'arka':      return <CashRegister date={currentDate} />
+
+      // Fatura Shitje — new invoice-based module
+      case 'fatura-shitje': return <FaturaShitje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+      case 'fatura-blerje': return <FaturaBlerje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+
+      // Magazina — fletë hyrje / dalje me kod magazine + monedhë (pa TVSH)
+      case 'magazina-hyrje': return <Magazina date={currentDate} kind="hyrje" />
+      case 'magazina-dalje': return <Magazina date={currentDate} kind="dalje" />
+      case 'magazinat':      return <Magazinat />
+      case 'inventar-permbledhese': return <InventarPermbledhese />
 
       // Shitje / Kthime — reuse SalesSection
       case 'shitje-flori':
@@ -111,39 +135,18 @@ function App() {
       case 'shitje-diamant':
       case 'kthime-diamant': return <SalesSection date={currentDate} type="diamant" />
       case 'shitje-online':
-      case 'kthime-online':
-      case 'bnj-stafi':      return <SalesSection date={currentDate} type="online" />
-
-      // Inventar sub-pages
-      case 'inventar-flori':   return <Inventory date={currentDate} />
-      case 'inventar-diamant': return <Inventory date={currentDate} />
-      case 'inventar-reale':   return <InventoryReale date={currentDate} />
+      case 'kthime-online':  return <SalesSection date={currentDate} type="online" />
 
       // Blerje
       case 'blerje-flori':   return <InventoryFlow date={currentDate} type="flori"   kind="hyrje" />
       case 'blerje-diamant': return <InventoryFlow date={currentDate} type="diamant" kind="hyrje" />
-      case 'inventar-hyrje': return <InventoryFlow date={currentDate} type="flori"   kind="hyrje" />
-      case 'inventar-dalje': return <InventoryFlow date={currentDate} type="flori"   kind="dalje" />
 
       // Arka special
-      case 'arka-fund-dite': return <EndOfDay date={currentDate} mode="arka" />
-      case 'arka-mbyllje':   return <EndOfDay date={currentDate} mode="mbyllje" />
+      case 'arka-ditore':    return <ArkaDitore date={currentDate} onNavigate={navigateTo} />
+      case 'arka-kasaforta': return <Kasaforta />
+      case 'arka-terheqje':  return <TerheqjaKasaforta date={currentDate} />
 
-      // Banka special
-      case 'banka-levizje': return <BankLevizje date={currentDate} />
-      case 'banka-pb':      return <PBView date={currentDate} />
-
-      // Kontabilitet
-      case 'kont-xhiro':         return <XhiroNeto date={currentDate} />
-      case 'kont-borxhe':        return <DebtsForm date={currentDate} mode="debt" />
-      case 'kont-kthim-borxhi':  return <DebtsForm date={currentDate} mode="repayment" />
-      case 'kont-permbledhese-m':return <UnifiedReport initialDate={currentDate} onNavigate={navigateTo} />
-      case 'kont-permbledhese-v':return <UnifiedReport initialDate={currentDate} onNavigate={navigateTo} />
-      case 'permbledhese':       return <UnifiedReport initialDate={currentDate} onNavigate={navigateTo} />
-
-      // Mjete
-      case 'mjete-backup': return <BackupPage />
-      case 'mjete-import': return <Marketing />
+      case 'permbledhese':   return <UnifiedReport initialDate={currentDate} onNavigate={navigateTo} />
 
       default: break
     }
@@ -163,10 +166,8 @@ function App() {
     <Layout
       page={page}
       currentDate={currentDate}
-      currentMonth={currentMonth}
       onNavigate={navigateTo}
       onDateChange={setCurrentDate}
-      onMonthChange={setCurrentMonth}
     >
       {renderPage()}
     </Layout>

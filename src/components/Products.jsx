@@ -87,8 +87,10 @@ const CAT_COLORS = {
 const EMPTY = {
   name: '', sku: '', barcode: '', category: 'Unazë',
   brand: '', description: '', cost_price: '', sell_price: '',
-  stock: '', min_stock: '5',
+  stock: '', min_stock: '5', vat_rate: '20',
 }
+
+const VAT_OPTIONS = [0, 6, 10, 20]
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const productNo = id => `GS-${String(id).padStart(4, '0')}`
@@ -430,6 +432,7 @@ function ProductModal({ product, onClose, onSave }) {
           sell_price:  product.sell_price !== undefined ? String(product.sell_price) : '',
           stock:       product.stock !== undefined ? String(product.stock) : '',
           min_stock:   product.min_stock !== undefined ? String(product.min_stock) : '5',
+          vat_rate:    product.vat_rate !== undefined && product.vat_rate !== null ? String(product.vat_rate) : '20',
         }
       : { ...EMPTY }
   )
@@ -450,6 +453,7 @@ function ProductModal({ product, onClose, onSave }) {
       sell_price: parseFloat(form.sell_price) || 0,
       stock:      parseInt(form.stock)         || 0,
       min_stock:  parseInt(form.min_stock)     || 5,
+      vat_rate:   form.vat_rate === '' || form.vat_rate == null ? 20 : parseFloat(form.vat_rate),
     })
   }
 
@@ -508,6 +512,25 @@ function ProductModal({ product, onClose, onSave }) {
                 <label className="form-label">Çmimi Shitje (€)</label>
                 <input type="number" step="0.01" min="0" value={form.sell_price} onChange={e => set('sell_price', e.target.value)}
                   className="input-field" placeholder="0.00" />
+                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                  <span className="text-[10px] text-slate-500 mr-0.5">nga kosto:</span>
+                  {[0.5, 1, 1.5, 2, 2.5, 3].map(m => {
+                    const cost = parseFloat(form.cost_price) || 0
+                    const disabled = cost <= 0
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => set('sell_price', (cost * m).toFixed(2))}
+                        title={disabled ? 'Vendos fillimisht koston' : `Çm. Shitje = €${(cost * m).toFixed(2)}`}
+                        className="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 font-semibold border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-100 disabled:hover:text-slate-600"
+                      >
+                        ×{m}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
               <div>
                 <label className="form-label">Stoku Aktual</label>
@@ -518,6 +541,30 @@ function ProductModal({ product, onClose, onSave }) {
                 <label className="form-label">Stok Minimal (alarm)</label>
                 <input type="number" min="0" value={form.min_stock} onChange={e => set('min_stock', e.target.value)}
                   className="input-field" placeholder="5" />
+              </div>
+              <div className="col-span-2">
+                <label className="form-label">TVSH %</label>
+                <div className="flex gap-2 items-center">
+                  <select
+                    value={VAT_OPTIONS.includes(parseFloat(form.vat_rate)) ? form.vat_rate : 'custom'}
+                    onChange={e => {
+                      const v = e.target.value
+                      set('vat_rate', v === 'custom' ? form.vat_rate : v)
+                    }}
+                    className="input-field w-40"
+                  >
+                    {VAT_OPTIONS.map(v => <option key={v} value={v}>{v}%</option>)}
+                    <option value="custom">Tjetër...</option>
+                  </select>
+                  <input
+                    type="number" step="0.01" min="0" max="100"
+                    value={form.vat_rate}
+                    onChange={e => set('vat_rate', e.target.value)}
+                    className="input-field w-32"
+                    placeholder="20"
+                  />
+                  <span className="text-xs text-slate-500">do të aplikohet automatikisht kur ky produkt të shitet</span>
+                </div>
               </div>
               <div className="col-span-2">
                 <label className="form-label">Përshkrimi (opsional)</label>
@@ -559,7 +606,10 @@ export default function Products() {
   const [modal, setModal]           = useState(null)    // null | 'add' | product
   const [confirmDel, setConfirmDel] = useState(null)
   const [showImport, setShowImport] = useState(false)
-  const [view, setView]             = useState('grid')  // grid | list
+  const [view, setView]             = useState('list')  // grid | list
+  const [fromDate, setFromDate]     = useState('')
+  const [toDate, setToDate]         = useState('')
+  const [bulkApplying, setBulkApplying] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -571,6 +621,19 @@ export default function Products() {
 
   useEffect(() => { load() }, [load])
 
+  // Return product creation date as local YYYY-MM-DD. SQLite stores created_at
+  // in UTC, so we parse it explicitly as UTC before reading the local day —
+  // otherwise late-night creations would shift to the wrong calendar day.
+  const createdLocalDate = (p) => {
+    if (!p.created_at) return ''
+    const d = new Date(String(p.created_at).replace(' ', 'T') + 'Z')
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const todayStr = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
   const filtered = products.filter(p => {
     const q = search.toLowerCase()
     const matchSearch = !q ||
@@ -580,7 +643,16 @@ export default function Products() {
       (p.barcode || '').includes(q) ||
       productNo(p.id).toLowerCase().includes(q)
     const matchCat = filterCat === 'Të gjitha' || p.category === filterCat
-    return matchSearch && matchCat
+    let matchDate = true
+    if (fromDate || toDate) {
+      const d = createdLocalDate(p)
+      if (!d) matchDate = false
+      else {
+        if (fromDate && d < fromDate) matchDate = false
+        if (toDate && d > toDate) matchDate = false
+      }
+    }
+    return matchSearch && matchCat && matchDate
   })
 
   const handleSave = async data => {
@@ -609,6 +681,55 @@ export default function Products() {
       setConfirmDel(null)
       load()
     } catch (e) { console.error(e) }
+  }
+
+  // Quick per-row sell-price multiplier: sell_price = cost * m, then PUT the
+  // full product (the API requires the whole payload, not a partial update).
+  const applyMultiplier = async (p, m) => {
+    const cost = parseFloat(p.cost_price) || 0
+    if (cost <= 0) { alert('Produkti nuk ka çmim kosto.'); return }
+    const newSell = +(cost * m).toFixed(2)
+    try {
+      await fetch(`/api/products/${p.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...p, sell_price: newSell }),
+      })
+      load()
+    } catch (e) { console.error(e) }
+  }
+
+  // Bulk multiplier: applies to every product currently shown by the filters
+  // (search + category + Sot). Products with no cost are skipped.
+  const applyBulkMultiplier = async (m) => {
+    const eligible = filtered.filter(p => parseFloat(p.cost_price) > 0)
+    if (eligible.length === 0) { alert('Asnjë produkt me kosto > 0 në listë.'); return }
+    const skipped = filtered.length - eligible.length
+    let scope = 'të shfaqura'
+    if (fromDate && toDate) scope = fromDate === toDate ? `të shtuara më ${fromDate}` : `të shtuara nga ${fromDate} deri ${toDate}`
+    else if (fromDate)      scope = `të shtuara nga ${fromDate} e tutje`
+    else if (toDate)        scope = `të shtuara deri më ${toDate}`
+    const msg =
+      `Vendos Çm. Shitje = Kosto × ${m} për ${eligible.length} produkte ${scope}` +
+      (skipped > 0 ? `\n(${skipped} pa kosto u anashkalohen)` : '') + '?'
+    if (!confirm(msg)) return
+    setBulkApplying(true)
+    try {
+      await Promise.all(eligible.map(p => {
+        const newSell = +(parseFloat(p.cost_price) * m).toFixed(2)
+        return fetch(`/api/products/${p.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...p, sell_price: newSell }),
+        })
+      }))
+      await load()
+    } catch (e) {
+      console.error(e)
+      alert('Gabim gjatë aplikimit në grup.')
+    } finally {
+      setBulkApplying(false)
+    }
   }
 
   const exportExcel = () => {
@@ -686,6 +807,68 @@ export default function Products() {
         <button onClick={() => setModal('add')} className="btn-primary flex-shrink-0">
           + Shto Produkt
         </button>
+      </div>
+
+      {/* ── Date range filter + Bulk multiplier ── */}
+      <div className="card flex flex-wrap items-end gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">📅</span>
+          <span className="text-sm font-semibold text-slate-700">Filtër data (shtimit)</span>
+        </div>
+        <div>
+          <label className="form-label">Nga data</label>
+          <input
+            type="date" value={fromDate}
+            max={toDate || undefined}
+            onChange={e => setFromDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        <div>
+          <label className="form-label">Deri më datë</label>
+          <input
+            type="date" value={toDate}
+            min={fromDate || undefined}
+            onChange={e => setToDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        <button
+          onClick={() => { setFromDate(todayStr); setToDate(todayStr) }}
+          className="btn-secondary text-xs"
+          title="Vendos intervalin për datën e sotme"
+        >Sot</button>
+        {(fromDate || toDate) && (
+          <button
+            onClick={() => { setFromDate(''); setToDate('') }}
+            className="btn-secondary text-xs"
+          >Pastro filtrin</button>
+        )}
+
+        <div className="flex-1" />
+
+        <div>
+          <label className="form-label">Apliko shumëzues për {filtered.length} produkte</label>
+          <select
+            value=""
+            disabled={bulkApplying || filtered.length === 0}
+            onChange={e => {
+              const m = parseFloat(e.target.value)
+              e.target.selectedIndex = 0
+              if (m) applyBulkMultiplier(m)
+            }}
+            title="Apliko Çm. Shitje = Kosto × shumëzues për të gjitha produktet e shfaqura"
+            className="input-field w-56 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-emerald-700"
+          >
+            <option value="">⚡ {bulkApplying ? 'Duke aplikuar...' : 'Zgjidh shumëzuesin...'}</option>
+            <option value="0.5">×0.5 (kosto × 0.5)</option>
+            <option value="1">×1 (kosto × 1)</option>
+            <option value="1.5">×1.5 (kosto × 1.5)</option>
+            <option value="2">×2 (kosto × 2)</option>
+            <option value="2.5">×2.5 (kosto × 2.5)</option>
+            <option value="3">×3 (kosto × 3)</option>
+          </select>
+        </div>
       </div>
 
       {/* ── Stock strip ── */}
@@ -795,6 +978,7 @@ export default function Products() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Produkti</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Kategoria</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">SKU</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Barkodi</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Kosto €</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Shitje €</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Stoku</th>
@@ -818,8 +1002,34 @@ export default function Products() {
                     <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 text-slate-700'}`}>{p.category}</span>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{p.sku || '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{p.barcode || '—'}</td>
                   <td className="px-4 py-3 text-right text-slate-700">{p.cost_price ? `€${Number(p.cost_price).toLocaleString()}` : '—'}</td>
-                  <td className="px-4 py-3 text-right font-bold text-slate-900">{p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="font-bold text-slate-900">
+                        {p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}
+                      </span>
+                      <select
+                        value=""
+                        disabled={!p.cost_price}
+                        onChange={e => {
+                          const m = parseFloat(e.target.value)
+                          e.target.selectedIndex = 0
+                          if (m) applyMultiplier(p, m)
+                        }}
+                        title={p.cost_price ? 'Vendos Çm. Shitje = Kosto × shumëzues' : 'Vendos fillimisht koston'}
+                        className="text-[10px] bg-white border border-slate-300 rounded px-1 py-0.5 text-emerald-700 font-bold cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <option value="">×</option>
+                        <option value="0.5">×0.5</option>
+                        <option value="1">×1</option>
+                        <option value="1.5">×1.5</option>
+                        <option value="2">×2</option>
+                        <option value="2.5">×2.5</option>
+                        <option value="3">×3</option>
+                      </select>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
