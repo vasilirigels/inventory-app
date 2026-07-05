@@ -183,11 +183,26 @@ async function initDB() {
   // 'flori' | 'diamant' | '' — set when purchase invoice line specifies it
   try { db.run("ALTER TABLE products ADD COLUMN material TEXT DEFAULT ''") } catch (_) {}
 
-  // Arka Ditore: gjendja fizike e arkës (e numëruar dorazi në fund të ditës)
+  // Arka Ditore: gjendja fizike e arkës (e numëruar dorazi në fund të ditës) — për çdo monedhë
   try { db.run("ALTER TABLE daily_records ADD COLUMN physical_cash_lek REAL DEFAULT 0") } catch (_) {}
-  // Mbyllje Dite: pjesa e gjendjes fizike që kalon në kasafortë (LEK).
-  // Pjesa tjetër (physical_cash - closeout_to_safe) shkruhet si opening_lek për ditën pasardhëse.
+  try { db.run("ALTER TABLE daily_records ADD COLUMN physical_cash_eur REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN physical_cash_usd REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN physical_cash_gbp REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN physical_cash_chf REAL DEFAULT 0") } catch (_) {}
+  // Mbyllje Dite: pjesa e gjendjes fizike që kalon në kasafortë — për çdo monedhë.
+  // Pjesa tjetër (physical_cash - closeout_to_safe) shkruhet si opening_{cur} për ditën pasardhëse.
   try { db.run("ALTER TABLE daily_records ADD COLUMN closeout_to_safe_lek REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN closeout_to_safe_eur REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN closeout_to_safe_usd REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN closeout_to_safe_gbp REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN closeout_to_safe_chf REAL DEFAULT 0") } catch (_) {}
+  // Safe deposit/withdraw për monedhat që s'ekzistonin në schema-n fillestare
+  try { db.run("ALTER TABLE daily_records ADD COLUMN safe_deposit_usd REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN safe_deposit_gbp REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN safe_deposit_chf REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN safe_withdraw_usd REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN safe_withdraw_gbp REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE daily_records ADD COLUMN safe_withdraw_chf REAL DEFAULT 0") } catch (_) {}
 
   // ── Safe withdrawals (Tërheqje nga Kasaforta) ────────────────────────────
   // Regjistrim individual për çdo tërheqje me metadata (kush, kur, shënim).
@@ -199,11 +214,17 @@ async function initDB() {
       date TEXT NOT NULL,
       amount_lek REAL DEFAULT 0,
       amount_eur REAL DEFAULT 0,
+      amount_usd REAL DEFAULT 0,
+      amount_gbp REAL DEFAULT 0,
+      amount_chf REAL DEFAULT 0,
       person TEXT DEFAULT '',
       note TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  try { db.run("ALTER TABLE safe_withdrawals ADD COLUMN amount_usd REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE safe_withdrawals ADD COLUMN amount_gbp REAL DEFAULT 0") } catch (_) {}
+  try { db.run("ALTER TABLE safe_withdrawals ADD COLUMN amount_chf REAL DEFAULT 0") } catch (_) {}
 
   // ── Sales invoices (Fatura Shitje) ────────────────────────────────────────
   db.run(`
@@ -364,6 +385,44 @@ async function initDB() {
       notes TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (purchase_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Konvertim Hurda — scrap gold purchases (paid in cash, does NOT enter product inventory)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS hurda_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      purchase_no TEXT NOT NULL,
+      supplier_name TEXT DEFAULT '',
+      supplier_nipt TEXT DEFAULT '',
+      gram REAL DEFAULT 0,
+      price_per_gram REAL DEFAULT 0,
+      currency TEXT DEFAULT 'LEK',
+      exchange_rate REAL DEFAULT 1,
+      total_amount REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // BLERJE HAS — bulk gold-jewelry purchases (paid in cash, does NOT enter product inventory).
+  // The batch buys ready-made items by total gram weight; later they are split/weighed
+  // individually and moved into the products table via has_purchase_items.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS has_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      purchase_no TEXT NOT NULL,
+      supplier_name TEXT DEFAULT '',
+      supplier_nipt TEXT DEFAULT '',
+      gram REAL DEFAULT 0,
+      price_per_gram REAL DEFAULT 0,
+      currency TEXT DEFAULT 'EUR',
+      exchange_rate REAL DEFAULT 1,
+      total_amount REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 

@@ -188,8 +188,10 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
   const [from, setFrom]       = useState(getMonthStart())
   const [to, setTo]           = useState(getToday())
   const [filter, setFilter]   = useState('')
+  const [category, setCategory] = useState('')
   const [rows, setRows]       = useState([])
   const [totals, setTotals]   = useState(null)
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [docsRow, setDocsRow] = useState(null)
@@ -200,9 +202,11 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     try {
       const params = new URLSearchParams({ from, to })
       if (filter.trim()) params.set('q', filter.trim())
+      if (category) params.set('category', category)
       const data = await fetch(`/api/reports/purchase-items?${params}`).then(r => r.json())
       setRows(Array.isArray(data?.rows) ? data.rows : [])
       setTotals(data?.totals || null)
+      if (Array.isArray(data?.categories)) setCategories(data.categories)
       setSearched(true)
     } catch (e) {
       console.error(e)
@@ -210,7 +214,7 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }, [from, to, filter])
+  }, [from, to, filter, category])
 
   useEffect(() => { load() }, []) // eslint-disable-line
 
@@ -262,7 +266,7 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
       </div>
 
       <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
           <div>
             <label className="form-label">Nga data</label>
             <input type="date" value={from} max={to}
@@ -274,10 +278,17 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
               onChange={e => setTo(e.target.value)} className="input-field" />
           </div>
           <ProductFilterPicker value={filter} onChange={setFilter} />
+          <div>
+            <label className="form-label">Kategoria</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} className="input-field">
+              <option value="">Të gjitha</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
           <div className="flex gap-2">
             <button onClick={load} className="btn-primary flex-1">🔎 Kërko</button>
             <button
-              onClick={() => { setFilter(''); setFrom(getMonthStart()); setTo(getToday()) }}
+              onClick={() => { setFilter(''); setCategory(''); setFrom(getMonthStart()); setTo(getToday()) }}
               className="btn-secondary"
               title="Pastro filtrat"
             >✕</button>

@@ -8,16 +8,14 @@ function fmt(v) {
   return x.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// Pjesa e faturës e paguar realisht me cash/POS (Banka dhe Borxhi trajtohen si të papaguara).
+// Pjesa e faturës e paguar realisht me cash/POS në momentin e regjistrimit.
 // Snapshot — nuk merr parasysh pagesat e mëvonshme nga Detyrime modal.
+// Për 'debt' merret parapagimi (mund të jetë > 0 nëse klienti la një pjesë kesh).
 function truePaidCashPos(inv) {
   const pm = inv.payment_method || 'cash'
   if (pm === 'mikse') return n(inv.paid_cash) + n(inv.paid_pos)
-  if (pm === 'cash' || pm === 'pos') {
-    const init = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
-    return init
-  }
-  return 0
+  const init = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
+  return init
 }
 
 function emptyItem() {
@@ -390,32 +388,28 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
   // Daily snapshot: use the amount paid AT INVOICE CREATION TIME (not the current state).
   // Later payments registered via the Detyrime Klienti modal show up in Detyrime + Analize
   // Veprime but must NOT shift the day's xhiro on the invoice list.
-  // Vetëm cash + POS llogariten si "të paguara" — Banka dhe Borxhi janë në pritje (të papaguara).
-  const totals = list.reduce((acc, inv) => {
+  // Vetëm cash + POS llogariten si "të paguara" — Borxhi është në pritje (i papaguar).
+  // Totalet grupohen sipas monedhës origjinale të faturës — nuk konvertohen në LEK.
+  const totalsByCur = list.reduce((acc, inv) => {
+    const cur = inv.currency || 'LEK'
+    if (!acc[cur]) acc[cur] = {
+      count: 0, gross: 0, disc: 0, sub: 0, vat: 0, tot: 0, paid: 0, due: 0,
+    }
+    const t = acc[cur]
     const initPaid = truePaidCashPos(inv)
     const initDue  = Math.max(0, n(inv.total_with_vat) - initPaid)
-    const rate = n(inv.exchange_rate) || 1
-    const gross = n(inv.subtotal_no_vat) + n(inv.total_discount)
-    acc.count += 1
-    acc.gross += gross
-    acc.disc  += n(inv.total_discount)
-    acc.sub  += n(inv.subtotal_no_vat)
-    acc.vat  += n(inv.total_vat)
-    acc.tot  += n(inv.total_with_vat)
-    acc.paid += initPaid
-    acc.due  += initDue
-    acc.grossLek += gross * rate
-    acc.discLek  += n(inv.total_discount) * rate
-    acc.subLek   += n(inv.subtotal_no_vat) * rate
-    acc.vatLek   += n(inv.total_vat) * rate
-    acc.totLek   += n(inv.total_with_vat) * rate
-    acc.paidLek  += initPaid * rate
-    acc.dueLek   += initDue * rate
+    const gross    = n(inv.subtotal_no_vat) + n(inv.total_discount)
+    t.count += 1
+    t.gross += gross
+    t.disc  += n(inv.total_discount)
+    t.sub   += n(inv.subtotal_no_vat)
+    t.vat   += n(inv.total_vat)
+    t.tot   += n(inv.total_with_vat)
+    t.paid  += initPaid
+    t.due   += initDue
     return acc
-  }, {
-    count: 0, gross: 0, disc: 0, sub: 0, vat: 0, tot: 0, paid: 0, due: 0,
-    grossLek: 0, discLek: 0, subLek: 0, vatLek: 0, totLek: 0, paidLek: 0, dueLek: 0,
-  })
+  }, {})
+  const currenciesInList = Object.keys(totalsByCur).sort()
 
   const filtersActive = fc || fCurrency !== 'all' || fPayment !== 'all'
 
@@ -483,7 +477,6 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
             <option value="mikse">🔀 Mikse</option>
             <option value="cash">💵 Cash</option>
             <option value="pos">💳 POS</option>
-            <option value="bank">🏦 Bankë</option>
             <option value="debt">⚠️ Borxh</option>
           </select>
         </div>
@@ -531,14 +524,12 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
               {list.map(inv => {
                 // Snapshot from the invoice's creation moment — later payments via the
                 // Detyrime Klienti modal are ignored here so daily xhiro stays stable.
-                // Vetëm pjesa cash + POS quhet e paguar; Banka/Borxhi shfaqen si të papaguara.
+                // Vetëm pjesa cash + POS quhet e paguar; Borxhi shfaqet si i papaguar.
                 const initPaid = truePaidCashPos(inv)
                 const due = Math.max(0, n(inv.total_with_vat) - initPaid)
                 const pm  = inv.payment_method
                 const pmBadge = pm === 'debt'
                   ? <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
-                  : pm === 'bank'
-                  ? <span className="badge bg-blue-100 text-blue-700">🏦 Bankë</span>
                   : pm === 'pos'
                   ? <span className="badge bg-purple-100 text-purple-700">💳 POS</span>
                   : pm === 'mikse'
@@ -639,23 +630,28 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
               )})}
             </tbody>
             <tfoot className="bg-emerald-50 border-t-2 border-emerald-300">
-              <tr>
-                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 uppercase tracking-wide">
-                  💵 TOTAL CASH (LEK) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.grossLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
-                  {totals.discLek > 0.005 ? `-${fmt(totals.discLek)}` : '—'}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.subLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.vatLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(totals.totLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 text-base">{fmt(totals.paidLek)}</td>
-                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueLek > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
-                  {totals.dueLek > 0.005 ? fmt(totals.dueLek) : '✓'}
-                </td>
-                <td></td>
-              </tr>
+              {currenciesInList.map((cur, idx) => {
+                const t = totalsByCur[cur]
+                return (
+                  <tr key={cur} className={idx > 0 ? 'border-t border-emerald-200' : ''}>
+                    <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 uppercase tracking-wide">
+                      💵 TOTAL ({cur}) <span className="text-[10px] font-normal text-emerald-600">— {t.count} {t.count === 1 ? 'faturë' : 'fatura'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.gross)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
+                      {t.disc > 0.005 ? `-${fmt(t.disc)}` : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.sub)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.vat)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(t.tot)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 text-base">{fmt(t.paid)}</td>
+                    <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                      {t.due > 0.005 ? fmt(t.due) : '✓'}
+                    </td>
+                    <td></td>
+                  </tr>
+                )
+              })}
             </tfoot>
           </table>
         )}
@@ -680,7 +676,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
   // Mixed-payment breakdown (used only when paymentMethod === 'mikse')
   const [paidCash, setPaidCash]       = useState('')
   const [paidPos,  setPaidPos]        = useState('')
-  const [paidBank, setPaidBank]       = useState('')
   const [notes, setNotes]             = useState('')
   const [items, setItems]             = useState([emptyItem()])
   const [allRates, setAllRates]       = useState({ LEK: 1 })
@@ -709,7 +704,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           })
           setCurrency(inv.currency || 'LEK')
           setExchangeRate(inv.exchange_rate || 1)
-          setPaymentMethod(['cash','bank','debt','pos','mikse'].includes(inv.payment_method) ? inv.payment_method : 'cash')
+          setPaymentMethod(['cash','debt','pos','mikse'].includes(inv.payment_method) ? inv.payment_method : 'cash')
           // Show what was recorded at sale registration, not the current paid total —
           // later payments from Detyrime Klienti must not shift the editor either.
           const initPaid = inv.initial_amount_paid != null ? inv.initial_amount_paid : inv.amount_paid
@@ -717,7 +712,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           setPaidTouched(true)
           setPaidCash(inv.paid_cash != null ? String(inv.paid_cash) : '')
           setPaidPos (inv.paid_pos  != null ? String(inv.paid_pos)  : '')
-          setPaidBank(inv.paid_bank != null ? String(inv.paid_bank) : '')
           setNotes(inv.notes || '')
           setItems((inv.items && inv.items.length > 0) ? inv.items : [emptyItem()])
         } else {
@@ -850,7 +844,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
         amount_paid: amountPaid === '' ? null : parseFloat(amountPaid),
         paid_cash: paymentMethod === 'mikse' ? (parseFloat(paidCash) || 0) : 0,
         paid_pos:  paymentMethod === 'mikse' ? (parseFloat(paidPos)  || 0) : 0,
-        paid_bank: paymentMethod === 'mikse' ? (parseFloat(paidBank) || 0) : 0,
         notes,
         items: validItems,
       }
@@ -965,14 +958,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
             >💳 POS</button>
             <button
               type="button"
-              onClick={() => { setPaymentMethod('bank'); setAmountPaid('0'); setPaidTouched(true) }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'bank' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-700'
-              }`}
-              title="Shuma e Paguar = 0 (pa paguar = totali, në pritje)"
-            >🏦 Bankë</button>
-            <button
-              type="button"
               onClick={() => { setPaymentMethod('debt'); setAmountPaid('0'); setPaidTouched(true) }}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
                 paymentMethod === 'debt' ? 'bg-white shadow-sm text-amber-700' : 'text-slate-500 hover:text-slate-700'
@@ -982,27 +967,25 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
             <button
               type="button"
               onClick={() => {
-                // Default split: half cash, half bank (matches the common "50/50" case)
                 const half = +(totals.tot / 2).toFixed(2)
                 setPaymentMethod('mikse')
                 setPaidCash(String(half))
-                setPaidBank(String(+(totals.tot - half).toFixed(2)))
-                setPaidPos('')
+                setPaidPos(String(+(totals.tot - half).toFixed(2)))
                 setPaidTouched(true)
               }}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
                 paymentMethod === 'mikse' ? 'bg-white shadow-sm text-teal-700' : 'text-slate-500 hover:text-slate-700'
               }`}
-              title="Ndaj pagesën në Cash + POS + Bankë (psh. 50% cash, 50% bankë)"
+              title="Ndaj pagesën në Cash + POS (psh. 50% cash, 50% pos)"
             >🔀 Mikse</button>
           </div>
           {paymentMethod === 'mikse' ? (() => {
             const tot = totals.tot
-            const sumPaid = +(n(paidCash) + n(paidPos) + n(paidBank)).toFixed(2)
+            const sumPaid = +(n(paidCash) + n(paidPos)).toFixed(2)
             const due = +(tot - sumPaid).toFixed(2)
             return (
               <div className="mt-3 space-y-3">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] text-emerald-700 uppercase font-semibold">💵 Cash ({currency})</label>
                     <input type="number" step="0.01" min="0" value={paidCash}
@@ -1013,12 +996,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
                     <label className="text-[10px] text-purple-700 uppercase font-semibold">💳 POS ({currency})</label>
                     <input type="number" step="0.01" min="0" value={paidPos}
                       onChange={e => setPaidPos(e.target.value)}
-                      className="input-field tabular-nums" placeholder="0.00" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-blue-700 uppercase font-semibold">🏦 Bankë ({currency})</label>
-                    <input type="number" step="0.01" min="0" value={paidBank}
-                      onChange={e => setPaidBank(e.target.value)}
                       className="input-field tabular-nums" placeholder="0.00" />
                   </div>
                 </div>

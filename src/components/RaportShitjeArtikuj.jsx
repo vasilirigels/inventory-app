@@ -177,11 +177,14 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
   const [filter, setFilter]   = useState('')
   const [material, setMaterial] = useState('')
   const [rows, setRows]       = useState([])
+  const [rowsDetailed, setRowsDetailed] = useState([])
   const [totals, setTotals]   = useState(null)
   const [totalsByMaterial, setTotalsByMaterial] = useState(null)
+  const [totalsByCurrency, setTotalsByCurrency] = useState(null)
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [docsRow, setDocsRow] = useState(null)
+  const [viewMode, setViewMode] = useState('detailed')  // 'aggregated' | 'detailed'
 
   const load = useCallback(async () => {
     if (!from || !to) return
@@ -190,20 +193,29 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
       const params = new URLSearchParams({ from, to })
       if (filter.trim()) params.set('q', filter.trim())
       if (material === 'flori' || material === 'diamant') params.set('material', material)
+      if (viewMode === 'detailed') params.set('detailed', '1')
       const data = await fetch(`/api/reports/sales-items?${params}`).then(r => r.json())
       setRows(Array.isArray(data?.rows) ? data.rows : [])
+      setRowsDetailed(Array.isArray(data?.rowsDetailed) ? data.rowsDetailed : [])
       setTotals(data?.totals || null)
       setTotalsByMaterial(data?.totalsByMaterial || null)
+      setTotalsByCurrency(data?.totalsByCurrency || null)
       setSearched(true)
     } catch (e) {
       console.error(e)
-      setRows([]); setTotals(null); setTotalsByMaterial(null)
+      setRows([]); setRowsDetailed([]); setTotals(null); setTotalsByMaterial(null); setTotalsByCurrency(null)
     } finally {
       setLoading(false)
     }
-  }, [from, to, filter, material])
+  }, [from, to, filter, material, viewMode])
 
   useEffect(() => { load() }, []) // eslint-disable-line
+  // Kur ndryshohet mënyra e shikimit, rikthej të dhënat automatikisht
+  // nëse përdoruesi ka bërë tashmë një kërkim.
+  useEffect(() => {
+    if (searched) load()
+    // eslint-disable-next-line
+  }, [viewMode])
 
   const exportXlsx = () => {
     const matLabel = (m) => m === 'flori' ? 'Flori' : m === 'diamant' ? 'Diamant' : ''
@@ -247,7 +259,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     }
     if (totals) {
       out.push({
-        Barkodi: '', SKU: '', Artikulli: 'TOTALI', Kategoria: '', Materiali: '',
+        Barkodi: '', SKU: '', Artikulli: 'TOTALI në LEK (kombinuar)', Kategoria: '', Materiali: '',
         'Sasia': totals.qty,
         'Çm. Shitje (LEK)': '',
         'Zbritje (LEK)': totals.discount_lek,
@@ -256,6 +268,21 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
         'Vlera me TVSH (LEK)': totals.value_with_vat_lek,
         'Nr. Faturash': '',
       })
+    }
+    if (totalsByCurrency) {
+      for (const cur of Object.keys(totalsByCurrency).sort()) {
+        const t = totalsByCurrency[cur]
+        out.push({
+          Barkodi: '', SKU: '', Artikulli: `TOTAL (${cur})`, Kategoria: '', Materiali: '',
+          'Sasia': t.qty,
+          'Çm. Shitje (LEK)': '',
+          'Zbritje (LEK)': t.discount,
+          'Vlera pa TVSH (LEK)': t.value_no_vat,
+          'TVSH (LEK)': t.vat,
+          'Vlera me TVSH (LEK)': t.value_with_vat,
+          'Nr. Faturash': '',
+        })
+      }
     }
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(out)
@@ -270,7 +297,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
         <div>
           <h2 className="text-lg font-bold text-slate-800">Raport Shitje — Artikuj</h2>
           <p className="text-xs text-slate-500">
-            Burimi: Fatura Shitje · Të gjitha vlerat janë në LEK (të konvertuara me kursin e çdo fature)
+            Burimi: Fatura Shitje · Kolonat për çdo artikull janë në LEK (të konvertuara me kursin e çdo fature) · Totalet finale sipas monedhës origjinale
           </p>
         </div>
         <button onClick={exportXlsx} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
@@ -310,11 +337,151 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
         </div>
       </div>
 
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+          <button
+            type="button"
+            onClick={() => setViewMode('aggregated')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              viewMode === 'aggregated' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'
+            }`}
+            title="Grupuar sipas produktit (një rresht për artikull)"
+          >📦 Përmbledhur (sipas artikullit)</button>
+          <button
+            type="button"
+            onClick={() => setViewMode('detailed')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              viewMode === 'detailed' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'
+            }`}
+            title="Një rresht për çdo shitje (çdo faturë e ndarë)"
+          >🧾 I Detajuar (fatura të veçanta)</button>
+        </div>
+        {viewMode === 'detailed' && searched && (
+          <p className="text-[11px] text-slate-500">
+            {rowsDetailed.length} rreshta shitjeje
+          </p>
+        )}
+      </div>
+
       <div className="card p-0 overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
         ) : !searched ? (
           <div className="p-8 text-center text-slate-400 text-sm">Vendos filtrat dhe kliko Kërko.</div>
+        ) : viewMode === 'detailed' ? (
+          rowsDetailed.length === 0 ? (
+            <div className="p-10 text-center">
+              <div className="text-5xl mb-3">🧾</div>
+              <p className="text-slate-500">Nuk u gjetën shitje në këtë periudhë.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fature</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Barkodi</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Artikulli</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Materiali</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Mon.</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Sasia</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Çm. Shitje</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Zbritje %</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Vlera pa TVSH</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">TVSH</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Vlera me TVSH</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Hap</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowsDetailed.map((r, idx) => {
+                    const isForeign = (r.currency || 'LEK') !== 'LEK'
+                    return (
+                      <tr key={`${r.item_id}-${idx}`}
+                          className={`border-b border-slate-100 ${r.is_credit_note ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50'}`}>
+                        <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{r.date}</td>
+                        <td className="px-3 py-2 font-mono text-xs">
+                          <button
+                            onClick={() => onNavigate?.('fatura-shitje', { date: r.date, invoiceId: r.invoice_id })}
+                            className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                            title="Hap faturën"
+                          >{r.invoice_no}</button>
+                          {r.is_credit_note && <span className="ml-1 badge bg-red-100 text-red-700 text-[9px]">KREDIT</span>}
+                        </td>
+                        <td className="px-3 py-2 text-slate-800 text-xs">
+                          {r.customer_name || <span className="italic text-slate-400">—</span>}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-slate-600">{r.barcode || '—'}</td>
+                        <td className="px-3 py-2 text-slate-800">{r.name || <span className="italic text-slate-400">—</span>}</td>
+                        <td className="px-3 py-2 text-xs">
+                          {r.material === 'flori'
+                            ? <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 font-medium">🟡</span>
+                            : r.material === 'diamant'
+                            ? <span className="px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-800 font-medium">💎</span>
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className="badge bg-blue-100 text-blue-700 text-[10px]">{r.currency}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800">
+                          {fmtQty(r.qty)} <span className="text-[10px] text-slate-400">{r.unit}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                          {fmt(r.unit_price)}
+                          {isForeign && <div className="text-[10px] font-normal text-slate-500 italic">= {fmt(r.unit_price_lek)} LEK</div>}
+                        </td>
+                        <td className={`px-3 py-2 text-right tabular-nums ${r.discount_percent > 0 ? 'text-orange-600' : 'text-slate-400'}`}>
+                          {r.discount_percent > 0 ? `${r.discount_percent}%` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                          {fmt(r.value_no_vat)}
+                          {isForeign && <div className="text-[10px] font-normal text-slate-500 italic">= {fmt(r.value_no_vat_lek)} LEK</div>}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                          {fmt(r.vat)}
+                          {isForeign && r.vat > 0.005 && <div className="text-[10px] font-normal text-slate-500 italic">= {fmt(r.vat_lek)} LEK</div>}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700">
+                          {fmt(r.value_with_vat)}
+                          {isForeign && <div className="text-[10px] font-normal text-blue-600/70 italic">= {fmt(r.value_with_vat_lek)} LEK</div>}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => onNavigate?.('fatura-shitje', { date: r.date, invoiceId: r.invoice_id })}
+                            className="px-2 py-0.5 rounded-md text-xs font-semibold text-blue-600 hover:bg-blue-50"
+                            title="Hap faturën"
+                          >📄</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                {totalsByCurrency && Object.keys(totalsByCurrency).length > 0 && (
+                  <tfoot className="bg-emerald-50 border-t-2 border-emerald-300">
+                    {Object.keys(totalsByCurrency).sort().map((cur, idx) => {
+                      const t = totalsByCurrency[cur]
+                      return (
+                        <tr key={cur} className={`font-bold text-xs ${idx > 0 ? 'border-t border-emerald-200' : ''}`}>
+                          <td colSpan={7} className="px-3 py-2 text-right text-emerald-700 uppercase tracking-wide">💵 TOTAL ({cur}):</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtQty(t.qty)}</td>
+                          <td></td>
+                          <td className="px-3 py-2 text-right tabular-nums text-orange-700">
+                            {t.discount > 0.005 ? `-${fmt(t.discount)}` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmt(t.value_no_vat)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(t.vat)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-emerald-800 text-sm">{fmt(t.value_with_vat)}</td>
+                          <td></td>
+                        </tr>
+                      )
+                    })}
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )
         ) : rows.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">📊</div>
@@ -417,18 +584,35 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       <td></td>
                     </tr>
                   )}
-                  <tr className="font-bold text-xs">
-                    <td colSpan={4} className="px-3 py-2 text-right text-slate-700 uppercase tracking-wide">TOTALI (LEK):</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtQty(totals.qty)}</td>
+                  <tr className="font-bold text-xs bg-slate-100 border-t border-slate-300">
+                    <td colSpan={4} className="px-3 py-2 text-right text-slate-500 uppercase tracking-wide">TOTALI në LEK (kombinuar):</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmtQty(totals.qty)}</td>
                     <td></td>
-                    <td className="px-3 py-2 text-right tabular-nums text-orange-700">
+                    <td className="px-3 py-2 text-right tabular-nums text-orange-600">
                       {totals.discount_lek > 0.005 ? `-${fmt(totals.discount_lek)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmt(totals.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(totals.vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-blue-800 text-sm">{fmt(totals.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(totals.value_no_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{fmt(totals.vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(totals.value_with_vat_lek)}</td>
                     <td></td>
                   </tr>
+                  {totalsByCurrency && Object.keys(totalsByCurrency).sort().map((cur, idx, arr) => {
+                    const t = totalsByCurrency[cur]
+                    return (
+                      <tr key={cur} className={`font-bold text-xs bg-emerald-50 ${idx === 0 ? 'border-t-2 border-emerald-300' : 'border-t border-emerald-200'}`}>
+                        <td colSpan={4} className="px-3 py-2 text-right text-emerald-700 uppercase tracking-wide">💵 TOTAL ({cur}):</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtQty(t.qty)}</td>
+                        <td></td>
+                        <td className="px-3 py-2 text-right tabular-nums text-orange-700">
+                          {t.discount > 0.005 ? `-${fmt(t.discount)}` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmt(t.value_no_vat)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(t.vat)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-800 text-sm">{fmt(t.value_with_vat)}</td>
+                        <td></td>
+                      </tr>
+                    )
+                  })}
                 </tfoot>
               )}
             </table>

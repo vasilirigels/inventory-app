@@ -45,7 +45,7 @@
 
   /* ── Cards ── */
   .card {
-    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-5;
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-3 md:p-5;
   }
 
   /* ── Section title ── */

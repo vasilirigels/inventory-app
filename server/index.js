@@ -146,13 +146,19 @@ app.post('/api/daily/:date', async (req, res) => {
       'debt_settlement_chf', 'debt_settlement_has'
     ];
 
-    const values = fields.map(f => data[f] || 0);
-
     if (existing) {
-      const setClause = fields.map(f => `${f} = ?`).join(', ');
+      // Përditëso VETËM fushat që janë dërguar në body — mos i rivendos zero
+      // fushat e tjera, sepse nën-faqet e sidebar-it dërgojnë vetëm rreshtat
+      // e vet (p.sh. Konvertim Valute dërgon vetëm conv_*).
+      const providedFields = fields.filter(f => Object.prototype.hasOwnProperty.call(data, f));
+      if (providedFields.length === 0) return res.json({ success: true, updated: 0 });
+      const setClause = providedFields.map(f => `${f} = ?`).join(', ');
+      const values    = providedFields.map(f => parseFloat(data[f]) || 0);
       run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...values, date]);
     } else {
-      const cols = fields.join(', ');
+      // Insert i ri — fushat që s'janë në body marrin default 0
+      const values = fields.map(f => parseFloat(data[f]) || 0);
+      const cols   = fields.join(', ');
       const placeholders = fields.map(() => '?').join(', ');
       run(
         `INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`,
@@ -1444,7 +1450,8 @@ app.delete('/api/invoice-payments/:id', async (req, res) => {
 app.get('/api/client-debts', async (req, res) => {
   try {
     const { q, nipt, name, from, to } = req.query;
-    // Detyrime tracks Bank + Debt invoices (and credit notes offsetting them); Cash + POS are paid in full and excluded
+    // Detyrime tracks any invoice with unpaid balance: Bank/Debt/Mikse (Cash + POS paid in full).
+    // Tolerance 0.005 to guard against float residuals leaving 0.00... amount_due behind.
     let sql = `
       SELECT i.*,
         (SELECT date   FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
@@ -1452,9 +1459,8 @@ app.get('/api/client-debts', async (req, res) => {
         (SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = i.id) AS payment_count
       FROM invoices i
       WHERE COALESCE(i.cancelled, 0) = 0
-        AND i.payment_method IN ('bank', 'debt')
-        AND (COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0
-             OR COALESCE(i.is_credit_note, 0) = 1)`;
+        AND i.payment_method IN ('bank', 'debt', 'mikse')
+        AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005`;
     const params = [];
     if (nipt) {
       sql += ' AND i.customer_nipt = ?';
@@ -1538,10 +1544,10 @@ app.get('/api/client-debts/summary', async (req, res) => {
   try {
     const onlyDebt = req.query.onlyDebt === '1' || req.query.onlyDebt === 'true';
     const { from, to } = req.query;
-    // Only Bank + Debt invoices count toward debts; Cash + POS excluded entirely
+    // Any invoice with an unpaid balance counts toward client debts: Bank/Debt/Mikse.
     const conds = [
       "COALESCE(cancelled, 0) = 0",
-      "payment_method IN ('bank','debt')",
+      "payment_method IN ('bank','debt','mikse')",
     ];
     const params = [];
     if (from) { conds.push('date >= ?'); params.push(from); }
@@ -1560,7 +1566,7 @@ app.get('/api/client-debts/summary', async (req, res) => {
       FROM invoices
       ${where}
       GROUP BY client_key, customer_name, customer_nipt, currency
-      ${onlyDebt ? 'HAVING SUM(COALESCE(amount_due, total_with_vat - amount_paid)) > 0' : ''}
+      ${onlyDebt ? 'HAVING SUM(COALESCE(amount_due, total_with_vat - amount_paid)) > 0.005' : ''}
       ORDER BY
         CASE WHEN customer_name IS NULL OR customer_name = '' THEN 1 ELSE 0 END,
         customer_name COLLATE NOCASE ASC,
@@ -1735,9 +1741,12 @@ function applyProductPrices(items) {
       updates.push('vat_rate = ?');
       params.push(parseFloat(it.vat_rate) || 0);
     }
-    if (it.material === 'flori' || it.material === 'diamant') {
+    if (it.material === 'flori' || it.material === 'diamant' || it.material === 'ora') {
       updates.push('material = ?');
       params.push(it.material);
+      const CATEGORY_BY_MATERIAL = { flori: 'Flori', diamant: 'Diamant', ora: 'Ora' };
+      updates.push('category = ?');
+      params.push(CATEGORY_BY_MATERIAL[it.material]);
     }
     if (updates.length === 0) continue;
     params.push(it.product_id);
@@ -1927,6 +1936,275 @@ app.delete('/api/purchase-invoices/:id', async (req, res) => {
     run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
     run('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
     run('DELETE FROM purchase_invoices WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// GOLD SPOT PRICE — EUR / gram (cached ~5 min)
+// Sources: gold-api.com (USD/oz) + frankfurter.dev (EUR/USD)
+// ============================================================
+const GRAM_PER_TROY_OZ = 31.1034768;
+const GOLD_CACHE_TTL_MS = 30 * 1000;
+let goldPriceCache = { value: null, at: 0 };
+
+async function fetchGoldSpotEurPerGram(force = false) {
+  const now = Date.now();
+  if (!force && goldPriceCache.value && (now - goldPriceCache.at) < GOLD_CACHE_TTL_MS) {
+    return goldPriceCache.value;
+  }
+  const [goldRes, fxRes] = await Promise.all([
+    fetch('https://api.gold-api.com/price/XAU'),
+    fetch('https://api.frankfurter.dev/v1/latest?from=USD&to=EUR'),
+  ]);
+  if (!goldRes.ok) throw new Error(`gold-api ${goldRes.status}`);
+  if (!fxRes.ok)   throw new Error(`fx-api ${fxRes.status}`);
+  const gold = await goldRes.json();
+  const fx   = await fxRes.json();
+  const usdPerOz  = parseFloat(gold.price);
+  const eurPerUsd = parseFloat(fx?.rates?.EUR);
+  if (!usdPerOz || !eurPerUsd) throw new Error('missing price data');
+  const eurPerOz   = usdPerOz * eurPerUsd;
+  const eurPerGram = eurPerOz / GRAM_PER_TROY_OZ;
+  const payload = {
+    eur_per_gram: +eurPerGram.toFixed(2),
+    eur_per_oz:   +eurPerOz.toFixed(2),
+    usd_per_oz:   +usdPerOz.toFixed(2),
+    eur_per_usd:  +eurPerUsd.toFixed(6),
+    updated_at:   gold.updatedAt || new Date().toISOString(),
+    source:       'gold-api.com + frankfurter.dev',
+  };
+  goldPriceCache = { value: payload, at: now };
+  return payload;
+}
+
+app.get('/api/gold-spot-price', async (req, res) => {
+  try {
+    const force = req.query.force === '1' || req.query.force === 'true';
+    const data = await fetchGoldSpotEurPerGram(force);
+    res.json(data);
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// ============================================================
+// KONVERTIM HURDA — scrap gold purchases (paid in cash)
+// Does NOT touch product inventory. Grams accumulate in this table.
+// Deducted from arka via the arka-ditore endpoint.
+// ============================================================
+function nextHurdaNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const row = queryOne("SELECT COUNT(*) AS c FROM hurda_purchases WHERE date LIKE ?", [year + '%']);
+  const next = (row?.c || 0) + 1;
+  return `KH${year}-${String(next).padStart(5, '0')}`;
+}
+
+function computeHurdaTotal(d) {
+  // Klienti dërgon total_amount të llogaritur në monedhën e pagesës (sepse
+  // price_per_gram tashmë është gjithmonë në EUR, ndërsa pagesa mund të jetë
+  // në LEK/EUR/USD/GBP/CHF — konvertimi bëhet klientit me kurset e datës).
+  if (d.total_amount != null && d.total_amount !== '') {
+    return +parseFloat(d.total_amount).toFixed(2) || 0;
+  }
+  const g = parseFloat(d.gram) || 0;
+  const p = parseFloat(d.price_per_gram) || 0;
+  return +(g * p).toFixed(2);
+}
+
+app.get('/api/hurda-purchases/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ purchase_no: nextHurdaNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hurda-purchases/by-date/:date', async (req, res) => {
+  try {
+    res.json(queryAll(
+      'SELECT * FROM hurda_purchases WHERE date = ? ORDER BY id ASC',
+      [req.params.date]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hurda-purchases/by-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    res.json(queryAll(
+      'SELECT * FROM hurda_purchases WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC',
+      [from, to]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hurda-purchases/:id', async (req, res) => {
+  try {
+    const row = queryOne('SELECT * FROM hurda_purchases WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hurda-purchases', async (req, res) => {
+  try {
+    const d = req.body || {};
+    if (!d.date) return res.status(400).json({ error: 'date required' });
+    const purchase_no = (d.purchase_no || '').trim() || nextHurdaNo(d.date);
+    const total_amount = computeHurdaTotal(d);
+    run(
+      `INSERT INTO hurda_purchases (date, purchase_no, supplier_name, supplier_nipt,
+        gram, price_per_gram, currency, exchange_rate, total_amount, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        d.date, purchase_no,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+      ]
+    );
+    const created = queryOne('SELECT id FROM hurda_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
+    res.json({ success: true, id: created?.id, purchase_no });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/hurda-purchases/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const existing = queryOne('SELECT * FROM hurda_purchases WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const total_amount = computeHurdaTotal(d);
+    run(
+      `UPDATE hurda_purchases SET date=?, supplier_name=?, supplier_nipt=?,
+        gram=?, price_per_gram=?, currency=?, exchange_rate=?, total_amount=?, notes=?
+       WHERE id=?`,
+      [
+        d.date || existing.date,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+        id,
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/hurda-purchases/:id', async (req, res) => {
+  try {
+    run('DELETE FROM hurda_purchases WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// BLERJE HAS — bulk gold-jewelry batch purchases (paid in cash).
+// Same shape as hurda_purchases: total grams + price/gram + supplier + cash payment.
+// Deducted from arka via the arka-ditore endpoint (like hurda).
+// ============================================================
+function nextHasNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const row = queryOne("SELECT COUNT(*) AS c FROM has_purchases WHERE date LIKE ?", [year + '%']);
+  const next = (row?.c || 0) + 1;
+  return `BH${year}-${String(next).padStart(5, '0')}`;
+}
+
+function computeHasTotal(d) {
+  if (d.total_amount != null && d.total_amount !== '') {
+    return +parseFloat(d.total_amount).toFixed(2) || 0;
+  }
+  const g = parseFloat(d.gram) || 0;
+  const p = parseFloat(d.price_per_gram) || 0;
+  return +(g * p).toFixed(2);
+}
+
+app.get('/api/has-purchases/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ purchase_no: nextHasNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/has-purchases/by-date/:date', async (req, res) => {
+  try {
+    res.json(queryAll(
+      'SELECT * FROM has_purchases WHERE date = ? ORDER BY id ASC',
+      [req.params.date]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/has-purchases/by-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    res.json(queryAll(
+      'SELECT * FROM has_purchases WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC',
+      [from, to]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/has-purchases/:id', async (req, res) => {
+  try {
+    const row = queryOne('SELECT * FROM has_purchases WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/has-purchases', async (req, res) => {
+  try {
+    const d = req.body || {};
+    if (!d.date) return res.status(400).json({ error: 'date required' });
+    const purchase_no = (d.purchase_no || '').trim() || nextHasNo(d.date);
+    const total_amount = computeHasTotal(d);
+    run(
+      `INSERT INTO has_purchases (date, purchase_no, supplier_name, supplier_nipt,
+        gram, price_per_gram, currency, exchange_rate, total_amount, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        d.date, purchase_no,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'EUR', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+      ]
+    );
+    const created = queryOne('SELECT id FROM has_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
+    res.json({ success: true, id: created?.id, purchase_no });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/has-purchases/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const existing = queryOne('SELECT * FROM has_purchases WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const total_amount = computeHasTotal(d);
+    run(
+      `UPDATE has_purchases SET date=?, supplier_name=?, supplier_nipt=?,
+        gram=?, price_per_gram=?, currency=?, exchange_rate=?, total_amount=?, notes=?
+       WHERE id=?`,
+      [
+        d.date || existing.date,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'EUR', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+        id,
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/has-purchases/:id', async (req, res) => {
+  try {
+    run('DELETE FROM has_purchases WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2494,6 +2772,7 @@ app.get('/api/inventory-summary', async (req, res) => {
     );
 
     // IN — purchase invoices (price in LEK = price * exchange_rate)
+    // Filtruar sipas periudhës — për shfaqjen e aktivitetit hyrës në periudhë.
     const inPurchase = queryAll(
       `SELECT pi.product_id AS pid,
               SUM(pi.qty) AS qty,
@@ -2508,6 +2787,7 @@ app.get('/api/inventory-summary', async (req, res) => {
     );
 
     // IN — magazina hyrje (pa TVSH → TVSH = 0, me TVSH = pa TVSH)
+    // Filtruar sipas periudhës — për shfaqjen e aktivitetit hyrës në periudhë.
     const inMag = queryAll(
       `SELECT mi.product_id AS pid,
               SUM(mi.qty) AS qty,
@@ -2519,10 +2799,43 @@ app.get('/api/inventory-summary', async (req, res) => {
       dateParams()
     );
 
+    // "Deri në `to`" — për llogaritjen e kostos mesatare të ponderuar që reflekton
+    // të gjithë historikun e blerjeve deri në fund të periudhës. Kështu një artikull
+    // i shitur sot që u ble muajin e kaluar merr koston reale të blerjes, jo 0.
+    const upToCond = (parent) => to ? `AND ${parent}.date <= ?` : '';
+    const upToParams = () => to ? [to] : [];
+
+    const inPurchaseHist = queryAll(
+      `SELECT pi.product_id AS pid,
+              SUM(pi.qty) AS qty,
+              SUM(pi.qty * pi.purchase_price_no_vat * COALESCE(p.exchange_rate, 1)) AS value_no_vat_lek,
+              SUM(pi.vat_amount      * COALESCE(p.exchange_rate, 1)) AS vat_lek,
+              SUM(pi.total_with_vat  * COALESCE(p.exchange_rate, 1)) AS value_with_vat_lek
+       FROM purchase_items pi
+       JOIN purchase_invoices p ON p.id = pi.purchase_id
+       WHERE pi.product_id IS NOT NULL ${upToCond('p')}
+       GROUP BY pi.product_id`,
+      upToParams()
+    );
+
+    const inMagHist = queryAll(
+      `SELECT mi.product_id AS pid,
+              SUM(mi.qty) AS qty,
+              SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek
+       FROM magazina_hyrje_items mi
+       JOIN magazina_hyrje m ON m.id = mi.magazina_id
+       WHERE mi.product_id IS NOT NULL ${upToCond('m')}
+       GROUP BY mi.product_id`,
+      upToParams()
+    );
+
     // OUT — sales (skip cancelled; credit notes have negative qty so they
     // self-net within the sum)
     const outSales = queryAll(
-      `SELECT ii.product_id AS pid, SUM(ii.qty) AS qty
+      `SELECT ii.product_id AS pid,
+              SUM(ii.qty) AS qty,
+              SUM(ii.subtotal_no_vat * COALESCE(i.exchange_rate, 1)) AS sales_no_vat_lek,
+              SUM(ii.total_with_vat  * COALESCE(i.exchange_rate, 1)) AS sales_with_vat_lek
        FROM invoice_items ii
        JOIN invoices i ON i.id = ii.invoice_id
        WHERE ii.product_id IS NOT NULL
@@ -2547,36 +2860,55 @@ app.get('/api/inventory-summary', async (req, res) => {
       for (const r of rows) m.set(r[key], r);
       return m;
     };
-    const mInPurch = mapBy(inPurchase);
-    const mInMag   = mapBy(inMag);
-    const mOutSale = mapBy(outSales);
-    const mOutMag  = mapBy(outMag);
+    const mInPurch     = mapBy(inPurchase);
+    const mInMag       = mapBy(inMag);
+    const mInPurchHist = mapBy(inPurchaseHist);
+    const mInMagHist   = mapBy(inMagHist);
+    const mOutSale     = mapBy(outSales);
+    const mOutMag      = mapBy(outMag);
 
     const rows = products.map(p => {
       const ip = mInPurch.get(p.id) || { qty: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 };
       const im = mInMag.get(p.id)   || { qty: 0, value_no_vat_lek: 0 };
-      const os = mOutSale.get(p.id) || { qty: 0 };
+      const iph = mInPurchHist.get(p.id) || { qty: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 };
+      const imh = mInMagHist.get(p.id)   || { qty: 0, value_no_vat_lek: 0 };
+      const os = mOutSale.get(p.id) || { qty: 0, sales_no_vat_lek: 0, sales_with_vat_lek: 0 };
       const om = mOutMag.get(p.id)  || { qty: 0 };
 
+      // Aktivitet HYRËS për periudhën (për shfaqje në rresht)
       const qty_in_purchase    = +(ip.qty || 0);
       const qty_in_magazina    = +(im.qty || 0);
       const total_in           = qty_in_purchase + qty_in_magazina;
-
-      const value_in_no_vat_lek   = +((ip.value_no_vat_lek   || 0) + (im.value_no_vat_lek || 0));
-      const vat_in_lek            = +(ip.vat_lek            || 0);
-      const value_in_with_vat_lek = +((ip.value_with_vat_lek || 0) + (im.value_no_vat_lek || 0));
 
       const qty_out_sales     = +(os.qty || 0);
       const qty_out_magazina  = +(om.qty || 0);
       const total_out         = qty_out_sales + qty_out_magazina;
       const net_qty           = +(total_in - total_out).toFixed(4);
 
-      const avg_price_no_vat_lek   = total_in > 0 ? +(value_in_no_vat_lek   / total_in).toFixed(2) : 0;
-      const avg_price_with_vat_lek = total_in > 0 ? +(value_in_with_vat_lek / total_in).toFixed(2) : 0;
+      // Kosto mesatare e ponderuar HISTORIKE (nga të gjitha blerjet deri në `to`)
+      // — përdoret për COGS dhe vlerën e stokut. Kështu artikujt e shitur nga
+      // stoku i vjetër marrin koston reale, jo 0 kur nuk ka blerje në periudhë.
+      const total_in_hist = +((iph.qty || 0) + (imh.qty || 0));
+      const value_in_no_vat_lek_hist   = +((iph.value_no_vat_lek   || 0) + (imh.value_no_vat_lek || 0));
+      const value_in_with_vat_lek_hist = +((iph.value_with_vat_lek || 0) + (imh.value_no_vat_lek || 0));
+
+      const avg_price_no_vat_lek   = total_in_hist > 0 ? +(value_in_no_vat_lek_hist   / total_in_hist).toFixed(2) : 0;
+      const avg_price_with_vat_lek = total_in_hist > 0 ? +(value_in_with_vat_lek_hist / total_in_hist).toFixed(2) : 0;
 
       const total_value_no_vat_lek   = +(net_qty * avg_price_no_vat_lek).toFixed(2);
       const total_value_with_vat_lek = +(net_qty * avg_price_with_vat_lek).toFixed(2);
       const total_value_vat_lek      = +(total_value_with_vat_lek - total_value_no_vat_lek).toFixed(2);
+
+      // Profit — COGS on units actually sold (excludes magazina dalje transfers).
+      // Përdor kosto historike (jo periodike) → tregon fitim real edhe kur në
+      // periudhë nuk ka pasur blerje.
+      const sales_no_vat_lek    = +(os.sales_no_vat_lek   || 0);
+      const sales_with_vat_lek  = +(os.sales_with_vat_lek || 0);
+      const cogs_no_vat_lek     = +(qty_out_sales * avg_price_no_vat_lek).toFixed(2);
+      const profit_no_vat_lek   = +(sales_no_vat_lek - cogs_no_vat_lek).toFixed(2);
+      const profit_margin_pct   = sales_no_vat_lek > 0
+        ? +((profit_no_vat_lek / sales_no_vat_lek) * 100).toFixed(2)
+        : 0;
 
       return {
         id: p.id, name: p.name, sku: p.sku, barcode: p.barcode,
@@ -2591,6 +2923,9 @@ app.get('/api/inventory-summary', async (req, res) => {
         // Pa TVSH / Me TVSH
         avg_price_no_vat_lek, avg_price_with_vat_lek,
         total_value_no_vat_lek, total_value_vat_lek, total_value_with_vat_lek,
+        // Fitim
+        sales_no_vat_lek, sales_with_vat_lek,
+        cogs_no_vat_lek, profit_no_vat_lek, profit_margin_pct,
       };
     });
 
@@ -2602,10 +2937,14 @@ app.get('/api/inventory-summary', async (req, res) => {
       total_value_no_vat_lek:   a.total_value_no_vat_lek   + r.total_value_no_vat_lek,
       total_value_vat_lek:      a.total_value_vat_lek      + r.total_value_vat_lek,
       total_value_with_vat_lek: a.total_value_with_vat_lek + r.total_value_with_vat_lek,
+      sales_no_vat_lek:         a.sales_no_vat_lek         + r.sales_no_vat_lek,
+      cogs_no_vat_lek:          a.cogs_no_vat_lek          + r.cogs_no_vat_lek,
+      profit_no_vat_lek:        a.profit_no_vat_lek        + r.profit_no_vat_lek,
     }), {
       total_in: 0, total_out: 0, net_qty: 0,
       total_value_lek: 0,
       total_value_no_vat_lek: 0, total_value_vat_lek: 0, total_value_with_vat_lek: 0,
+      sales_no_vat_lek: 0, cogs_no_vat_lek: 0, profit_no_vat_lek: 0,
     });
 
     res.json({ rows, totals });
@@ -2629,180 +2968,309 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const { date } = req.params;
     if (!date) return res.status(400).json({ error: 'date required' });
 
-    // Për çdo faturë, ndaj totalin në 4 pjesë: cash, pos, bank, debt.
-    //   pm='cash'  → cash_part = total
-    //   pm='pos'   → pos_part  = total
-    //   pm='bank'  → bank_part = total
-    //   pm='debt'  → debt_part = total
-    //   pm='mikse' → ndahet nga kolonat paid_cash/paid_pos/paid_bank; pjesa e mbetur (>0) = debt_part
-    // Kjo siguron që pos/banka e marrin totalin edhe nga faturat e pastra pos/bankë.
-    const salesAgg = queryOne(
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const zeroPerCur = () => ({ LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 });
+    const fx = (obj) => {
+      const out = {};
+      for (const c of CURS) out[c] = +(obj[c] || 0).toFixed(2);
+      return out;
+    };
+
+    // Ndarja e faturës në cash/pos/bank/debt për 'mikse', ose gjithë totali
+    // për pm='cash'|'pos'|'bank'|'debt'. Këto llogariten pastaj për çdo monedhë.
+    // Për 'debt' me parapagim kesh: amount_paid > 0 → pjesa e paguar hyn te
+    // kesh_nga_shitjet (nëpërmjet formulës xhiro − bank − pos − due), dhe
+    // amount_due mban vetëm mbetjen. Amount_paid këtu është snapshot i
+    // regjistrimit (pagesat e mëpasme nga Detyrimet nuk hyjnë në arkën e ditës).
+    const salesRows = queryAll(
       `SELECT
-         COALESCE(SUM(total_with_vat * COALESCE(exchange_rate, 1)), 0) AS xhiro_total,
-         COALESCE(SUM(
-           (CASE
-              WHEN payment_method = 'bank'  THEN total_with_vat
-              WHEN payment_method = 'mikse' THEN COALESCE(paid_bank, 0)
-              ELSE 0 END) * COALESCE(exchange_rate, 1)
-         ), 0) AS paid_bank,
-         COALESCE(SUM(
-           (CASE
-              WHEN payment_method = 'pos'   THEN total_with_vat
-              WHEN payment_method = 'mikse' THEN COALESCE(paid_pos, 0)
-              ELSE 0 END) * COALESCE(exchange_rate, 1)
-         ), 0) AS paid_pos,
-         COALESCE(SUM(
-           (CASE
-              WHEN payment_method = 'debt'  THEN total_with_vat
-              WHEN payment_method = 'mikse' THEN
-                CASE WHEN (total_with_vat - COALESCE(paid_cash, 0) - COALESCE(paid_pos, 0) - COALESCE(paid_bank, 0)) > 0
-                     THEN  total_with_vat - COALESCE(paid_cash, 0) - COALESCE(paid_pos, 0) - COALESCE(paid_bank, 0)
-                     ELSE 0 END
-              ELSE 0 END) * COALESCE(exchange_rate, 1)
-         ), 0) AS amount_due,
-         COUNT(*) AS invoice_count
-       FROM invoices
-       WHERE date = ? AND COALESCE(cancelled, 0) = 0`,
-      [date]
-    ) || {};
-
-    const expAgg = queryOne(
-      `SELECT
-         COALESCE(SUM(COALESCE(amount, 0) * COALESCE(exchange_rate, 1)), 0) AS expenses_lek,
-         COUNT(*) AS expense_count
-       FROM expense_entries
-       WHERE date = ?`,
-      [date]
-    ) || {};
-
-    // Fatura blerje të paguara kesh: payment_method='cash' → amount_paid është kesh.
-    // Për 'mikse' do na duhej një kolonë paid_cash që purchase_invoices ende nuk e ka.
-    const purAgg = queryOne(
-      `SELECT
-         COALESCE(SUM(COALESCE(amount_paid, 0) * COALESCE(exchange_rate, 1)), 0) AS purchase_cash_lek,
-         COUNT(*) AS purchase_count
-       FROM purchase_invoices
-       WHERE date = ? AND payment_method = 'cash'`,
-      [date]
-    ) || {};
-
-    const xhiro_total = +salesAgg.xhiro_total.toFixed(2);
-    const paid_bank   = +salesAgg.paid_bank.toFixed(2);
-    const paid_pos    = +salesAgg.paid_pos.toFixed(2);
-    const amount_due  = +salesAgg.amount_due.toFixed(2);
-    const expenses    = +expAgg.expenses_lek.toFixed(2);
-    const purchase_cash = +purAgg.purchase_cash_lek.toFixed(2);
-
-    const physRow = queryOne(
-      `SELECT COALESCE(opening_lek, 0)          AS opening,
-              COALESCE(physical_cash_lek, 0)    AS phys,
-              COALESCE(closeout_to_safe_lek, 0) AS to_safe
-         FROM daily_records WHERE date = ?`,
+         COALESCE(i.currency, 'LEK')          AS cur,
+         COALESCE(i.total_with_vat, 0)        AS total,
+         COALESCE(i.payment_method, 'cash')   AS pm,
+         COALESCE(i.paid_cash, 0)             AS paid_cash,
+         COALESCE(i.paid_pos, 0)              AS paid_pos,
+         COALESCE(i.paid_bank, 0)             AS paid_bank,
+         (COALESCE(i.amount_paid, 0)
+           - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)
+         )                                    AS initial_paid
+       FROM invoices i
+       WHERE i.date = ? AND COALESCE(i.cancelled, 0) = 0`,
       [date]
     );
-    const opening_cash        = +((physRow?.opening || 0)).toFixed(2);
 
-    // Cash receipts from sales = total - bank - pos - debt
-    const cash_from_sales = +(xhiro_total - paid_bank - paid_pos - amount_due).toFixed(2);
-    const cash_balance    = +(opening_cash + cash_from_sales - expenses - purchase_cash).toFixed(2);
+    const xhiro_total = zeroPerCur();
+    const paid_bank   = zeroPerCur();
+    const paid_pos    = zeroPerCur();
+    const amount_due  = zeroPerCur();
+    for (const r of salesRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in xhiro_total)) continue;
+      xhiro_total[c] += r.total;
+      if (r.pm === 'bank') paid_bank[c] += r.total;
+      else if (r.pm === 'pos') paid_pos[c] += r.total;
+      else if (r.pm === 'debt') {
+        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const due     = Math.max(0, r.total - paidNow);
+        amount_due[c] += due;
+        // paidNow bie te kesh_nga_shitjet automatikisht (xhiro − bank − pos − due).
+      }
+      else if (r.pm === 'mikse') {
+        paid_bank[c] += r.paid_bank;
+        paid_pos[c]  += r.paid_pos;
+        const debt = r.total - r.paid_cash - r.paid_pos - r.paid_bank;
+        if (debt > 0) amount_due[c] += debt;
+      }
+    }
 
-    const physical_cash       = +((physRow?.phys || 0)).toFixed(2);
-    const closeout_to_safe    = +((physRow?.to_safe || 0)).toFixed(2);
-    const carryover_next_day  = +Math.max(0, physical_cash - closeout_to_safe).toFixed(2);
-    const difference          = +(physical_cash - cash_balance).toFixed(2);
+    const expRows = queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount, 0)       AS amt
+         FROM expense_entries WHERE date = ?`,
+      [date]
+    );
+    const expenses = zeroPerCur();
+    for (const r of expRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in expenses) expenses[c] += r.amt;
+    }
+
+    // Fatura Blerje kesh (payment_method='cash') → amount_paid në monedhën origjinale.
+    const purRows = queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount_paid, 0)  AS amt
+         FROM purchase_invoices
+         WHERE date = ? AND payment_method = 'cash'`,
+      [date]
+    );
+    const purchase_cash = zeroPerCur();
+    for (const r of purRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in purchase_cash) purchase_cash[c] += r.amt;
+    }
+
+    // Hurdë (scrap gold) purchases — paid fully in cash, deducted from arka per currency
+    const hurdaRows = queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(total_amount, 0) AS amt
+         FROM hurda_purchases WHERE date = ?`,
+      [date]
+    );
+    const hurda_cash = zeroPerCur();
+    let hurda_gram_total = 0;
+    for (const r of hurdaRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in hurda_cash) hurda_cash[c] += r.amt;
+    }
+    const hurdaGramRow = queryOne('SELECT COALESCE(SUM(gram),0) AS g FROM hurda_purchases WHERE date = ?', [date]);
+    hurda_gram_total = +(hurdaGramRow?.g || 0).toFixed(3);
+
+    // HAS (bulk gold-jewelry batch) purchases — same treatment as hurda: cash out per currency
+    const hasRows = queryAll(
+      `SELECT COALESCE(currency, 'EUR') AS cur,
+              COALESCE(total_amount, 0) AS amt
+         FROM has_purchases WHERE date = ?`,
+      [date]
+    );
+    const has_cash = zeroPerCur();
+    let has_gram_total = 0;
+    for (const r of hasRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (c in has_cash) has_cash[c] += r.amt;
+    }
+    const hasGramRow = queryOne('SELECT COALESCE(SUM(gram),0) AS g FROM has_purchases WHERE date = ?', [date]);
+    has_gram_total = +(hasGramRow?.g || 0).toFixed(3);
+
+    const dailyRow = queryOne(
+      `SELECT COALESCE(opening_lek, 0)              AS opening_LEK,
+              COALESCE(opening_eur, 0)              AS opening_EUR,
+              COALESCE(opening_usd, 0)              AS opening_USD,
+              COALESCE(opening_gbp, 0)              AS opening_GBP,
+              COALESCE(opening_chf, 0)              AS opening_CHF,
+              COALESCE(physical_cash_lek, 0)        AS phys_LEK,
+              COALESCE(physical_cash_eur, 0)        AS phys_EUR,
+              COALESCE(physical_cash_usd, 0)        AS phys_USD,
+              COALESCE(physical_cash_gbp, 0)        AS phys_GBP,
+              COALESCE(physical_cash_chf, 0)        AS phys_CHF,
+              COALESCE(closeout_to_safe_lek, 0)     AS safe_LEK,
+              COALESCE(closeout_to_safe_eur, 0)     AS safe_EUR,
+              COALESCE(closeout_to_safe_usd, 0)     AS safe_USD,
+              COALESCE(closeout_to_safe_gbp, 0)     AS safe_GBP,
+              COALESCE(closeout_to_safe_chf, 0)     AS safe_CHF
+         FROM daily_records WHERE date = ?`,
+      [date]
+    ) || {};
+
+    const opening_cash   = zeroPerCur();
+    const physical_cash  = zeroPerCur();
+    const closeout_to_safe = zeroPerCur();
+    for (const c of CURS) {
+      opening_cash[c]     = dailyRow[`opening_${c}`] || 0;
+      physical_cash[c]    = dailyRow[`phys_${c}`]    || 0;
+      closeout_to_safe[c] = dailyRow[`safe_${c}`]    || 0;
+    }
+
+    // Kesh nga shitjet (për çdo monedhë) = xhiro − bankë − pos − borxh
+    const cash_from_sales = zeroPerCur();
+    const cash_balance    = zeroPerCur();
+    const carryover_next_day = zeroPerCur();
+    const difference = zeroPerCur();
+    for (const c of CURS) {
+      cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
+      cash_balance[c]    = opening_cash[c] + cash_from_sales[c] - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
+      carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
+      difference[c]      = physical_cash[c] - cash_balance[c];
+    }
 
     res.json({
       date,
-      xhiro_total,
-      paid_bank,
-      paid_pos,
-      amount_due,
-      opening_cash,
-      cash_from_sales,
-      expenses,
-      purchase_cash,
-      cash_balance,
-      physical_cash,
-      difference,
-      closeout_to_safe,
-      carryover_next_day,
+      currencies: CURS,
+      xhiro_total:       fx(xhiro_total),
+      paid_bank:         fx(paid_bank),
+      paid_pos:          fx(paid_pos),
+      amount_due:        fx(amount_due),
+      opening_cash:      fx(opening_cash),
+      cash_from_sales:   fx(cash_from_sales),
+      expenses:          fx(expenses),
+      purchase_cash:     fx(purchase_cash),
+      hurda_cash:        fx(hurda_cash),
+      hurda_gram_total,
+      has_cash:          fx(has_cash),
+      has_gram_total,
+      cash_balance:      fx(cash_balance),
+      physical_cash:     fx(physical_cash),
+      difference:        fx(difference),
+      closeout_to_safe:  fx(closeout_to_safe),
+      carryover_next_day: fx(carryover_next_day),
       counts: {
-        invoices: salesAgg.invoice_count || 0,
-        expenses: expAgg.expense_count || 0,
-        purchases_cash: purAgg.purchase_count || 0,
+        invoices: salesRows.length,
+        expenses: expRows.length,
+        purchases_cash: purRows.length,
+        hurda_purchases: hurdaRows.length,
+        has_purchases: hasRows.length,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Mbyllje e ditës: ndaj gjendjen fizike midis kasafortës dhe gjendjes fillestare të ditës pasardhëse.
-//   to_safe: shkruhet tek closeout_to_safe_lek për këtë datë
-//   carry:   physical_cash - to_safe; shkruhet tek opening_lek për datën pasardhëse
+// Mbyllje e ditës për çdo monedhë: ndaj gjendjen fizike midis kasafortës dhe
+// gjendjes fillestare të ditës pasardhëse.
+//   to_safe: { LEK, EUR, USD, GBP, CHF } → closeout_to_safe_{cur} për këtë datë
+//   carry:   physical_cash_{cur} - to_safe[cur] → opening_{cur} për datën pasardhëse
 app.post('/api/arka-ditore/:date/closeout', async (req, res) => {
   try {
     const { date } = req.params;
-    const toSafe = Math.max(0, parseFloat(req.body?.to_safe_lek) || 0);
-
-    const today = queryOne('SELECT COALESCE(physical_cash_lek, 0) AS phys FROM daily_records WHERE date = ?', [date]);
-    const physical = +(today?.phys || 0);
-    const carry = +Math.max(0, physical - toSafe).toFixed(2);
-
-    // Update today's closeout_to_safe
-    const existsToday = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
-    if (existsToday) {
-      run('UPDATE daily_records SET closeout_to_safe_lek = ? WHERE date = ?', [toSafe, date]);
-    } else {
-      run('INSERT INTO daily_records (date, closeout_to_safe_lek) VALUES (?, ?)', [date, toSafe]);
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const body = req.body || {};
+    // Accept either { to_safe: {LEK, EUR, ...} } or legacy { to_safe_lek }
+    const toSafe = {};
+    for (const c of CURS) {
+      const raw = body.to_safe?.[c] ?? body[`to_safe_${c.toLowerCase()}`] ?? 0;
+      toSafe[c] = Math.max(0, parseFloat(raw) || 0);
     }
 
-    // Compute next day's date
+    const today = queryOne(
+      `SELECT COALESCE(physical_cash_lek, 0) AS phys_LEK,
+              COALESCE(physical_cash_eur, 0) AS phys_EUR,
+              COALESCE(physical_cash_usd, 0) AS phys_USD,
+              COALESCE(physical_cash_gbp, 0) AS phys_GBP,
+              COALESCE(physical_cash_chf, 0) AS phys_CHF
+         FROM daily_records WHERE date = ?`,
+      [date]
+    ) || {};
+    const carry = {};
+    for (const c of CURS) {
+      const phys = +(today[`phys_${c}`] || 0);
+      carry[c] = +Math.max(0, phys - toSafe[c]).toFixed(2);
+    }
+
+    const existsToday = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    const closeoutCols = CURS.map(c => `closeout_to_safe_${c.toLowerCase()}`);
+    const closeoutVals = CURS.map(c => toSafe[c]);
+    if (existsToday) {
+      const setClause = closeoutCols.map(col => `${col} = ?`).join(', ');
+      run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...closeoutVals, date]);
+    } else {
+      const cols = closeoutCols.join(', ');
+      const placeholders = closeoutCols.map(() => '?').join(', ');
+      run(`INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`, [date, ...closeoutVals]);
+    }
+
     const d = new Date(date + 'T12:00:00');
     d.setDate(d.getDate() + 1);
     const nextDate = d.toISOString().split('T')[0];
 
-    // Write carry-over into next day's opening_lek
     const existsNext = queryOne('SELECT id FROM daily_records WHERE date = ?', [nextDate]);
+    const openCols = CURS.map(c => `opening_${c.toLowerCase()}`);
+    const openVals = CURS.map(c => carry[c]);
     if (existsNext) {
-      run('UPDATE daily_records SET opening_lek = ? WHERE date = ?', [carry, nextDate]);
+      const setClause = openCols.map(col => `${col} = ?`).join(', ');
+      run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...openVals, nextDate]);
     } else {
-      run('INSERT INTO daily_records (date, opening_lek) VALUES (?, ?)', [nextDate, carry]);
+      const cols = openCols.join(', ');
+      const placeholders = openCols.map(() => '?').join(', ');
+      run(`INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`, [nextDate, ...openVals]);
     }
 
-    res.json({ success: true, to_safe_lek: toSafe, carry_lek: carry, next_date: nextDate });
+    res.json({ success: true, to_safe: toSafe, carry, next_date: nextDate });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Kasaforta: bilanci kumulativ + historiku i lëvizjeve (derdhje + closeout − tërheqje).
+// Kasaforta: bilanci kumulativ + historiku i lëvizjeve (derdhje + closeout − tërheqje)
+// për çdo monedhë (LEK, EUR, USD, GBP, CHF).
 app.get('/api/kasaforta', async (req, res) => {
   try {
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const selectCols = CURS.flatMap(c => {
+      const lc = c.toLowerCase();
+      return [
+        `COALESCE(safe_deposit_${lc}, 0)     AS dep_${c}`,
+        `COALESCE(safe_withdraw_${lc}, 0)    AS wd_${c}`,
+        `COALESCE(closeout_to_safe_${lc}, 0) AS co_${c}`,
+      ];
+    }).join(', ');
+    const whereActivity = CURS.flatMap(c => {
+      const lc = c.toLowerCase();
+      return [
+        `COALESCE(safe_deposit_${lc}, 0) > 0`,
+        `COALESCE(safe_withdraw_${lc}, 0) > 0`,
+        `COALESCE(closeout_to_safe_${lc}, 0) > 0`,
+      ];
+    }).join(' OR ');
+
     const rows = queryAll(
-      `SELECT date,
-              COALESCE(safe_deposit_lek, 0)     AS safe_deposit,
-              COALESCE(safe_withdraw_lek, 0)    AS safe_withdraw,
-              COALESCE(closeout_to_safe_lek, 0) AS closeout_in
+      `SELECT date, ${selectCols}
          FROM daily_records
-         WHERE COALESCE(safe_deposit_lek, 0) > 0
-            OR COALESCE(safe_withdraw_lek, 0) > 0
-            OR COALESCE(closeout_to_safe_lek, 0) > 0
+         WHERE ${whereActivity}
          ORDER BY date ASC`
     );
 
-    let running = 0;
+    const running = { LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 };
     const history = rows.map(r => {
-      const net = (r.safe_deposit + r.closeout_in) - r.safe_withdraw;
-      running += net;
-      return {
-        date: r.date,
-        deposit_lek:  +r.safe_deposit.toFixed(2),
-        closeout_in:  +r.closeout_in.toFixed(2),
-        withdraw_lek: +r.safe_withdraw.toFixed(2),
-        net_lek:      +net.toFixed(2),
-        balance_lek:  +running.toFixed(2),
-      };
+      const perCur = {};
+      for (const c of CURS) {
+        const net = (r[`dep_${c}`] + r[`co_${c}`]) - r[`wd_${c}`];
+        const balanceBefore = running[c];
+        running[c] += net;
+        perCur[c] = {
+          deposit:  +r[`dep_${c}`].toFixed(2),
+          closeout_in: +r[`co_${c}`].toFixed(2),
+          withdraw: +r[`wd_${c}`].toFixed(2),
+          net:      +net.toFixed(2),
+          balance_before: +balanceBefore.toFixed(2),
+          balance:  +running[c].toFixed(2),
+        };
+      }
+      return { date: r.date, ...perCur };
     });
 
+    const balance = {};
+    for (const c of CURS) balance[c] = +running[c].toFixed(2);
+
     res.json({
-      balance_lek: +running.toFixed(2),
+      currencies: CURS,
+      balance,
+      // Backwards compat: keep balance_lek for any old caller
+      balance_lek: balance.LEK,
       history: history.reverse(),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2815,20 +3283,24 @@ app.get('/api/kasaforta', async (req, res) => {
 // Shuma agregate për datë sinkronizohet edhe në daily_records.safe_withdraw_lek/eur
 // që raportet ekzistuese (Kasaforta, permbledhëse) të vazhdojnë të punojnë.
 
+const CURS_SW = ['lek', 'eur', 'usd', 'gbp', 'chf'];
+
 function syncSafeWithdrawTotals(date) {
   const agg = queryOne(
-    `SELECT COALESCE(SUM(amount_lek), 0) AS lek,
-            COALESCE(SUM(amount_eur), 0) AS eur
+    `SELECT ${CURS_SW.map(c => `COALESCE(SUM(amount_${c}), 0) AS ${c}`).join(', ')}
        FROM safe_withdrawals WHERE date = ?`,
     [date]
-  ) || { lek: 0, eur: 0 };
+  ) || {};
   const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  const cols = CURS_SW.map(c => `safe_withdraw_${c}`);
+  const vals = CURS_SW.map(c => +(agg[c] || 0).toFixed(2));
   if (existing) {
-    run('UPDATE daily_records SET safe_withdraw_lek = ?, safe_withdraw_eur = ? WHERE date = ?',
-      [+agg.lek.toFixed(2), +agg.eur.toFixed(2), date]);
+    const setClause = cols.map(col => `${col} = ?`).join(', ');
+    run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...vals, date]);
   } else {
-    run('INSERT INTO daily_records (date, safe_withdraw_lek, safe_withdraw_eur) VALUES (?, ?, ?)',
-      [date, +agg.lek.toFixed(2), +agg.eur.toFixed(2)]);
+    const colList = cols.join(', ');
+    const placeholders = cols.map(() => '?').join(', ');
+    run(`INSERT INTO daily_records (date, ${colList}) VALUES (?, ${placeholders})`, [date, ...vals]);
   }
 }
 
@@ -2841,7 +3313,8 @@ app.get('/api/safe-withdrawals', async (req, res) => {
     if (to)   { where += ' AND date <= ?'; params.push(to); }
     const lim = Math.min(parseInt(limit) || 200, 500);
     const rows = queryAll(
-      `SELECT id, date, amount_lek, amount_eur, person, note, created_at
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              person, note, created_at
          FROM safe_withdrawals
         WHERE ${where}
         ORDER BY date DESC, created_at DESC
@@ -2857,15 +3330,22 @@ app.post('/api/safe-withdrawals', async (req, res) => {
     const d = req.body || {};
     const date = d.date;
     if (!date) return res.status(400).json({ error: 'date required' });
-    const lek = parseFloat(d.amount_lek) || 0;
-    const eur = parseFloat(d.amount_eur) || 0;
-    if (lek <= 0 && eur <= 0) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
+    const amounts = {};
+    let anyPositive = false;
+    for (const c of CURS_SW) {
+      const v = parseFloat(d[`amount_${c}`]) || 0;
+      amounts[c] = v;
+      if (v > 0) anyPositive = true;
+    }
+    if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
+    const cols = CURS_SW.map(c => `amount_${c}`);
+    const vals = CURS_SW.map(c => amounts[c]);
     run(
-      `INSERT INTO safe_withdrawals (date, amount_lek, amount_eur, person, note)
-       VALUES (?, ?, ?, ?, ?)`,
-      [date, lek, eur, person, note]
+      `INSERT INTO safe_withdrawals (date, ${cols.join(', ')}, person, note)
+       VALUES (?, ${cols.map(() => '?').join(', ')}, ?, ?)`,
+      [date, ...vals, person, note]
     );
     syncSafeWithdrawTotals(date);
     res.json({ success: true });
@@ -2883,18 +3363,33 @@ app.delete('/api/safe-withdrawals/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Ruaj gjendjen fizike të arkës (e numëruar dorazi) për një datë.
+// Ruaj gjendjen fizike të arkës (e numëruar dorazi) për një datë, për çdo monedhë.
+// Pranon { physical_cash: { LEK, EUR, USD, GBP, CHF } } ose formatin e vjetër
+// { physical_cash_lek } për prapa-kompatibilitet.
 app.post('/api/arka-ditore/:date/physical', async (req, res) => {
   try {
     const { date } = req.params;
-    const value = parseFloat(req.body?.physical_cash_lek) || 0;
-    const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
-    if (existing) {
-      run('UPDATE daily_records SET physical_cash_lek = ? WHERE date = ?', [value, date]);
-    } else {
-      run('INSERT INTO daily_records (date, physical_cash_lek) VALUES (?, ?)', [date, value]);
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const body = req.body || {};
+    const vals = {};
+    for (const c of CURS) {
+      const raw = body.physical_cash?.[c] ?? body[`physical_cash_${c.toLowerCase()}`] ?? null;
+      if (raw !== null) vals[c] = parseFloat(raw) || 0;
     }
-    res.json({ success: true, physical_cash_lek: value });
+    if (Object.keys(vals).length === 0) return res.status(400).json({ error: 'no values provided' });
+
+    const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    const cols = Object.keys(vals).map(c => `physical_cash_${c.toLowerCase()}`);
+    const values = Object.values(vals);
+    if (existing) {
+      const setClause = cols.map(col => `${col} = ?`).join(', ');
+      run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...values, date]);
+    } else {
+      const colList = cols.join(', ');
+      const placeholders = cols.map(() => '?').join(', ');
+      run(`INSERT INTO daily_records (date, ${colList}) VALUES (?, ${placeholders})`, [date, ...values]);
+    }
+    res.json({ success: true, physical_cash: vals });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2910,8 +3405,9 @@ app.post('/api/arka-ditore/:date/physical', async (req, res) => {
 // Sales items — burimi: Fatura Shitje (invoice_items).
 app.get('/api/reports/sales-items', async (req, res) => {
   try {
-    const { from, to, q, material } = req.query;
+    const { from, to, q, material, detailed } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    const isDetailed = detailed === '1' || detailed === 'true';
 
     const params = [from, to];
     let where = `i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0`;
@@ -2924,6 +3420,69 @@ app.get('/api/reports/sales-items', async (req, res) => {
       where += ` AND COALESCE(p.material, '') = ?`;
       params.push(material);
     }
+
+    // Rreshtat e detajuar — një rresht për çdo shitje (invoice item), pa mbledhje.
+    const rowsDetailed = isDetailed ? queryAll(
+      `SELECT
+         ii.id AS item_id,
+         i.id  AS invoice_id,
+         i.date,
+         i.invoice_no,
+         COALESCE(i.customer_name, '') AS customer_name,
+         COALESCE(i.currency, 'LEK')   AS currency,
+         COALESCE(i.exchange_rate, 1)  AS exchange_rate,
+         COALESCE(i.is_credit_note, 0) AS is_credit_note,
+         COALESCE(ii.product_id, 0)                     AS product_id,
+         COALESCE(NULLIF(ii.barcode, ''), p.barcode, '') AS barcode,
+         COALESCE(NULLIF(ii.name, ''), p.name, '')       AS name,
+         COALESCE(p.sku, '')      AS sku,
+         COALESCE(p.category, '') AS category,
+         COALESCE(p.material, '') AS material,
+         COALESCE(p.unit, 'copë') AS unit,
+         ii.qty AS qty,
+         ii.unit_price_no_vat AS unit_price,
+         ii.discount_percent  AS discount_percent,
+         ii.subtotal_no_vat   AS subtotal_no_vat,
+         ii.vat_amount        AS vat_amount,
+         ii.total_with_vat    AS total_with_vat
+       FROM invoice_items ii
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE ${where}
+       ORDER BY i.date ASC, i.invoice_no ASC, ii.id ASC`,
+      params
+    ).map(r => {
+      const rate      = +(r.exchange_rate || 1);
+      const qty       = +(r.qty || 0);
+      const unitOrig  = +(r.unit_price || 0);
+      const discPct   = +(r.discount_percent || 0);
+      const subOrig   = +(r.subtotal_no_vat || 0);
+      const vatOrig   = +(r.vat_amount || 0);
+      const totOrig   = +(r.total_with_vat || 0);
+      const discOrig  = +(qty * unitOrig * discPct / 100);
+      return {
+        item_id: r.item_id, invoice_id: r.invoice_id,
+        date: r.date, invoice_no: r.invoice_no,
+        customer_name: r.customer_name,
+        currency: r.currency, exchange_rate: rate,
+        is_credit_note: !!r.is_credit_note,
+        product_id: r.product_id, barcode: r.barcode, name: r.name,
+        sku: r.sku, category: r.category, material: r.material, unit: r.unit,
+        qty,
+        unit_price:           +unitOrig.toFixed(2),
+        discount_percent:     discPct,
+        discount:             +discOrig.toFixed(2),
+        value_no_vat:         +subOrig.toFixed(2),
+        vat:                  +vatOrig.toFixed(2),
+        value_with_vat:       +totOrig.toFixed(2),
+        // Ekuivalentët në LEK për krahasim vizual
+        unit_price_lek:       +(unitOrig * rate).toFixed(2),
+        discount_lek:         +(discOrig * rate).toFixed(2),
+        value_no_vat_lek:     +(subOrig * rate).toFixed(2),
+        vat_lek:              +(vatOrig * rate).toFixed(2),
+        value_with_vat_lek:   +(totOrig * rate).toFixed(2),
+      };
+    }) : null;
 
     const rows = queryAll(
       `SELECT
@@ -2985,7 +3544,36 @@ app.get('/api/reports/sales-items', async (req, res) => {
       tjeter:  rows.filter(r => r.material !== 'flori' && r.material !== 'diamant').reduce(addInto, emptyTotals()),
     };
 
-    res.json({ rows, totals, totalsByMaterial });
+    // Totalet e grupuara sipas monedhës origjinale të faturës — pa konvertim në LEK.
+    // Përdorin të njëjtat filtra (datë, q, material) si query kryesor.
+    const totalsByCurrencyRaw = queryAll(
+      `SELECT
+         COALESCE(i.currency, 'LEK') AS currency,
+         SUM(ii.qty) AS qty,
+         SUM(ii.qty * ii.unit_price_no_vat * (ii.discount_percent / 100.0)) AS discount,
+         SUM(ii.subtotal_no_vat) AS value_no_vat,
+         SUM(ii.vat_amount)      AS vat,
+         SUM(ii.total_with_vat)  AS value_with_vat
+       FROM invoice_items ii
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE ${where}
+       GROUP BY COALESCE(i.currency, 'LEK')
+       ORDER BY currency ASC`,
+      params
+    );
+    const totalsByCurrency = {};
+    for (const r of totalsByCurrencyRaw) {
+      totalsByCurrency[r.currency] = {
+        qty:                +(+r.qty || 0),
+        discount:           +(+r.discount || 0).toFixed(2),
+        value_no_vat:       +(+r.value_no_vat || 0).toFixed(2),
+        vat:                +(+r.vat || 0).toFixed(2),
+        value_with_vat:     +(+r.value_with_vat || 0).toFixed(2),
+      };
+    }
+
+    res.json({ rows, rowsDetailed, totals, totalsByMaterial, totalsByCurrency });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2993,11 +3581,12 @@ app.get('/api/reports/sales-items', async (req, res) => {
 // (magazina_hyrje_items, pa TVSH → trajtohet si TVSH = 0).
 app.get('/api/reports/purchase-items', async (req, res) => {
   try {
-    const { from, to, q } = req.query;
+    const { from, to, q, category } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
 
-    const ql = (q || '').trim();
+    const ql   = (q || '').trim();
     const like = ql ? `%${ql}%` : null;
+    const cat  = (category || '').trim();
 
     // ── Fatura Blerje
     const purchaseParams = [from, to];
@@ -3005,6 +3594,10 @@ app.get('/api/reports/purchase-items', async (req, res) => {
     if (like) {
       purchaseWhere += ` AND (pit.barcode LIKE ? OR pit.name LIKE ? OR p.sku LIKE ?)`;
       purchaseParams.push(like, like, like);
+    }
+    if (cat) {
+      purchaseWhere += ` AND COALESCE(p.category, '') = ?`;
+      purchaseParams.push(cat);
     }
     const purchases = queryAll(
       `SELECT
@@ -3037,6 +3630,10 @@ app.get('/api/reports/purchase-items', async (req, res) => {
     if (like) {
       magWhere += ` AND (mi.barcode LIKE ? OR mi.name LIKE ? OR p.sku LIKE ?)`;
       magParams.push(like, like, like);
+    }
+    if (cat) {
+      magWhere += ` AND COALESCE(p.category, '') = ?`;
+      magParams.push(cat);
     }
     const mags = queryAll(
       `SELECT
@@ -3121,7 +3718,16 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       value_with_vat_lek: a.value_with_vat_lek + r.value_with_vat_lek,
     }), { qty: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
 
-    res.json({ rows, totals });
+    // Lista e kategorive për të mbushur filtër-in në frontend
+    // (nga produktet aktive që kanë të paktën një kategori të vendosur).
+    const categoryRows = queryAll(
+      `SELECT DISTINCT category FROM products
+       WHERE COALESCE(active, 1) = 1 AND COALESCE(category, '') != ''
+       ORDER BY category ASC`
+    );
+    const categories = categoryRows.map(r => r.category);
+
+    res.json({ rows, totals, categories });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

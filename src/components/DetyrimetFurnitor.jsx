@@ -514,6 +514,18 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
     return acc
   }, { tot: 0, paid: 0, due: 0, totLek: 0, paidLek: 0, dueLek: 0 })
 
+  // Totalet e grupuara sipas monedhës origjinale të faturës — pa konvertim në LEK.
+  const totalsByCur = invoices.reduce((acc, inv) => {
+    const cur = inv.currency || 'LEK'
+    if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0 }
+    const due = n(inv.amount_due != null ? inv.amount_due : (inv.total_with_vat - inv.amount_paid))
+    acc[cur].tot  += n(inv.total_with_vat)
+    acc[cur].paid += n(inv.amount_paid)
+    acc[cur].due  += due
+    return acc
+  }, {})
+  const currenciesInList = Object.keys(totalsByCur).sort()
+
   const groups = {}
   for (const inv of invoices) {
     const key = (inv.supplier_nipt && inv.supplier_nipt.trim()) || inv.supplier_name || '(pa furnitor)'
@@ -679,15 +691,22 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
               ))}
             </tbody>
             <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-              <tr className="bg-blue-50">
-                <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
-                  💱 Totale të Përgjithshme NË LEK <span className="text-[10px] font-normal text-blue-600">(të konvertuara me kursin e çdo fature)</span>
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.totLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(totals.paidLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-red-600">{fmt(totals.dueLek)}</td>
-                <td></td>
-              </tr>
+              {currenciesInList.map((cur, idx) => {
+                const t = totalsByCur[cur]
+                return (
+                  <tr key={cur} className={`bg-blue-50 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
+                    <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
+                      💱 TOTAL ({cur})
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.tot)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(t.paid)}</td>
+                    <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {t.due > 0.005 ? fmt(t.due) : '✓'}
+                    </td>
+                    <td></td>
+                  </tr>
+                )
+              })}
             </tfoot>
           </table>
         )}

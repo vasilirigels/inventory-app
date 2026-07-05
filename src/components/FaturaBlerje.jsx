@@ -679,6 +679,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [amountPaid, setAmountPaid]   = useState('')
   const [notes, setNotes]       = useState('')
+  const [category, setCategory] = useState('')
   const [items, setItems]       = useState([emptyItem()])
   const [allRates, setAllRates] = useState({ LEK: 1 })
   const [showImport, setShowImport] = useState(false)
@@ -706,7 +707,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           const initPaid = inv.initial_amount_paid != null ? inv.initial_amount_paid : inv.amount_paid
           setAmountPaid(initPaid != null ? String(initPaid) : '')
           setNotes(inv.notes || '')
-          setItems((inv.items && inv.items.length > 0) ? inv.items : [emptyItem()])
+          const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
+          const mats = invItems.map(it => it.material).filter(m => m === 'flori' || m === 'diamant' || m === 'ora')
+          setCategory(mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : '')
+          setItems(invItems)
         } else {
           setInvoiceDate(date)
           const r = await fetch(`/api/purchase-invoices/next-no?date=${date}`).then(r => r.json())
@@ -823,7 +827,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
 
   const save = async () => {
     if (saving) return
-    const valid = items.filter(it => (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.purchase_price_no_vat) > 0)
+    const valid = items
+      .filter(it => (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.purchase_price_no_vat) > 0)
+      .map(it => category ? { ...it, material: category } : it)
     if (valid.length === 0) { alert('Shtoni të paktën një artikull.'); return }
     setSaving(true)
     try {
@@ -910,6 +916,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             value={exchangeRate} onChange={e => setExchangeRate(e.target.value)}
             disabled={currency === 'LEK'} className="input-field disabled:bg-slate-50" />
           <p className="text-[10px] text-slate-400 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
+        </div>
+        <div>
+          <label className="form-label">Kategoria</label>
+          <select value={category} onChange={e => setCategory(e.target.value)} className="input-field">
+            <option value="">— pa kategori —</option>
+            <option value="flori">🟡 Flori</option>
+            <option value="diamant">💎 Diamant</option>
+            <option value="ora">⌚ Ora</option>
+          </select>
+          <p className="text-[10px] text-slate-400 mt-0.5">Aplikohet për të gjithë artikujt e faturës</p>
         </div>
         <div className="col-span-2 md:col-span-4">
           <label className="form-label">Lloji i Pagesës ndaj Furnitorit</label>
@@ -1000,7 +1016,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <th className="px-2 py-2 text-right font-semibold w-20">TVSH</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Vlera me TVSH</th>
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800">Çm. SHITJE</th>
-                <th className="px-2 py-2 text-left font-semibold w-24 bg-amber-50 text-amber-800">Materiali</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
             </thead>
@@ -1045,18 +1060,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                         onChange={e => setItem(idx, { sell_price: e.target.value })}
                         className="input-field-sm text-right font-semibold text-emerald-800" />
                     </td>
-                    <td className="px-1 py-1 bg-amber-50">
-                      <select
-                        value={it.material || ''}
-                        onChange={e => setItem(idx, { material: e.target.value })}
-                        className="input-field-sm text-xs"
-                        title="Materiali i artikullit (përdoret tek Raport Shitje Artikuj)"
-                      >
-                        <option value="">—</option>
-                        <option value="flori">🟡 Flori</option>
-                        <option value="diamant">💎 Diamant</option>
-                      </select>
-                    </td>
                     <td className="px-1 py-1 text-center">
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
                     </td>
@@ -1071,7 +1074,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <td></td>
                 <td className="px-2 py-2 text-right tabular-nums text-slate-800">{fmt(totals.vat)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</td>
-                <td></td>
                 <td></td>
                 <td></td>
               </tr>

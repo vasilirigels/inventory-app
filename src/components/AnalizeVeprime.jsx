@@ -13,7 +13,7 @@ function pmLabel(pm) {
   return pm === 'debt' ? 'Borxh' : pm === 'bank' ? 'Bankë' : pm === 'pos' ? 'POS' : 'Cash'
 }
 
-function exportActivityExcel(enriched, totals, client, dateRange) {
+function exportActivityExcel(enriched, totals, client, dateRange, currencyByInvoiceId) {
   const rows = enriched.map(ev => {
     if (ev.kind === 'invoice') {
       const inv = ev.invoice
@@ -36,7 +36,7 @@ function exportActivityExcel(enriched, totals, client, dateRange) {
       'Lloji': 'Pagesë',
       'Burimi': 'Detyrime Klienti',
       'Nr. Fature': p.invoice_no,
-      'Monedha': '',
+      'Monedha': currencyByInvoiceId?.get(p.invoice_id) || '',
       'Pagesa': pmLabel(p.payment_method),
       'Detaje': p.notes || '',
       'Debitim (+)': '',
@@ -61,7 +61,7 @@ function exportActivityExcel(enriched, totals, client, dateRange) {
   })
 }
 
-function exportActivityPdf(enriched, totals, client, dateRange) {
+function exportActivityPdf(enriched, totals, client, dateRange, currencyByInvoiceId) {
   const dateInfo = (dateRange?.from || dateRange?.to)
     ? `Periudha: ${dateRange.from || '...'} → ${dateRange.to || '...'} · `
     : ''
@@ -69,7 +69,7 @@ function exportActivityPdf(enriched, totals, client, dateRange) {
   exportToPdf(`Analize Veprime Klient${client?.name ? ` — ${client.name}` : ''}`, [
     {
       subtitle,
-      headers: ['Data', 'Lloji', 'Burimi', 'Detaje', 'Pagesa', 'Debitim (+)', 'Kreditim (−)', 'Balanca'],
+      headers: ['Data', 'Lloji', 'Burimi', 'Detaje', 'Monedha', 'Pagesa', 'Debitim (+)', 'Kreditim (−)', 'Balanca'],
       rows: enriched.map(ev => {
         if (ev.kind === 'invoice') {
           const inv = ev.invoice
@@ -77,7 +77,8 @@ function exportActivityPdf(enriched, totals, client, dateRange) {
             ev.date,
             'Faturë Shitje',
             'FATURA SHITJE',
-            `${inv.invoice_no} (${inv.currency})`,
+            inv.invoice_no,
+            inv.currency,
             pmLabel(inv.payment_method),
             { v: formatNum(inv.total_with_vat), cls: 'num' },
             ev.initialPaid > 0.005 ? { v: formatNum(ev.initialPaid), cls: 'num green' } : '',
@@ -90,6 +91,7 @@ function exportActivityPdf(enriched, totals, client, dateRange) {
           'Pagesë',
           'Detyrime Klienti',
           `për ${p.invoice_no}${p.notes ? ` — ${p.notes}` : ''}`,
+          currencyByInvoiceId?.get(p.invoice_id) || '',
           pmLabel(p.payment_method),
           '',
           { v: formatNum(p.amount), cls: 'num green' },
@@ -97,7 +99,7 @@ function exportActivityPdf(enriched, totals, client, dateRange) {
         ]
       }),
       footerRows: [[
-        'TOTALE', '', '', '', '',
+        'TOTALE', '', '', '', '', '',
         { v: formatNum(totals.invoiced), cls: 'num' },
         { v: formatNum(totals.paid), cls: 'num green' },
         { v: formatNum(totals.due), cls: `num ${totals.due > 0.005 ? 'red' : 'green'}` },
@@ -402,24 +404,43 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
 
   // Per-invoice exchange rate so payment events can be converted to LEK too
   // (payment.amount is in the invoice's currency).
-  const rateByInvoiceId = new Map(data.invoices.map(i => [i.id, n(i.exchange_rate) || 1]))
+  const rateByInvoiceId     = new Map(data.invoices.map(i => [i.id, n(i.exchange_rate) || 1]))
+  const currencyByInvoiceId = new Map(data.invoices.map(i => [i.id, i.currency || 'LEK']))
 
   let runDebit = 0, runCredit = 0
   let runDebitLek = 0, runCreditLek = 0
+  // Totalet e ndara sipas monedhës origjinale.
+  const totalsByCur = {}
+  const bump = (cur, invAmt, paidAmt) => {
+    if (!totalsByCur[cur]) totalsByCur[cur] = { invoiced: 0, paid: 0 }
+    totalsByCur[cur].invoiced += invAmt
+    totalsByCur[cur].paid     += paidAmt
+  }
   const enriched = events.map(ev => {
     if (ev.kind === 'invoice') {
       const rate = n(ev.invoice.exchange_rate) || 1
+      const cur  = ev.invoice.currency || 'LEK'
       runDebit  += n(ev.invoice.total_with_vat)
       runCredit += ev.initialPaid
       runDebitLek  += n(ev.invoice.total_with_vat) * rate
       runCreditLek += ev.initialPaid * rate
+      bump(cur, n(ev.invoice.total_with_vat), ev.initialPaid)
     } else {
       const rate = rateByInvoiceId.get(ev.payment.invoice_id) || 1
+      const cur  = currencyByInvoiceId.get(ev.payment.invoice_id) || 'LEK'
       runCredit += n(ev.payment.amount)
       runCreditLek += n(ev.payment.amount) * rate
+      bump(cur, 0, n(ev.payment.amount))
     }
     return { ...ev, balance: +(runDebit - runCredit).toFixed(2) }
   })
+  for (const c of Object.keys(totalsByCur)) {
+    const t = totalsByCur[c]
+    t.invoiced = +t.invoiced.toFixed(2)
+    t.paid     = +t.paid.toFixed(2)
+    t.due      = +(t.invoiced - t.paid).toFixed(2)
+  }
+  const currenciesInList = Object.keys(totalsByCur).sort()
 
   const totals = {
     invoiced: +runDebit.toFixed(2),
@@ -446,12 +467,12 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
           </div>
           <div className="flex gap-2 flex-shrink-0">
             <button
-              onClick={() => exportActivityExcel(enriched, totals, client, dateRange)}
+              onClick={() => exportActivityExcel(enriched, totals, client, dateRange, currencyByInvoiceId)}
               className="btn-secondary text-xs"
               title="Eksporto në Excel"
             >📊 Excel</button>
             <button
-              onClick={() => exportActivityPdf(enriched, totals, client, dateRange)}
+              onClick={() => exportActivityPdf(enriched, totals, client, dateRange, currencyByInvoiceId)}
               className="btn-secondary text-xs"
               title="Eksporto në PDF"
             >📄 PDF</button>
@@ -463,6 +484,7 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Lloji & Burimi</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Detaje</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Debitim (+)</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Kreditim (−)</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Balanca</th>
@@ -496,7 +518,10 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                         className="font-mono font-semibold text-blue-600 hover:text-blue-800 hover:underline"
                         title="Hap këtë faturë"
                       >{inv.invoice_no}</button>
-                      <div className="text-[11px] text-slate-500">{inv.currency} · {pm === 'debt' ? '⚠️ Borxh' : pm === 'bank' ? '🏦 Bankë' : pm === 'pos' ? '💳 POS' : '💵 Cash'}</div>
+                      <div className="text-[11px] text-slate-500">{pm === 'debt' ? '⚠️ Borxh' : pm === 'bank' ? '🏦 Bankë' : pm === 'pos' ? '💳 POS' : '💵 Cash'}</div>
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <span className="badge bg-blue-100 text-blue-700">{inv.currency}</span>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800">
                       {fmt(inv.total_with_vat)}
@@ -547,6 +572,9 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                       {p.payment_method === 'bank' ? '🏦 Bankë' : p.payment_method === 'pos' ? '💳 POS' : '💵 Cash'}{p.notes ? ` · ${p.notes}` : ''}
                     </div>
                   </td>
+                  <td className="px-4 py-2 text-center">
+                    <span className="badge bg-blue-100 text-blue-700">{payCurrency}</span>
+                  </td>
                   <td className="px-4 py-2"></td>
                   <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700">
                     {fmt(p.amount)}
@@ -564,16 +592,24 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
             })}
           </tbody>
           <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-            <tr className="bg-blue-50">
-              <td colSpan={3} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
-                💱 TOTALE NË LEK <span className="text-[10px] font-normal text-blue-600">(të konvertuara me kursin e çdo fature)</span>
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.invoicedLek)}</td>
-              <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(totals.paidLek)}</td>
-              <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${totals.dueLek > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
-                {fmt(totals.dueLek)}
-              </td>
-            </tr>
+            {currenciesInList.map((cur, idx) => {
+              const t = totalsByCur[cur]
+              return (
+                <tr key={cur} className={`bg-blue-50 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
+                  <td colSpan={3} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
+                    💱 TOTAL ({cur})
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className="badge bg-blue-200 text-blue-800">{cur}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.invoiced)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(t.paid)}</td>
+                  <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                    {fmt(t.due)}
+                  </td>
+                </tr>
+              )
+            })}
           </tfoot>
         </table>
       </div>

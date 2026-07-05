@@ -12,11 +12,7 @@ export const SECTION_CONFIGS = {
     description: 'Konvertim mes monedhave brenda arkës.',
     rows: [{ label: 'Konvertim', fields: { lek: 'conv_lek', eur: 'conv_eur', usd: 'conv_usd', gbp: 'conv_gbp', chf: 'conv_chf' } }],
   },
-  'arka-konv-hurda': {
-    title: 'Konvertim Hurda',
-    description: 'Konvertim i hurdës në vlera monetare.',
-    rows: [{ label: 'Hurda', fields: { lek: 'hurda_lek', eur: 'hurda_eur', usd: 'hurda_usd', gbp: 'hurda_gbp', chf: 'hurda_chf', gram: 'hurda_gram' } }],
-  },
+  // 'arka-konv-hurda' rendërohet nga komponenti KonvertimHurda (listë blerjesh me gram).
   'arka-kasaforta': {
     title: 'Gjendje Kasaforta',
     description: 'Gjendja e mbartur në kasafortë në fillim të ditës.',
