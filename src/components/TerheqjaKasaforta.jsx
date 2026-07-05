@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
+
 function fmt(v) {
   const x = parseFloat(v) || 0
   if (x === 0) return '-'
@@ -15,16 +17,16 @@ function fmtDateTime(s) {
   })
 }
 
+const emptyAmounts = () => ({ LEK: '', EUR: '', USD: '', GBP: '', CHF: '' })
+
 export default function TerheqjaKasaforta({ date }) {
-  const [lek, setLek] = useState('')
-  const [eur, setEur] = useState('')
+  const [amounts, setAmounts] = useState(emptyAmounts())
   const [person, setPerson] = useState('')
   const [note, setNote] = useState('')
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-  const [confirmDel, setConfirmDel] = useState(null)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
 
@@ -45,29 +47,30 @@ export default function TerheqjaKasaforta({ date }) {
 
   const submit = async e => {
     e.preventDefault()
-    const nLek = parseFloat(lek) || 0
-    const nEur = parseFloat(eur) || 0
-    if (nLek <= 0 && nEur <= 0) {
-      setMsg('⚠ Vendos një shumë > 0 (LEK ose EUR)')
+    const parsed = {}
+    let anyPositive = false
+    for (const c of CURS) {
+      const v = parseFloat(amounts[c]) || 0
+      parsed[c] = v
+      if (v > 0) anyPositive = true
+    }
+    if (!anyPositive) {
+      setMsg('⚠ Vendos një shumë > 0 në të paktën një monedhë')
       setTimeout(() => setMsg(''), 3000)
       return
     }
     setSaving(true)
     try {
+      const payload = { date, person: person.trim(), note: note.trim() }
+      for (const c of CURS) payload[`amount_${c.toLowerCase()}`] = parsed[c]
       const res = await fetch('/api/safe-withdrawals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date,
-          amount_lek: nLek,
-          amount_eur: nEur,
-          person: person.trim(),
-          note: note.trim(),
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'gabim')
-      setLek(''); setEur(''); setPerson(''); setNote('')
+      setAmounts(emptyAmounts()); setPerson(''); setNote('')
       setMsg('✓ Tërheqja u regjistrua')
       setTimeout(() => setMsg(''), 2500)
       loadHistory()
@@ -79,64 +82,56 @@ export default function TerheqjaKasaforta({ date }) {
     }
   }
 
-  const doDelete = async id => {
-    try {
-      await fetch(`/api/safe-withdrawals/${id}`, { method: 'DELETE' })
-      setConfirmDel(null)
-      loadHistory()
-    } catch (e) { console.error(e) }
+  const totals = {}
+  for (const c of CURS) {
+    totals[c] = history.reduce((s, r) => s + (r[`amount_${c.toLowerCase()}`] || 0), 0)
   }
 
-  const totalLek = history.reduce((s, r) => s + (r.amount_lek || 0), 0)
-  const totalEur = history.reduce((s, r) => s + (r.amount_eur || 0), 0)
-
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="max-w-6xl mx-auto space-y-4">
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="text-lg font-bold text-slate-800">Tërheqje nga Kasaforta</h3>
         <p className="text-xs text-slate-500 mt-1">
-          Regjistro çdo tërheqje me shumën, personin që e mori, dhe një shënim opsional.
+          Regjistro çdo tërheqje me shumat për çdo monedhë, personin që i mori dhe një shënim opsional.
           Klik butonin "Regjistro Tërheqjen" për ta ruajtur.
         </p>
 
-        <form onSubmit={submit} className="mt-5 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-          <div>
-            <label className="form-label">Shuma LEK</label>
-            <input
-              type="number" step="0.01" min="0"
-              value={lek} onChange={e => setLek(e.target.value)}
-              className="input-field text-right font-semibold"
-              placeholder="0.00"
-            />
+        <form onSubmit={submit} className="mt-5 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {CURS.map(c => (
+              <div key={c}>
+                <label className="form-label">Shuma {c}</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={amounts[c]}
+                  onChange={e => setAmounts(a => ({ ...a, [c]: e.target.value }))}
+                  className="input-field text-right font-semibold"
+                  placeholder="0.00"
+                />
+              </div>
+            ))}
           </div>
-          <div>
-            <label className="form-label">Shuma EUR</label>
-            <input
-              type="number" step="0.01" min="0"
-              value={eur} onChange={e => setEur(e.target.value)}
-              className="input-field text-right font-semibold"
-              placeholder="0.00"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="form-label">Personi (kush e mori)</label>
+              <input
+                type="text"
+                value={person} onChange={e => setPerson(e.target.value)}
+                className="input-field"
+                placeholder="p.sh. BIBA, DIANA"
+              />
+            </div>
+            <div>
+              <label className="form-label">Shënim (opsional)</label>
+              <input
+                type="text"
+                value={note} onChange={e => setNote(e.target.value)}
+                className="input-field"
+                placeholder="arsyeja / destinacioni"
+              />
+            </div>
           </div>
-          <div className="md:col-span-2">
-            <label className="form-label">Personi (kush e mori)</label>
-            <input
-              type="text"
-              value={person} onChange={e => setPerson(e.target.value)}
-              className="input-field"
-              placeholder="p.sh. BIBA, DIANA"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="form-label">Shënim (opsional)</label>
-            <input
-              type="text"
-              value={note} onChange={e => setNote(e.target.value)}
-              className="input-field"
-              placeholder="arsyeja / destinacioni"
-            />
-          </div>
-          <div className="md:col-span-6 flex items-center gap-3">
+          <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
               disabled={saving}
@@ -161,8 +156,11 @@ export default function TerheqjaKasaforta({ date }) {
           <div>
             <h4 className="text-sm font-bold text-slate-800">Historik i Tërheqjeve</h4>
             <p className="text-xs text-slate-500 mt-0.5">
-              {history.length} regjistrime · Total: <strong className="text-slate-700">{fmt(totalLek)} LEK</strong>
-              {totalEur > 0 && <> · <strong className="text-slate-700">{fmt(totalEur)} EUR</strong></>}
+              {history.length} regjistrime · Totale:
+              {CURS.filter(c => totals[c] > 0).map(c => (
+                <span key={c}> · <strong className="text-slate-700">{fmt(totals[c])} {c}</strong></span>
+              ))}
+              {CURS.every(c => totals[c] === 0) && <span> —</span>}
             </p>
           </div>
           <div className="flex items-end gap-2 flex-wrap">
@@ -205,66 +203,39 @@ export default function TerheqjaKasaforta({ date }) {
             Ende pa tërheqje të regjistruara.
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Data</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Ora</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">LEK</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">EUR</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Personi</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Shënim</th>
-                <th className="text-center px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Veprim</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map(r => (
-                <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-2.5 text-slate-700 font-medium">{r.date}</td>
-                  <td className="px-4 py-2.5 text-slate-500 text-xs">{fmtDateTime(r.created_at)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-800">{fmt(r.amount_lek)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-800">{fmt(r.amount_eur)}</td>
-                  <td className="px-4 py-2.5 text-slate-700">{r.person || <span className="text-slate-400 italic">—</span>}</td>
-                  <td className="px-4 py-2.5 text-slate-600">{r.note || <span className="text-slate-400 italic">—</span>}</td>
-                  <td className="px-4 py-2.5 text-center">
-                    <button
-                      onClick={() => setConfirmDel(r)}
-                      className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium"
-                    >
-                      Fshi
-                    </button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Data</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Ora</th>
+                  {CURS.map(c => (
+                    <th key={c} className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">{c}</th>
+                  ))}
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Personi</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Shënim</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {history.map(r => (
+                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2.5 text-slate-700 font-medium">{r.date}</td>
+                    <td className="px-3 py-2.5 text-slate-500 text-xs">{fmtDateTime(r.created_at)}</td>
+                    {CURS.map(c => (
+                      <td key={c} className="px-3 py-2.5 text-right tabular-nums font-semibold text-slate-800">
+                        {fmt(r[`amount_${c.toLowerCase()}`])}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2.5 text-slate-700">{r.person || <span className="text-slate-400 italic">—</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{r.note || <span className="text-slate-400 italic">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
-      {confirmDel && (
-        <div className="modal-overlay">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🗑️</div>
-              <h3 className="font-bold text-slate-800 text-lg mb-2">Fshi tërheqjen?</h3>
-              <p className="text-slate-500 text-sm mb-6">
-                {confirmDel.date} — {fmt(confirmDel.amount_lek)} LEK
-                {confirmDel.amount_eur > 0 && ` / ${fmt(confirmDel.amount_eur)} EUR`}
-                {confirmDel.person && ` (${confirmDel.person})`}
-              </p>
-              <div className="flex gap-3">
-                <button onClick={() => setConfirmDel(null)} className="btn-secondary flex-1 justify-center">Anulo</button>
-                <button
-                  onClick={() => doDelete(confirmDel.id)}
-                  className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  Fshi
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

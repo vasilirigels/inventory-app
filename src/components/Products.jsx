@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import * as XLSX from 'xlsx'
 
 // ── Image upload helpers ───────────────────────────────────────────────────────
@@ -61,27 +62,30 @@ function ProductImage({ product, onUploaded }) {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const CATEGORIES = [
+  'Flori', 'Diamant', 'Ora',
   'Unazë', 'Vathë', 'Byzylyk', 'Gjerdan / Varëse',
-  'Komplet', 'Ora', 'Diamant', 'Tjeter',
+  'Komplet', 'Tjeter',
 ]
 const CAT_ICONS = {
+  'Flori':           '🟡',
+  'Diamant':         '💎',
+  'Ora':             '⌚',
   'Unazë':           '💍',
   'Vathë':           '✨',
   'Byzylyk':         '📿',
   'Gjerdan / Varëse':'🏅',
   'Komplet':         '🎁',
-  'Ora':             '⌚',
-  'Diamant':         '💎',
   'Tjeter':          '📦',
 }
 const CAT_COLORS = {
+  'Flori':           'bg-yellow-100 text-yellow-800',
+  'Diamant':         'bg-blue-100 text-blue-800',
+  'Ora':             'bg-slate-100 text-slate-700',
   'Unazë':           'bg-yellow-100 text-yellow-800',
   'Vathë':           'bg-pink-100 text-pink-800',
   'Byzylyk':         'bg-amber-100 text-amber-800',
   'Gjerdan / Varëse':'bg-orange-100 text-orange-800',
   'Komplet':         'bg-purple-100 text-purple-800',
-  'Ora':             'bg-slate-100 text-slate-700',
-  'Diamant':         'bg-blue-100 text-blue-800',
   'Tjeter':          'bg-gray-100 text-gray-700',
 }
 const EMPTY = {
@@ -621,6 +625,9 @@ export default function Products() {
 
   useEffect(() => { load() }, [load])
 
+  // Live-refresh when another PC creates/edits/deletes a product.
+  useRealtimeSync('products', load)
+
   // Return product creation date as local YYYY-MM-DD. SQLite stores created_at
   // in UTC, so we parse it explicitly as UTC before reading the local day —
   // otherwise late-night creations would shift to the wrong calendar day.
@@ -658,11 +665,18 @@ export default function Products() {
   const handleSave = async data => {
     try {
       if (data.id) {
-        await fetch(`/api/products/${data.id}`, {
+        const res = await fetch(`/api/products/${data.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         })
+        // 409 = another PC saved a change while this form was open. Reload the
+        // list and warn — user's edits stay in the form so they can retry.
+        if (res.status === 409) {
+          await load()
+          alert('Ky produkt u ndryshua nga një PC tjetër ndërkohë. Të dhënat u rifreskuan — kontrollo dhe ruaj sërish.')
+          return
+        }
       } else {
         await fetch('/api/products', {
           method: 'POST',
@@ -867,6 +881,10 @@ export default function Products() {
             <option value="2">×2 (kosto × 2)</option>
             <option value="2.5">×2.5 (kosto × 2.5)</option>
             <option value="3">×3 (kosto × 3)</option>
+            <option value="3.5">×3.5 (kosto × 3.5)</option>
+            <option value="4">×4 (kosto × 4)</option>
+            <option value="4.5">×4.5 (kosto × 4.5)</option>
+            <option value="5">×5 (kosto × 5)</option>
           </select>
         </div>
       </div>
@@ -1027,6 +1045,10 @@ export default function Products() {
                         <option value="2">×2</option>
                         <option value="2.5">×2.5</option>
                         <option value="3">×3</option>
+                        <option value="3.5">×3.5</option>
+                        <option value="4">×4</option>
+                        <option value="4.5">×4.5</option>
+                        <option value="5">×5</option>
                       </select>
                     </div>
                   </td>

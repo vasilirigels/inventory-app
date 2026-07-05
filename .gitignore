@@ -8,4 +8,5 @@ dist/
 npm-debug.log*
 .vite/
 server/uploads/
-.claude/settings.local.json
+.claude/
+release/

@@ -34,12 +34,8 @@ const NAV_GROUPS = [
         id: 'shitje', label: 'Shitje', icon: '⬆️',
         children: [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
-          { id: 'shitje-flori',          label: 'Shitje Flori' },
-          { id: 'shitje-diamant',        label: 'Shitje Diamant' },
           { id: 'shitje-online',         label: 'Shitje Online & Stafi' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },
-          { id: 'kthime-flori',          label: 'Kthime Flori' },
-          { id: 'kthime-diamant',        label: 'Kthime Diamant' },
           { id: 'kthime-online',         label: 'Kthime Online & Stafi' },
           { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
         ],
@@ -48,9 +44,7 @@ const NAV_GROUPS = [
         id: 'blerje', label: 'Blerje', icon: '⬇️',
         children: [
           { id: 'fatura-blerje',         label: 'FATURA BLERJE' },
-          { id: 'blerje-flori',          label: 'Hyrje Flori' },
-          { id: 'blerje-diamant',        label: 'Hyrje Diamant' },
-          { id: 'shlyerje-borxhi',       label: 'Shlyerje Borxhi te Produkteve' },
+          { id: 'blerje-has',            label: 'BLERJE HAS' },
           { id: 'raport-blerje-artikuj', label: 'Raport Blerje Artikuj' },
         ],
       },
@@ -84,7 +78,7 @@ const NAV_GROUPS = [
       { id: 'detyrime-furnitor', label: 'Detyrime Furnitor', icon: '🏭' },
       { id: 'analize-veprime-furnitor', label: 'ANALIZE VEPRIME FURNITOR', icon: '📉' },
       { id: 'raport-xhiro-ditore',   label: 'Raport Xhiro Ditore',   icon: '📅' },
-      { id: 'raport-shpenzime',      label: 'Raport Shpenzime',      icon: '💸' },
+      { id: 'raport-shpenzime',      label: 'Raport Shpenzime Ditore',      icon: '💸' },
       { id: 'permbledhese',  label: 'Përmbledhëse',           icon: '📊' },
       { id: 'marketing',     label: 'Marketingu',             icon: '📣' },
     ],
@@ -105,7 +99,7 @@ const PAGE_TITLES = {
   'raport-xhiro-ditore':   'Raport Xhiro Ditore',
   'raport-shitje-artikuj': 'Raport Shitje — Artikuj',
   'raport-blerje-artikuj': 'Raport Blerje — Artikuj',
-  'raport-shpenzime':      'Raport Shpenzime',
+  'raport-shpenzime':      'Raport Shpenzime Ditore',
   permbledhese: 'Përmbledhëse',
   marketing:    'Shpenzime Marketingu',
   shitje:       'Shitje',
@@ -146,14 +140,37 @@ export default function Layout({
   const parentOfPage = findParentId(page)
   const [openMenus, setOpenMenus] = useState(() => parentOfPage ? { [parentOfPage]: true } : {})
   const toggleMenu = id => setOpenMenus(m => ({ ...m, [id]: !m[id] }))
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const headerTitle = PAGE_TITLES[page] ?? getChildTitle(page) ?? 'Faqe'
+
+  // Në mobile, kliku në një zë navigacioni mbyll sidebar-in.
+  const handleNavigate = (id) => {
+    onNavigate(id)
+    setSidebarOpen(false)
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
 
+      {/* ── Backdrop për mobile (kliku mbyll sidebar-in) ── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ── Sidebar ── */}
-      <aside className="w-60 bg-slate-900 flex flex-col flex-shrink-0 shadow-xl">
+      <aside
+        className={`
+          w-60 bg-slate-900 flex flex-col flex-shrink-0 shadow-xl
+          fixed inset-y-0 left-0 z-40 transform transition-transform duration-200
+          md:static md:translate-x-0
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
+      >
 
         {/* Logo */}
         <div className="px-5 py-5 border-b border-slate-700/60">
@@ -185,7 +202,7 @@ export default function Layout({
                   const handleLeafClick = (e, id) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey) return
                     e.preventDefault()
-                    onNavigate(id)
+                    handleNavigate(id)
                   }
                   return (
                     <div key={item.id}>
@@ -256,13 +273,21 @@ export default function Layout({
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Top header */}
-        <header className="bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-4">
-            <h2 className="text-base font-bold text-slate-800">{headerTitle}</h2>
+        <header className="bg-white border-b border-slate-200 px-3 md:px-6 h-14 flex items-center justify-between flex-shrink-0 gap-2">
+          <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
+            {/* Hamburger për mobile */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex-shrink-0"
+              aria-label="Hap menynë"
+            >
+              <span className="text-xl leading-none">☰</span>
+            </button>
+            <h2 className="text-sm md:text-base font-bold text-slate-800 truncate">{headerTitle}</h2>
 
             {/* Daily date nav — show on any date-driven page */}
             {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && (
-              <div className="flex items-center gap-1.5">
+              <div className="hidden lg:flex items-center gap-1.5">
                 <button
                   onClick={() => onDateChange(prevDay(currentDate))}
                   className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
@@ -288,16 +313,16 @@ export default function Layout({
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
             <a
               href="/api/backup"
               download
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-2 md:px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded-lg transition-colors"
               title="Shkarko backup të bazës së të dhënave"
             >
-              💾 Backup
+              💾 <span className="hidden sm:inline">Backup</span>
             </a>
-            <span className="text-xs text-slate-400 hidden sm:block">
+            <span className="text-xs text-slate-400 hidden lg:block">
               {now.toLocaleDateString('sq-AL', { day: 'numeric', month: 'short', year: 'numeric' })}
             </span>
             <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-lg flex items-center justify-center text-white text-sm font-bold shadow-sm">
@@ -306,8 +331,32 @@ export default function Layout({
           </div>
         </header>
 
+        {/* Date nav për mobile / tablet — nën header */}
+        {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && (
+          <div className="lg:hidden bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1.5 flex-wrap flex-shrink-0">
+            <button
+              onClick={() => onDateChange(prevDay(currentDate))}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+            >‹</button>
+            <input
+              type="date"
+              value={currentDate}
+              onChange={e => onDateChange(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 flex-1 min-w-[130px]"
+            />
+            <button
+              onClick={() => onDateChange(nextDay(currentDate))}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+            >›</button>
+            <button
+              onClick={() => onDateChange(new Date().toISOString().split('T')[0])}
+              className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700"
+            >Sot</button>
+          </div>
+        )}
+
         {/* Page content */}
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-3 md:p-6">
           {children}
         </main>
       </div>

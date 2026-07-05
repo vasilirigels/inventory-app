@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -188,8 +189,10 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
   const [from, setFrom]       = useState(getMonthStart())
   const [to, setTo]           = useState(getToday())
   const [filter, setFilter]   = useState('')
+  const [category, setCategory] = useState('')
   const [rows, setRows]       = useState([])
   const [totals, setTotals]   = useState(null)
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [docsRow, setDocsRow] = useState(null)
@@ -200,9 +203,11 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     try {
       const params = new URLSearchParams({ from, to })
       if (filter.trim()) params.set('q', filter.trim())
+      if (category) params.set('category', category)
       const data = await fetch(`/api/reports/purchase-items?${params}`).then(r => r.json())
       setRows(Array.isArray(data?.rows) ? data.rows : [])
       setTotals(data?.totals || null)
+      if (Array.isArray(data?.categories)) setCategories(data.categories)
       setSearched(true)
     } catch (e) {
       console.error(e)
@@ -210,9 +215,21 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }, [from, to, filter])
+  }, [from, to, filter, category])
 
   useEffect(() => { load() }, []) // eslint-disable-line
+  // Auto-load kur ndryshojnë filtrat "atomikë" (data, kategoria).
+  useEffect(() => {
+    if (searched) load()
+    // eslint-disable-next-line
+  }, [from, to, category])
+  // Debounce për filtrin tekstual.
+  useEffect(() => {
+    if (!searched) return
+    const t = setTimeout(() => { load() }, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line
+  }, [filter])
 
   const exportXlsx = () => {
     const out = rows.map(r => ({
@@ -261,23 +278,30 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
         </button>
       </div>
 
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onChange={({ from: f, to: t }) => { setFrom(f); setTo(t) }}
+        loading={loading}
+        hint="Ndikon: rreshtat, totalet dhe eksporti"
+      />
+
       <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          <div>
-            <label className="form-label">Nga data</label>
-            <input type="date" value={from} max={to}
-              onChange={e => setFrom(e.target.value)} className="input-field" />
-          </div>
-          <div>
-            <label className="form-label">Deri më datë</label>
-            <input type="date" value={to} min={from}
-              onChange={e => setTo(e.target.value)} className="input-field" />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <ProductFilterPicker value={filter} onChange={setFilter} />
+          <div>
+            <label className="form-label">Kategoria</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} className="input-field">
+              <option value="">Të gjitha</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
           <div className="flex gap-2">
-            <button onClick={load} className="btn-primary flex-1">🔎 Kërko</button>
+            <button onClick={load} className="btn-secondary flex-1" title="Rifresko manualisht — filtrat aplikohen automatikisht">
+              🔄 Rifresko
+            </button>
             <button
-              onClick={() => { setFilter(''); setFrom(getMonthStart()); setTo(getToday()) }}
+              onClick={() => { setFilter(''); setCategory(''); setFrom(getMonthStart()); setTo(getToday()) }}
               className="btn-secondary"
               title="Pastro filtrat"
             >✕</button>

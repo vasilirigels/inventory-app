@@ -3,8 +3,13 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
+import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
-import { initDB, queryAll, queryOne, run, exportDB } from './db.js';
+import {
+  initDB, queryAll, queryOne, run, exportDB,
+  isUniqueViolation, retryOnUniqueNo,
+} from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +38,62 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// ─── Realtime change broadcast ────────────────────────────────────────────────
+// When any mutation route succeeds, we broadcast { table, action } to every
+// connected client so open windows (on other PCs) can re-fetch. A single
+// middleware wraps res.json so we don't have to touch each route.
+const wsClients = new Set();
+function broadcast(payload) {
+  const data = JSON.stringify(payload);
+  for (const ws of wsClients) {
+    try { if (ws.readyState === 1) ws.send(data); } catch (_) {}
+  }
+}
+// Map URL path → logical table name. Missing entry = no broadcast.
+function tableFromPath(p) {
+  if (!p.startsWith('/api/')) return null;
+  const seg = p.slice(5).split('?')[0].split('/')[0];
+  const map = {
+    'products': 'products',
+    'invoices': 'invoices',
+    'purchase-invoices': 'purchase_invoices',
+    'hurda-purchases': 'hurda_purchases',
+    'has-purchases': 'has_purchases',
+    'sales': 'sales',
+    'client-debts': 'customer_debts',
+    'customer-debts': 'customer_debts',
+    'clients': 'clients',
+    'suppliers': 'suppliers',
+    'daily': 'daily_records',
+    'marketing-expenses': 'marketing_expenses',
+    'expense-categories': 'expense_categories',
+    'expense-entries': 'expense_entries',
+    'safe-withdrawals': 'safe_withdrawals',
+    'safe-conversions': 'safe_conversions',
+    'kasaforta': 'daily_records',
+    'flete-hyrje': 'flete_hyrje',
+    'flete-dalje': 'flete_dalje',
+    'magazina-hyrje': 'magazina_hyrje',
+    'magazina-dalje': 'magazina_dalje',
+    'invoice-payments': 'invoice_payments',
+    'purchase-payments': 'purchase_payments',
+  };
+  return map[seg] || null;
+}
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origJson = res.json.bind(res);
+  res.json = (data) => {
+    const ret = origJson(data);
+    if (res.statusCode < 300) {
+      const table = tableFromPath(req.path);
+      if (table) broadcast({ type: 'change', table, action: req.method, at: Date.now() });
+    }
+    return ret;
+  };
+  next();
+});
+
 // Initialize DB before starting server
 await initDB();
 
@@ -42,22 +103,22 @@ await initDB();
 app.get('/api/daily/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    let record = queryOne('SELECT * FROM daily_records WHERE date = ?', [date]);
+    let record = await queryOne('SELECT * FROM daily_records WHERE date = ?', [date]);
 
     if (!record) {
       // Try to carry forward opening balance from previous day
-      const prevRecord = queryOne(
+      const prevRecord = await queryOne(
         `SELECT * FROM daily_records WHERE date < ? ORDER BY date DESC LIMIT 1`,
         [date]
       );
 
       if (prevRecord) {
         // Calculate closing balance of previous day to use as opening
-        const prevSales = queryAll(
+        const prevSales = await queryAll(
           'SELECT * FROM sales WHERE date = ? AND is_return = 0',
           [prevRecord.date]
         );
-        const prevReturns = queryAll(
+        const prevReturns = await queryAll(
           'SELECT * FROM sales WHERE date = ? AND is_return = 1',
           [prevRecord.date]
         );
@@ -130,7 +191,7 @@ app.post('/api/daily/:date', async (req, res) => {
     const { date } = req.params;
     const data = req.body;
 
-    const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    const existing = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
 
     const fields = [
       'opening_lek', 'opening_eur', 'opening_usd', 'opening_gbp', 'opening_chf',
@@ -146,15 +207,21 @@ app.post('/api/daily/:date', async (req, res) => {
       'debt_settlement_chf', 'debt_settlement_has'
     ];
 
-    const values = fields.map(f => data[f] || 0);
-
     if (existing) {
-      const setClause = fields.map(f => `${f} = ?`).join(', ');
-      run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...values, date]);
+      // Përditëso VETËM fushat që janë dërguar në body — mos i rivendos zero
+      // fushat e tjera, sepse nën-faqet e sidebar-it dërgojnë vetëm rreshtat
+      // e vet (p.sh. Konvertim Valute dërgon vetëm conv_*).
+      const providedFields = fields.filter(f => Object.prototype.hasOwnProperty.call(data, f));
+      if (providedFields.length === 0) return res.json({ success: true, updated: 0 });
+      const setClause = providedFields.map(f => `${f} = ?`).join(', ');
+      const values    = providedFields.map(f => parseFloat(data[f]) || 0);
+      await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...values, date]);
     } else {
-      const cols = fields.join(', ');
+      // Insert i ri — fushat që s'janë në body marrin default 0
+      const values = fields.map(f => parseFloat(data[f]) || 0);
+      const cols   = fields.join(', ');
       const placeholders = fields.map(() => '?').join(', ');
-      run(
+      await run(
         `INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`,
         [date, ...values]
       );
@@ -180,14 +247,14 @@ app.get('/api/sales/history', async (req, res) => {
     if (to)    { sql += ' AND date <= ?';           params.push(to); }
     if (q)     { sql += ' AND (barcode LIKE ? OR notes LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
     sql += ' ORDER BY date DESC, created_at DESC LIMIT 300';
-    res.json(queryAll(sql, params));
+    res.json(await queryAll(sql, params));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/sales/recent', async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days) || 30, 90);
-    const rows = queryAll(`
+    const rows = await queryAll(`
       SELECT date,
              SUM(eur_cash + eur_pb) AS eur_total,
              SUM(lek_cash + lek_pb) AS lek_total,
@@ -217,7 +284,7 @@ app.get('/api/sales/:date', async (req, res) => {
       params.push(type);
     }
     sql += ' ORDER BY created_at ASC';
-    const rows = queryAll(sql, params);
+    const rows = await queryAll(sql, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -227,7 +294,7 @@ app.get('/api/sales/:date', async (req, res) => {
 app.post('/api/sales', async (req, res) => {
   try {
     const d = req.body;
-    run(
+    await run(
       `INSERT INTO sales (date, type, barcode, cope, gram, lek_cash, lek_pb, eur_cash, eur_pb,
         usd_cash, gbp_cash, chf_cash, skonto_percent, cm_etikete_usd, cm_etikete_eur, is_return, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -249,7 +316,7 @@ app.put('/api/sales/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const d = req.body;
-    run(
+    await run(
       `UPDATE sales SET barcode=?, cope=?, gram=?, lek_cash=?, lek_pb=?, eur_cash=?, eur_pb=?,
         usd_cash=?, gbp_cash=?, chf_cash=?, skonto_percent=?, cm_etikete_usd=?, cm_etikete_eur=?,
         is_return=?, notes=? WHERE id=?`,
@@ -270,7 +337,7 @@ app.put('/api/sales/:id', async (req, res) => {
 app.delete('/api/sales/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    run('DELETE FROM sales WHERE id = ?', [id]);
+    await run('DELETE FROM sales WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -282,7 +349,7 @@ app.delete('/api/sales/:id', async (req, res) => {
 // ============================================================
 app.get('/api/customers/summary', async (req, res) => {
   try {
-    const rows = queryAll(`
+    const rows = await queryAll(`
       SELECT
         name,
         SUM(CASE WHEN type='debt'      THEN lek ELSE 0 END) AS debt_lek,
@@ -309,7 +376,7 @@ app.get('/api/customers/summary', async (req, res) => {
 app.get('/api/customers/:name/transactions', async (req, res) => {
   try {
     const { name } = req.params;
-    const rows = queryAll(
+    const rows = await queryAll(
       'SELECT * FROM customer_debts WHERE name = ? ORDER BY date ASC, id ASC',
       [name]
     );
@@ -325,7 +392,7 @@ app.get('/api/customers/:name/transactions', async (req, res) => {
 app.get('/api/debts/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const rows = queryAll(
+    const rows = await queryAll(
       'SELECT * FROM customer_debts WHERE date = ? ORDER BY created_at ASC',
       [date]
     );
@@ -338,7 +405,7 @@ app.get('/api/debts/:date', async (req, res) => {
 app.post('/api/debts', async (req, res) => {
   try {
     const d = req.body;
-    run(
+    await run(
       `INSERT INTO customer_debts (date, name, type, lek, eur, usd, gbp, chf)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [d.date, d.name, d.type, d.lek || 0, d.eur || 0, d.usd || 0, d.gbp || 0, d.chf || 0]
@@ -352,7 +419,7 @@ app.post('/api/debts', async (req, res) => {
 app.delete('/api/debts/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    run('DELETE FROM customer_debts WHERE id = ?', [id]);
+    await run('DELETE FROM customer_debts WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -365,7 +432,7 @@ app.delete('/api/debts/:id', async (req, res) => {
 app.get('/api/inventory/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const rows = queryAll(
+    const rows = await queryAll(
       'SELECT * FROM inventory WHERE date = ? ORDER BY type',
       [date]
     );
@@ -378,7 +445,7 @@ app.get('/api/inventory/:date', async (req, res) => {
 app.post('/api/inventory', async (req, res) => {
   try {
     const d = req.body;
-    const existing = queryOne(
+    const existing = await queryOne(
       'SELECT id FROM inventory WHERE date = ? AND type = ?',
       [d.date, d.type]
     );
@@ -393,14 +460,14 @@ app.post('/api/inventory', async (req, res) => {
 
     if (existing) {
       const setClause = fields.map(f => `${f} = ?`).join(', ');
-      run(
+      await run(
         `UPDATE inventory SET ${setClause} WHERE date = ? AND type = ?`,
         [...values, d.date, d.type]
       );
     } else {
       const cols = fields.join(', ');
       const placeholders = fields.map(() => '?').join(', ');
-      run(
+      await run(
         `INSERT INTO inventory (date, type, ${cols}) VALUES (?, ?, ${placeholders})`,
         [d.date, d.type, ...values]
       );
@@ -421,12 +488,12 @@ app.get('/api/marketing/:date', async (req, res) => {
     // Support YYYY-MM for monthly view
     let rows;
     if (date.length === 7) {
-      rows = queryAll(
+      rows = await queryAll(
         "SELECT * FROM marketing_expenses WHERE date LIKE ? ORDER BY date ASC",
         [date + '%']
       );
     } else {
-      rows = queryAll(
+      rows = await queryAll(
         'SELECT * FROM marketing_expenses WHERE date = ? ORDER BY created_at ASC',
         [date]
       );
@@ -440,7 +507,7 @@ app.get('/api/marketing/:date', async (req, res) => {
 app.post('/api/marketing', async (req, res) => {
   try {
     const d = req.body;
-    run(
+    await run(
       `INSERT INTO marketing_expenses (date, description, amount_lek, amount_eur, amount_usd)
        VALUES (?, ?, ?, ?, ?)`,
       [d.date, d.description || '', d.amount_lek || 0, d.amount_eur || 0, d.amount_usd || 0]
@@ -454,7 +521,7 @@ app.post('/api/marketing', async (req, res) => {
 app.delete('/api/marketing/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
+    await run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -469,17 +536,17 @@ app.get('/api/summary/:year/:month', async (req, res) => {
     const { year, month } = req.params;
     const prefix = `${year}-${month.padStart(2, '0')}`;
 
-    const records = queryAll(
+    const records = await queryAll(
       'SELECT * FROM daily_records WHERE date LIKE ? ORDER BY date',
       [prefix + '%']
     );
 
     const result = [];
     for (const rec of records) {
-      const sales = queryAll('SELECT * FROM sales WHERE date = ? AND is_return = 0', [rec.date]);
-      const returns = queryAll('SELECT * FROM sales WHERE date = ? AND is_return = 1', [rec.date]);
-      const debts = queryAll('SELECT * FROM customer_debts WHERE date = ?', [rec.date]);
-      const marketing = queryAll('SELECT * FROM marketing_expenses WHERE date = ?', [rec.date]);
+      const sales = await queryAll('SELECT * FROM sales WHERE date = ? AND is_return = 0', [rec.date]);
+      const returns = await queryAll('SELECT * FROM sales WHERE date = ? AND is_return = 1', [rec.date]);
+      const debts = await queryAll('SELECT * FROM customer_debts WHERE date = ?', [rec.date]);
+      const marketing = await queryAll('SELECT * FROM marketing_expenses WHERE date = ?', [rec.date]);
 
       const sumField = (arr, field) => arr.reduce((s, r) => s + (r[field] || 0), 0);
 
@@ -519,9 +586,9 @@ app.get('/api/report', async (req, res) => {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
 
-    const recs   = queryAll('SELECT * FROM daily_records WHERE date BETWEEN ? AND ?', [from, to]);
-    const sales  = queryAll('SELECT * FROM sales WHERE date BETWEEN ? AND ?', [from, to]);
-    const debts  = queryAll('SELECT * FROM customer_debts WHERE date BETWEEN ? AND ?', [from, to]);
+    const recs   = await queryAll('SELECT * FROM daily_records WHERE date BETWEEN ? AND ?', [from, to]);
+    const sales  = await queryAll('SELECT * FROM sales WHERE date BETWEEN ? AND ?', [from, to]);
+    const debts  = await queryAll('SELECT * FROM customer_debts WHERE date BETWEEN ? AND ?', [from, to]);
 
     const sumD = field => recs.reduce((s, r) => s + (r[field] || 0), 0);
 
@@ -626,9 +693,9 @@ app.get('/api/yearly/:year', async (req, res) => {
     const months = [];
     for (let m = 1; m <= 12; m++) {
       const prefix = `${year}-${String(m).padStart(2, '0')}`;
-      const recs = queryAll('SELECT * FROM daily_records WHERE date LIKE ?', [prefix + '%']);
-      const sales = queryAll('SELECT * FROM sales WHERE date LIKE ?', [prefix + '%']);
-      const debts = queryAll('SELECT * FROM customer_debts WHERE date LIKE ?', [prefix + '%']);
+      const recs = await queryAll('SELECT * FROM daily_records WHERE date LIKE ?', [prefix + '%']);
+      const sales = await queryAll('SELECT * FROM sales WHERE date LIKE ?', [prefix + '%']);
+      const debts = await queryAll('SELECT * FROM customer_debts WHERE date LIKE ?', [prefix + '%']);
 
       const sumD = field => recs.reduce((s, r) => s + (r[field] || 0), 0);
       const sumS = (arr, field) => arr.reduce((s, r) => s + (r[field] || 0), 0);
@@ -704,7 +771,7 @@ app.get('/api/products/lookup', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     if (!q) return res.json(null);
-    const product = queryOne(
+    const product = await queryOne(
       'SELECT * FROM products WHERE active = 1 AND (barcode = ? OR sku = ?) LIMIT 1',
       [q, q]
     );
@@ -717,7 +784,7 @@ app.get('/api/products/search', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
     const like = `%${q}%`;
-    const rows = queryAll(
+    const rows = await queryAll(
       `SELECT id, name, sku, barcode, category, sell_price, vat_rate, stock, image_path
          FROM products
         WHERE active = 1
@@ -735,8 +802,8 @@ app.patch('/api/products/:id/stock', async (req, res) => {
     const { id } = req.params;
     const { delta } = req.body;
     if (typeof delta !== 'number') return res.status(400).json({ error: 'delta required' });
-    run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, id]);
-    const p = queryOne('SELECT stock FROM products WHERE id = ?', [id]);
+    await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, id]);
+    const p = await queryOne('SELECT stock FROM products WHERE id = ?', [id]);
     res.json({ success: true, stock: p?.stock ?? 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -746,7 +813,7 @@ app.post('/api/products/:id/image', upload.single('image'), async (req, res) => 
     const { id } = req.params;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const image_path = req.file.filename;
-    run('UPDATE products SET image_path = ? WHERE id = ?', [image_path, id]);
+    await run('UPDATE products SET image_path = ? WHERE id = ?', [image_path, id]);
     res.json({ success: true, image_path });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -754,19 +821,19 @@ app.post('/api/products/:id/image', upload.single('image'), async (req, res) => 
 app.delete('/api/products/:id/image', async (req, res) => {
   try {
     const { id } = req.params;
-    const p = queryOne('SELECT image_path FROM products WHERE id = ?', [id]);
+    const p = await queryOne('SELECT image_path FROM products WHERE id = ?', [id]);
     if (p?.image_path) {
       const fp = path.join(uploadDir, p.image_path);
       if (fs.existsSync(fp)) fs.unlinkSync(fp);
     }
-    run("UPDATE products SET image_path = '' WHERE id = ?", [id]);
+    await run("UPDATE products SET image_path = '' WHERE id = ?", [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/backup', (req, res) => {
+app.get('/api/backup', async (req, res) => {
   try {
-    const data = exportDB();
+    const data = await exportDB();
     if (!data) return res.status(500).json({ error: 'DB not ready' });
     const buf = Buffer.from(data);
     const date = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -781,7 +848,7 @@ app.get('/api/backup', (req, res) => {
 // ============================================================
 app.get('/api/products', async (req, res) => {
   try {
-    const rows = queryAll(
+    const rows = await queryAll(
       'SELECT * FROM products WHERE active = 1 ORDER BY category, name',
       []
     );
@@ -791,12 +858,17 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// updated_at is a millisecond timestamp used for optimistic locking on
+// concurrent product edits. INSERT and UPDATE both stamp `now`, so a client
+// that PUTs with a stale value gets a 409 and can re-fetch.
+const NOW_TS_SQL = "strftime('%Y-%m-%d %H:%M:%f','now')";
+
 app.post('/api/products', async (req, res) => {
   try {
     const d = req.body;
-    run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    await run(
+      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
@@ -816,10 +888,24 @@ app.put('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const d = req.body;
-    run(
+    // Optimistic lock: if client sends `updated_at`, require it to still match
+    // what's in the DB. Missing/empty means the client opts out (legacy calls).
+    const clientTs = (d.updated_at ?? '').toString();
+    const current = await queryOne('SELECT updated_at FROM products WHERE id = ?', [id]);
+    if (!current) return res.status(404).json({ error: 'not found' });
+    if (clientTs && (current.updated_at || '') && clientTs !== current.updated_at) {
+      const fresh = await queryOne('SELECT * FROM products WHERE id = ?', [id]);
+      return res.status(409).json({
+        error: 'conflict',
+        message: 'Ky produkt u ndryshua nga një PC tjetër. Rifresko dhe provo përsëri.',
+        current: fresh,
+      });
+    }
+    await run(
       `UPDATE products
        SET name=?, sku=?, barcode=?, category=?, brand=?, description=?,
-           cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?
+           cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?,
+           updated_at=${NOW_TS_SQL}
        WHERE id=?`,
       [
         d.name, d.sku || '', d.barcode || '',
@@ -857,15 +943,15 @@ app.post('/api/products/import', async (req, res) => {
       // imports of the same item create duplicate rows in the Products page.
       // Stock/cost are not overwritten; the invoice save handles that.
       let existing = null;
-      if (barcode) existing = queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
-      if (!existing && sku) existing = queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]);
+      if (barcode) existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
+      if (!existing && sku) existing = await queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]);
       if (existing) {
-        run('UPDATE products SET active = 1 WHERE id = ?', [existing.id]);
+        await run('UPDATE products SET active = 1 WHERE id = ?', [existing.id]);
         ids.push(existing.id);
         matched++;
         continue;
       }
-      run(
+      await run(
         `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -876,7 +962,7 @@ app.post('/api/products/import', async (req, res) => {
           parseInt(d.stock) || 0, parseInt(d.min_stock) || 5,
         ]
       );
-      const row = queryOne('SELECT last_insert_rowid() AS id');
+      const row = await queryOne('SELECT last_insert_rowid() AS id');
       ids.push(row?.id || null);
       imported++;
     }
@@ -889,7 +975,7 @@ app.post('/api/products/import', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    run('UPDATE products SET active = 0 WHERE id = ?', [id]);
+    await run('UPDATE products SET active = 0 WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -963,7 +1049,7 @@ async function fetchBSHRates() {
 app.get('/api/exchange-rates/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const cached = queryAll('SELECT currency, rate, source FROM exchange_rates WHERE date = ?', [date]);
+    const cached = await queryAll('SELECT currency, rate, source FROM exchange_rates WHERE date = ?', [date]);
     let rates = {};
     let source = 'cache';
     if (cached.length >= SUPPORTED_CURRENCIES.length) {
@@ -974,7 +1060,7 @@ app.get('/api/exchange-rates/:date', async (req, res) => {
       rates = fetched.rates;
       source = fetched.source;
       for (const [cur, rate] of Object.entries(rates)) {
-        run(
+        await run(
           'INSERT OR REPLACE INTO exchange_rates (date, currency, rate, source) VALUES (?, ?, ?, ?)',
           [date, cur, rate, source]
         );
@@ -994,7 +1080,7 @@ app.post('/api/exchange-rates/:date', async (req, res) => {
     if (!rates || typeof rates !== 'object') return res.status(400).json({ error: 'rates required' });
     for (const [cur, rate] of Object.entries(rates)) {
       if (cur === 'LEK') continue;
-      run(
+      await run(
         'INSERT OR REPLACE INTO exchange_rates (date, currency, rate, source) VALUES (?, ?, ?, ?)',
         [date, cur, parseFloat(rate) || 0, 'manual']
       );
@@ -1020,9 +1106,9 @@ function computeLineTotals(it) {
   return { qty, unit_price_no_vat: price, discount_percent: disc, vat_rate: vatR, subtotal_no_vat, vat_amount, total_with_vat };
 }
 
-function nextInvoiceNo(date) {
+async function nextInvoiceNo(date) {
   const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
-  const row = queryOne(
+  const row = await queryOne(
     "SELECT COUNT(*) AS c FROM invoices WHERE date LIKE ?",
     [year + '%']
   );
@@ -1033,18 +1119,42 @@ function nextInvoiceNo(date) {
 app.get('/api/invoices/next-no', async (req, res) => {
   try {
     const { date } = req.query;
-    res.json({ invoice_no: nextInvoiceNo(date) });
+    res.json({ invoice_no: await nextInvoiceNo(date) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// Filtra sipas produkteve — nëse jepen `material` ose `category`, kthen vetëm
+// faturat që kanë të paktën një artikull me atë material/kategori.
+function buildItemFilterSQL(material, category) {
+  const conds = [];
+  const params = [];
+  if (material === 'flori' || material === 'diamant') {
+    conds.push('COALESCE(p.material, \'\') = ?');
+    params.push(material);
+  }
+  if (category && category.trim()) {
+    conds.push('COALESCE(p.category, \'\') = ?');
+    params.push(category.trim());
+  }
+  if (conds.length === 0) return { sql: '', params: [] };
+  const clause = `AND EXISTS (
+    SELECT 1 FROM invoice_items ii
+    LEFT JOIN products p ON p.id = ii.product_id
+    WHERE ii.invoice_id = i.id AND ${conds.join(' AND ')}
+  )`;
+  return { sql: clause, params };
+}
 
 app.get('/api/invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const rows = queryAll(
+    const { material, category } = req.query;
+    const filter = buildItemFilterSQL(material, category);
+    const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
-       FROM invoices i WHERE i.date = ? ORDER BY i.id ASC`,
-      [date]
+       FROM invoices i WHERE i.date = ? ${filter.sql} ORDER BY i.id ASC`,
+      [date, ...filter.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1052,13 +1162,14 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
 
 app.get('/api/invoices/by-range', async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, material, category } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
-    const rows = queryAll(
+    const filter = buildItemFilterSQL(material, category);
+    const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
-       FROM invoices i WHERE i.date BETWEEN ? AND ? ORDER BY i.date ASC, i.id ASC`,
-      [from, to]
+       FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ORDER BY i.date ASC, i.id ASC`,
+      [from, to, ...filter.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1067,10 +1178,10 @@ app.get('/api/invoices/by-range', async (req, res) => {
 app.get('/api/invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const invoice = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    const invoice = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!invoice) return res.status(404).json({ error: 'not found' });
-    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id ASC', [id]);
-    const paySum = queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [id])?.s || 0;
+    const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id ASC', [id]);
+    const paySum = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [id])?.s || 0;
     const raw = (invoice.amount_paid || 0) - paySum;
     const initial_amount_paid = +(invoice.is_credit_note ? raw : Math.max(0, raw)).toFixed(2);
     res.json({ ...invoice, items, initial_amount_paid });
@@ -1091,12 +1202,12 @@ function recomputeInvoiceTotals(items) {
   };
 }
 
-function adjustStock(items, sign) {
+async function adjustStock(items, sign) {
   for (const it of items) {
     if (it.product_id && it.qty) {
       const delta = sign * (parseInt(it.qty) || 0);
       if (delta !== 0) {
-        run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+        await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
       }
     }
   }
@@ -1105,17 +1216,17 @@ function adjustStock(items, sign) {
 // Auto-register a client when an invoice references one that's not in the
 // `clients` table yet. Match by NIPT first (strongest key), then by exact
 // normalized full name. Returns silently — failure must never block the sale.
-function ensureClientExists(name, nipt) {
+async function ensureClientExists(name, nipt) {
   try {
     const cleanName = (name || '').trim();
     const cleanNipt = (nipt || '').trim();
     if (!cleanName && !cleanNipt) return;
 
     if (cleanNipt) {
-      const byNipt = queryOne('SELECT id FROM clients WHERE nipt = ?', [cleanNipt]);
+      const byNipt = await queryOne('SELECT id FROM clients WHERE nipt = ?', [cleanNipt]);
       if (byNipt) return;
     } else {
-      const byName = queryOne(
+      const byName = await queryOne(
         `SELECT id FROM clients
           WHERE LOWER(TRIM(first_name || ' ' || last_name)) = LOWER(?)`,
         [cleanName]
@@ -1126,7 +1237,7 @@ function ensureClientExists(name, nipt) {
     const parts = cleanName.split(/\s+/);
     const firstName = parts[0] || '';
     const lastName  = parts.slice(1).join(' ');
-    run(
+    await run(
       `INSERT INTO clients (nipt, first_name, last_name, address, phone, notes)
        VALUES (?, ?, ?, '', '', '')`,
       [cleanNipt, firstName, lastName]
@@ -1139,7 +1250,7 @@ app.post('/api/invoices', async (req, res) => {
     const d = req.body || {};
     const date = d.date;
     if (!date) return res.status(400).json({ error: 'date required' });
-    const invoice_no = (d.invoice_no || '').trim() || nextInvoiceNo(date);
+    const userProvidedNo = (d.invoice_no || '').trim();
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
     const totals = recomputeInvoiceTotals(items);
@@ -1164,14 +1275,14 @@ app.post('/api/invoices', async (req, res) => {
       const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0);
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
-    ensureClientExists(d.customer_name, d.customer_nipt);
-    run(
+    await ensureClientExists(d.customer_name, d.customer_nipt);
+    const doInsertInvoice = (invNo) => run(
       `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
         subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
         paid_cash, paid_pos, paid_bank, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        date, invoice_no, d.customer_name || '', d.customer_nipt || '',
+        date, invNo, d.customer_name || '', d.customer_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
         totals.subtotal_no_vat, totalDiscount,
         totals.total_vat, totals.total_with_vat,
@@ -1180,10 +1291,16 @@ app.post('/api/invoices', async (req, res) => {
         d.notes || '',
       ]
     );
-    const invoice = queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
+    // If two PCs race, the UNIQUE index on invoice_no makes one INSERT fail;
+    // retryOnUniqueNo asks for a fresh number and tries again. User-provided
+    // numbers are inserted as-is so a collision surfaces to the caller.
+    const invoice_no = userProvidedNo
+      ? (await doInsertInvoice(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextInvoiceNo(date), doInsertInvoice);
+    const invoice = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const invoiceId = invoice?.id;
     for (const it of items) {
-      run(
+      await run(
         `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1194,7 +1311,7 @@ app.post('/api/invoices', async (req, res) => {
         ]
       );
     }
-    adjustStock(items, -1);
+    await adjustStock(items, -1);
     res.json({ success: true, id: invoiceId, invoice_no });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1205,9 +1322,9 @@ app.put('/api/invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const d = req.body || {};
-    const existing = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    const existing = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
-    const oldItems = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    const oldItems = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
     const totals = recomputeInvoiceTotals(items);
@@ -1227,18 +1344,21 @@ app.put('/api/invoices/:id', async (req, res) => {
     } else {
       formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? totals.total_with_vat : 0;
     }
-    const existingPaySum = queryOne(
+    const existingPaySum = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?',
       [id]
     )?.s || 0;
     const amountPaidU = +(formInitialPaid + existingPaySum).toFixed(2);
-    const amountDueU = Math.max(0, +(totals.total_with_vat - amountPaidU).toFixed(2));
+    // Për fatura kreditore lejo `amount_due` negativ (shop i detyrohet klientit
+    // ose po redukton borxhin origjinal). Për fatura të zakonshme mbaje ≥ 0.
+    const rawDue = +(totals.total_with_vat - amountPaidU).toFixed(2);
+    const amountDueU = existing.is_credit_note ? rawDue : Math.max(0, rawDue);
     const totalDiscountU = +items.reduce((s, it) => {
       const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0);
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
-    ensureClientExists(d.customer_name, d.customer_nipt);
-    run(
+    await ensureClientExists(d.customer_name, d.customer_nipt);
+    await run(
       `UPDATE invoices SET date=?, customer_name=?, customer_nipt=?, currency=?, exchange_rate=?,
         subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?,
         paid_cash=?, paid_pos=?, paid_bank=?, notes=?
@@ -1255,10 +1375,10 @@ app.put('/api/invoices/:id', async (req, res) => {
       ]
     );
     // Restore stock from previous items, then re-deduct
-    adjustStock(oldItems, +1);
-    run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
+    await adjustStock(oldItems, +1);
+    await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
     for (const it of items) {
-      run(
+      await run(
         `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1269,7 +1389,7 @@ app.put('/api/invoices/:id', async (req, res) => {
         ]
       );
     }
-    adjustStock(items, -1);
+    await adjustStock(items, -1);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1279,11 +1399,11 @@ app.put('/api/invoices/:id', async (req, res) => {
 app.delete('/api/invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
-    adjustStock(items, +1);
-    run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
-    run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
-    run('DELETE FROM invoices WHERE id = ?', [id]);
+    const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    await adjustStock(items, +1);
+    await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
+    await run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
+    await run('DELETE FROM invoices WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1294,13 +1414,13 @@ app.delete('/api/invoices/:id', async (req, res) => {
 app.post('/api/invoices/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
-    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    const inv = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
     if (inv.cancelled) return res.status(400).json({ error: 'Fatura është anuluar tashmë' });
-    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
-    adjustStock(items, +1);
-    run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
-    run('UPDATE invoices SET cancelled = 1, amount_paid = 0, amount_due = 0 WHERE id = ?', [id]);
+    const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    await adjustStock(items, +1);
+    await run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
+    await run('UPDATE invoices SET cancelled = 1, amount_paid = 0, amount_due = 0 WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1309,37 +1429,66 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
 app.post('/api/invoices/:id/credit-note', async (req, res) => {
   try {
     const { id } = req.params;
-    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    const inv = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
     if (inv.cancelled) return res.status(400).json({ error: 'Nuk lëshohet kreditore për faturë të anuluar' });
     if (inv.is_credit_note) return res.status(400).json({ error: 'Kjo është tashmë një kreditore' });
-    const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
     const date = (req.body && req.body.date) || new Date().toISOString().slice(0, 10);
-    const baseNo = nextInvoiceNo(date);
+    const baseNo = await nextInvoiceNo(date);
     const invoice_no = `${baseNo}-K`;
 
-    // Stornim: gjithmonë cash, e paguar plotësisht (amount_paid = total, due = 0)
+    // Stornim: trashëgon metodën e pagesës nga fatura origjinale që arka të mos
+    // shënojë levizje kesh të rrejshme.
+    //  - Cash/POS/Bank origjinali → kreditore me të njëjtën metodë, amount_paid=negTotal, due=0
+    //    (arka merr refund në atë mënyrë)
+    //  - Borxh origjinali → kreditore borxh me amount_paid=0, due=negTotal (redukton borxhin
+    //    e klientit pa lëvizje kesh; asgjë nuk u pagua, asgjë nuk kthehet kesh)
+    //  - Mikse origjinal → kreditore mikse me pjesët e paguara negative (thjesht refund në të
+    //    dyja fushat proporcionalisht)
     const negTotal = -(inv.total_with_vat || 0);
-    run(
+    const parentPm = inv.payment_method || 'cash';
+    let creditPm, creditPaid, creditDue, creditPaidCash = 0, creditPaidPos = 0, creditPaidBank = 0;
+    if (parentPm === 'debt') {
+      creditPm = 'debt';
+      creditPaid = 0;
+      creditDue = negTotal;
+    } else if (parentPm === 'mikse') {
+      creditPm = 'mikse';
+      creditPaid = negTotal;
+      creditDue = 0;
+      creditPaidCash = -(inv.paid_cash || 0);
+      creditPaidPos  = -(inv.paid_pos  || 0);
+      creditPaidBank = -(inv.paid_bank || 0);
+    } else {
+      // cash / pos / bank
+      creditPm = parentPm;
+      creditPaid = negTotal;
+      creditDue = 0;
+    }
+    await run(
       `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
-        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method,
+        paid_cash, paid_pos, paid_bank,
+        amount_paid, amount_due,
         notes, is_credit_note, parent_invoice_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date, invoice_no, inv.customer_name || '', inv.customer_nipt || '',
         inv.currency || 'LEK', inv.exchange_rate || 1,
         -(inv.subtotal_no_vat || 0), -(inv.total_discount || 0),
         -(inv.total_vat || 0), negTotal,
-        'cash',
-        negTotal, 0,
+        creditPm,
+        creditPaidCash, creditPaidPos, creditPaidBank,
+        creditPaid, creditDue,
         `Stornim për faturën ${inv.invoice_no}`,
         1, parseInt(id),
       ]
     );
-    const created = queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
+    const created = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const newId = created?.id;
     for (const it of items) {
-      run(
+      await run(
         `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1352,7 +1501,7 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
       );
     }
     // Returning items to stock (qty was negative → stock += positive)
-    adjustStock(items, +1);
+    await adjustStock(items, +1);
     res.json({ success: true, id: newId, invoice_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1360,11 +1509,11 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
 // ============================================================
 // INVOICE PAYMENTS — partial payment history per invoice
 // ============================================================
-function recalcInvoicePayments(invoiceId) {
+async function recalcInvoicePayments(invoiceId) {
   // Sum extra payments and rebuild invoice's amount_paid / amount_due
-  const inv = queryOne('SELECT total_with_vat, amount_paid FROM invoices WHERE id = ?', [invoiceId]);
+  const inv = await queryOne('SELECT total_with_vat, amount_paid FROM invoices WHERE id = ?', [invoiceId]);
   if (!inv) return null;
-  const extra = queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [invoiceId]);
+  const extra = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [invoiceId]);
   // amount_paid in invoice = initial_paid + sum(extra payments)
   // We rely on a stored "initial_paid" snapshot — track via a column or compute from history.
   // For simplicity: total_paid = initial registration paid + extras. We store the running total.
@@ -1376,9 +1525,9 @@ function recalcInvoicePayments(invoiceId) {
 app.get('/api/invoices/:id/payments', async (req, res) => {
   try {
     const { id } = req.params;
-    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    const inv = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
-    const payments = queryAll('SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY date ASC, id ASC', [id]);
+    const payments = await queryAll('SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY date ASC, id ASC', [id]);
     // The "initial registration" payment is the portion already in invoice.amount_paid before any extras.
     const extrasSum = payments.reduce((s, p) => s + (p.amount || 0), 0);
     const initialPaid = +(Math.max(0, (inv.amount_paid || 0) - extrasSum)).toFixed(2);
@@ -1400,7 +1549,7 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
     const date = d.date || new Date().toISOString().slice(0, 10);
     const pm = ['cash', 'bank', 'debt', 'pos'].includes(d.payment_method) ? d.payment_method : 'cash';
 
-    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
+    const inv = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'invoice not found' });
 
     const currentDue = Math.max(0, (inv.total_with_vat || 0) - (inv.amount_paid || 0));
@@ -1408,7 +1557,7 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
       return res.status(400).json({ error: `Shuma e tepruar — borxhi i mbetur është ${currentDue.toFixed(2)}` });
     }
 
-    run(
+    await run(
       `INSERT INTO invoice_payments (invoice_id, date, amount, payment_method, notes)
        VALUES (?, ?, ?, ?, ?)`,
       [id, date, amount, pm, d.notes || '']
@@ -1416,7 +1565,7 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
 
     const newPaid = +((inv.amount_paid || 0) + amount).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
-    run('UPDATE invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, id]);
+    await run('UPDATE invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, id]);
 
     res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1425,15 +1574,15 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
 app.delete('/api/invoice-payments/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const pay = queryOne('SELECT * FROM invoice_payments WHERE id = ?', [id]);
+    const pay = await queryOne('SELECT * FROM invoice_payments WHERE id = ?', [id]);
     if (!pay) return res.status(404).json({ error: 'not found' });
-    const inv = queryOne('SELECT * FROM invoices WHERE id = ?', [pay.invoice_id]);
+    const inv = await queryOne('SELECT * FROM invoices WHERE id = ?', [pay.invoice_id]);
     if (!inv) return res.status(404).json({ error: 'invoice missing' });
 
-    run('DELETE FROM invoice_payments WHERE id = ?', [id]);
+    await run('DELETE FROM invoice_payments WHERE id = ?', [id]);
     const newPaid = +Math.max(0, (inv.amount_paid || 0) - (pay.amount || 0)).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
-    run('UPDATE invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.invoice_id]);
+    await run('UPDATE invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.invoice_id]);
     res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1444,7 +1593,8 @@ app.delete('/api/invoice-payments/:id', async (req, res) => {
 app.get('/api/client-debts', async (req, res) => {
   try {
     const { q, nipt, name, from, to } = req.query;
-    // Detyrime tracks Bank + Debt invoices (and credit notes offsetting them); Cash + POS are paid in full and excluded
+    // Detyrime tracks any invoice with unpaid balance: Bank/Debt/Mikse (Cash + POS paid in full).
+    // Tolerance 0.005 to guard against float residuals leaving 0.00... amount_due behind.
     let sql = `
       SELECT i.*,
         (SELECT date   FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
@@ -1452,9 +1602,8 @@ app.get('/api/client-debts', async (req, res) => {
         (SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = i.id) AS payment_count
       FROM invoices i
       WHERE COALESCE(i.cancelled, 0) = 0
-        AND i.payment_method IN ('bank', 'debt')
-        AND (COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0
-             OR COALESCE(i.is_credit_note, 0) = 1)`;
+        AND i.payment_method IN ('bank', 'debt', 'mikse')
+        AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005`;
     const params = [];
     if (nipt) {
       sql += ' AND i.customer_nipt = ?';
@@ -1469,7 +1618,7 @@ app.get('/api/client-debts', async (req, res) => {
     if (from) { sql += ' AND i.date >= ?'; params.push(from); }
     if (to)   { sql += ' AND i.date <= ?'; params.push(to); }
     sql += ' ORDER BY i.date DESC, i.id DESC';
-    res.json(queryAll(sql, params));
+    res.json(await queryAll(sql, params));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1494,7 +1643,7 @@ app.get('/api/client-activity', async (req, res) => {
     if (to)   { conds.push('date <= ?'); params.push(to); }
     // Exclude cancelled invoices; credit notes are included
     conds.push('COALESCE(cancelled, 0) = 0');
-    const invoices = queryAll(
+    const invoices = await queryAll(
       `SELECT * FROM invoices WHERE ${conds.join(' AND ')} ORDER BY date ASC, id ASC`,
       params
     );
@@ -1507,7 +1656,7 @@ app.get('/api/client-activity', async (req, res) => {
     let payWhere = `p.invoice_id IN (${placeholders})`;
     if (from) { payWhere += ' AND p.date >= ?'; payParams.push(from); }
     if (to)   { payWhere += ' AND p.date <= ?'; payParams.push(to); }
-    const payments = queryAll(
+    const payments = await queryAll(
       `SELECT p.*, i.invoice_no, i.date AS invoice_date, i.total_with_vat AS invoice_total
          FROM invoice_payments p
          JOIN invoices i ON i.id = p.invoice_id
@@ -1538,10 +1687,10 @@ app.get('/api/client-debts/summary', async (req, res) => {
   try {
     const onlyDebt = req.query.onlyDebt === '1' || req.query.onlyDebt === 'true';
     const { from, to } = req.query;
-    // Only Bank + Debt invoices count toward debts; Cash + POS excluded entirely
+    // Any invoice with an unpaid balance counts toward client debts: Bank/Debt/Mikse.
     const conds = [
       "COALESCE(cancelled, 0) = 0",
-      "payment_method IN ('bank','debt')",
+      "payment_method IN ('bank','debt','mikse')",
     ];
     const params = [];
     if (from) { conds.push('date >= ?'); params.push(from); }
@@ -1560,13 +1709,13 @@ app.get('/api/client-debts/summary', async (req, res) => {
       FROM invoices
       ${where}
       GROUP BY client_key, customer_name, customer_nipt, currency
-      ${onlyDebt ? 'HAVING SUM(COALESCE(amount_due, total_with_vat - amount_paid)) > 0' : ''}
+      ${onlyDebt ? 'HAVING SUM(COALESCE(amount_due, total_with_vat - amount_paid)) > 0.005' : ''}
       ORDER BY
         CASE WHEN customer_name IS NULL OR customer_name = '' THEN 1 ELSE 0 END,
         customer_name COLLATE NOCASE ASC,
         customer_nipt ASC
     `;
-    res.json(queryAll(sql, params));
+    res.json(await queryAll(sql, params));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1575,7 +1724,7 @@ app.get('/api/client-debts/summary', async (req, res) => {
 // ============================================================
 app.get('/api/suppliers', async (req, res) => {
   try {
-    res.json(queryAll('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE ASC', []));
+    res.json(await queryAll('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE ASC', []));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1584,7 +1733,7 @@ app.get('/api/suppliers/search', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
     const like = `%${q}%`;
-    res.json(queryAll(
+    res.json(await queryAll(
       `SELECT * FROM suppliers
         WHERE nipt LIKE ? OR name LIKE ? OR phone LIKE ?
         ORDER BY name COLLATE NOCASE ASC LIMIT 12`,
@@ -1596,7 +1745,7 @@ app.get('/api/suppliers/search', async (req, res) => {
 app.post('/api/suppliers', async (req, res) => {
   try {
     const d = req.body || {};
-    run(
+    await run(
       `INSERT INTO suppliers (nipt, name, address, phone, notes) VALUES (?, ?, ?, ?, ?)`,
       [d.nipt || '', d.name || '', d.address || '', d.phone || '', d.notes || '']
     );
@@ -1607,7 +1756,7 @@ app.post('/api/suppliers', async (req, res) => {
 app.put('/api/suppliers/:id', async (req, res) => {
   try {
     const d = req.body || {};
-    run(
+    await run(
       `UPDATE suppliers SET nipt=?, name=?, address=?, phone=?, notes=? WHERE id=?`,
       [d.nipt || '', d.name || '', d.address || '', d.phone || '', d.notes || '', req.params.id]
     );
@@ -1617,7 +1766,7 @@ app.put('/api/suppliers/:id', async (req, res) => {
 
 app.delete('/api/suppliers/:id', async (req, res) => {
   try {
-    run('DELETE FROM suppliers WHERE id = ?', [req.params.id]);
+    await run('DELETE FROM suppliers WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1627,16 +1776,16 @@ app.delete('/api/suppliers/:id', async (req, res) => {
 // ============================================================
 app.get('/api/warehouses', async (req, res) => {
   try {
-    res.json(queryAll('SELECT * FROM warehouses ORDER BY code COLLATE NOCASE ASC', []));
+    res.json(await queryAll('SELECT * FROM warehouses ORDER BY code COLLATE NOCASE ASC', []));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/warehouses/search', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
-    if (!q) return res.json(queryAll('SELECT * FROM warehouses ORDER BY code COLLATE NOCASE ASC LIMIT 12', []));
+    if (!q) return res.json(await queryAll('SELECT * FROM warehouses ORDER BY code COLLATE NOCASE ASC LIMIT 12', []));
     const like = `%${q}%`;
-    res.json(queryAll(
+    res.json(await queryAll(
       `SELECT * FROM warehouses
         WHERE code LIKE ? OR name LIKE ?
         ORDER BY code COLLATE NOCASE ASC LIMIT 12`,
@@ -1650,13 +1799,13 @@ app.post('/api/warehouses', async (req, res) => {
     const d = req.body || {};
     const code = (d.code || '').trim();
     if (!code) return res.status(400).json({ error: 'Kodi është i detyrueshëm' });
-    const dup = queryOne('SELECT id FROM warehouses WHERE code = ?', [code]);
+    const dup = await queryOne('SELECT id FROM warehouses WHERE code = ?', [code]);
     if (dup) return res.status(400).json({ error: `Kodi "${code}" ekziston tashmë` });
-    run(
+    await run(
       `INSERT INTO warehouses (code, name, address, notes) VALUES (?, ?, ?, ?)`,
       [code, d.name || '', d.address || '', d.notes || '']
     );
-    const created = queryOne('SELECT * FROM warehouses WHERE code = ?', [code]);
+    const created = await queryOne('SELECT * FROM warehouses WHERE code = ?', [code]);
     res.json({ success: true, warehouse: created });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1666,9 +1815,9 @@ app.put('/api/warehouses/:id', async (req, res) => {
     const d = req.body || {};
     const code = (d.code || '').trim();
     if (!code) return res.status(400).json({ error: 'Kodi është i detyrueshëm' });
-    const dup = queryOne('SELECT id FROM warehouses WHERE code = ? AND id != ?', [code, req.params.id]);
+    const dup = await queryOne('SELECT id FROM warehouses WHERE code = ? AND id != ?', [code, req.params.id]);
     if (dup) return res.status(400).json({ error: `Kodi "${code}" ekziston tashmë` });
-    run(
+    await run(
       `UPDATE warehouses SET code=?, name=?, address=?, notes=? WHERE id=?`,
       [code, d.name || '', d.address || '', d.notes || '', req.params.id]
     );
@@ -1678,7 +1827,7 @@ app.put('/api/warehouses/:id', async (req, res) => {
 
 app.delete('/api/warehouses/:id', async (req, res) => {
   try {
-    run('DELETE FROM warehouses WHERE id = ?', [req.params.id]);
+    await run('DELETE FROM warehouses WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1698,26 +1847,26 @@ function computePurchaseLineTotals(it) {
   return { qty, purchase_price_no_vat: price, discount_percent: disc, vat_rate: vatR, subtotal_no_vat, vat_amount, total_with_vat };
 }
 
-function nextPurchaseNo(date) {
+async function nextPurchaseNo(date) {
   const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
-  const row = queryOne("SELECT COUNT(*) AS c FROM purchase_invoices WHERE date LIKE ?", [year + '%']);
+  const row = await queryOne("SELECT COUNT(*) AS c FROM purchase_invoices WHERE date LIKE ?", [year + '%']);
   const next = (row?.c || 0) + 1;
   return `B${year}-${String(next).padStart(5, '0')}`;
 }
 
-function adjustPurchaseStock(items, sign) {
+async function adjustPurchaseStock(items, sign) {
   // sign=+1 when applying purchase (stock up); sign=-1 when reverting
   for (const it of items) {
     if (it.product_id && it.qty) {
       const delta = sign * (parseInt(it.qty) || 0);
       if (delta !== 0) {
-        run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+        await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
       }
     }
   }
 }
 
-function applyProductPrices(items) {
+async function applyProductPrices(items) {
   // Update each product's cost_price + sell_price from the purchase line
   for (const it of items) {
     if (!it.product_id) continue;
@@ -1735,27 +1884,30 @@ function applyProductPrices(items) {
       updates.push('vat_rate = ?');
       params.push(parseFloat(it.vat_rate) || 0);
     }
-    if (it.material === 'flori' || it.material === 'diamant') {
+    if (it.material === 'flori' || it.material === 'diamant' || it.material === 'ora') {
       updates.push('material = ?');
       params.push(it.material);
+      const CATEGORY_BY_MATERIAL = { flori: 'Flori', diamant: 'Diamant', ora: 'Ora' };
+      updates.push('category = ?');
+      params.push(CATEGORY_BY_MATERIAL[it.material]);
     }
     if (updates.length === 0) continue;
     params.push(it.product_id);
-    run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, params);
+    await run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, params);
   }
 }
 
 app.get('/api/purchase-invoices/next-no', async (req, res) => {
   try {
     const { date } = req.query;
-    res.json({ invoice_no: nextPurchaseNo(date) });
+    res.json({ invoice_no: await nextPurchaseNo(date) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    res.json(queryAll(
+    res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid
        FROM purchase_invoices pi WHERE pi.date = ? ORDER BY pi.id ASC`,
@@ -1768,7 +1920,7 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
-    res.json(queryAll(
+    res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid
        FROM purchase_invoices pi WHERE pi.date BETWEEN ? AND ? ORDER BY pi.date ASC, pi.id ASC`,
@@ -1779,9 +1931,9 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
 
 app.get('/api/purchase-invoices/:id', async (req, res) => {
   try {
-    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [req.params.id]);
+    const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
-    const items = queryAll(
+    const items = await queryAll(
       `SELECT pi.*, COALESCE(p.material, '') AS material
          FROM purchase_items pi
          LEFT JOIN products p ON p.id = pi.product_id
@@ -1789,7 +1941,7 @@ app.get('/api/purchase-invoices/:id', async (req, res) => {
         ORDER BY pi.id ASC`,
       [req.params.id]
     );
-    const paySum = queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?', [req.params.id])?.s || 0;
+    const paySum = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?', [req.params.id])?.s || 0;
     const initial_amount_paid = +Math.max(0, (inv.amount_paid || 0) - paySum).toFixed(2);
     res.json({ ...inv, items, initial_amount_paid });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1799,7 +1951,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
   try {
     const d = req.body || {};
     if (!d.date) return res.status(400).json({ error: 'date required' });
-    const invoice_no = (d.invoice_no || '').trim() || nextPurchaseNo(d.date);
+    const userProvidedNo = (d.invoice_no || '').trim();
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
     const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
@@ -1818,22 +1970,25 @@ app.post('/api/purchase-invoices', async (req, res) => {
     }
     const amountDueI = Math.max(0, +(tot - amountPaidI).toFixed(2));
 
-    run(
+    const doInsertPurchase = (invNo) => run(
       `INSERT INTO purchase_invoices (date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
         subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        d.date, invoice_no, d.supplier_name || '', d.supplier_nipt || '',
+        d.date, invNo, d.supplier_name || '', d.supplier_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
         sub, totalDiscount, vat, tot,
         pmI, amountPaidI, amountDueI,
         d.notes || '',
       ]
     );
-    const created = queryOne('SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?', [d.date, invoice_no]);
+    const invoice_no = userProvidedNo
+      ? (await doInsertPurchase(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextPurchaseNo(d.date), doInsertPurchase);
+    const created = await queryOne('SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?', [d.date, invoice_no]);
     const newId = created?.id;
     for (const it of items) {
-      run(
+      await run(
         `INSERT INTO purchase_items (purchase_id, product_id, barcode, name, qty, purchase_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1845,8 +2000,8 @@ app.post('/api/purchase-invoices', async (req, res) => {
         ]
       );
     }
-    adjustPurchaseStock(items, +1);
-    applyProductPrices(items);
+    await adjustPurchaseStock(items, +1);
+    await applyProductPrices(items);
     res.json({ success: true, id: newId, invoice_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1855,9 +2010,9 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const d = req.body || {};
-    const existing = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
+    const existing = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
-    const oldItems = queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
+    const oldItems = await queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
     const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
@@ -1877,14 +2032,14 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     } else {
       formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? tot : 0;
     }
-    const existingPaySum = queryOne(
+    const existingPaySum = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?',
       [id]
     )?.s || 0;
     const amountPaidU = +(formInitialPaid + existingPaySum).toFixed(2);
     const amountDueU = Math.max(0, +(tot - amountPaidU).toFixed(2));
 
-    run(
+    await run(
       `UPDATE purchase_invoices SET date=?, supplier_name=?, supplier_nipt=?, currency=?, exchange_rate=?,
         subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?, notes=?
        WHERE id=?`,
@@ -1898,10 +2053,10 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         id,
       ]
     );
-    adjustPurchaseStock(oldItems, -1);
-    run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    await adjustPurchaseStock(oldItems, -1);
+    await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
     for (const it of items) {
-      run(
+      await run(
         `INSERT INTO purchase_items (purchase_id, product_id, barcode, name, qty, purchase_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1913,8 +2068,8 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         ]
       );
     }
-    adjustPurchaseStock(items, +1);
-    applyProductPrices(items);
+    await adjustPurchaseStock(items, +1);
+    await applyProductPrices(items);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1922,11 +2077,286 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
 app.delete('/api/purchase-invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const items = queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
-    adjustPurchaseStock(items, -1);
-    run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
-    run('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
-    run('DELETE FROM purchase_invoices WHERE id = ?', [id]);
+    const items = await queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
+    await adjustPurchaseStock(items, -1);
+    await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    await run('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
+    await run('DELETE FROM purchase_invoices WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// GOLD SPOT PRICE — EUR / gram (cached ~5 min)
+// Sources: gold-api.com (USD/oz) + frankfurter.dev (EUR/USD)
+// ============================================================
+const GRAM_PER_TROY_OZ = 31.1034768;
+const GOLD_CACHE_TTL_MS = 30 * 1000;
+let goldPriceCache = { value: null, at: 0 };
+
+async function fetchGoldSpotEurPerGram(force = false) {
+  const now = Date.now();
+  if (!force && goldPriceCache.value && (now - goldPriceCache.at) < GOLD_CACHE_TTL_MS) {
+    return goldPriceCache.value;
+  }
+  const [goldRes, fxRes] = await Promise.all([
+    fetch('https://api.gold-api.com/price/XAU'),
+    fetch('https://api.frankfurter.dev/v1/latest?from=USD&to=EUR'),
+  ]);
+  if (!goldRes.ok) throw new Error(`gold-api ${goldRes.status}`);
+  if (!fxRes.ok)   throw new Error(`fx-api ${fxRes.status}`);
+  const gold = await goldRes.json();
+  const fx   = await fxRes.json();
+  const usdPerOz  = parseFloat(gold.price);
+  const eurPerUsd = parseFloat(fx?.rates?.EUR);
+  if (!usdPerOz || !eurPerUsd) throw new Error('missing price data');
+  const eurPerOz   = usdPerOz * eurPerUsd;
+  const eurPerGram = eurPerOz / GRAM_PER_TROY_OZ;
+  const payload = {
+    eur_per_gram: +eurPerGram.toFixed(2),
+    eur_per_oz:   +eurPerOz.toFixed(2),
+    usd_per_oz:   +usdPerOz.toFixed(2),
+    eur_per_usd:  +eurPerUsd.toFixed(6),
+    updated_at:   gold.updatedAt || new Date().toISOString(),
+    source:       'gold-api.com + frankfurter.dev',
+  };
+  goldPriceCache = { value: payload, at: now };
+  return payload;
+}
+
+app.get('/api/gold-spot-price', async (req, res) => {
+  try {
+    const force = req.query.force === '1' || req.query.force === 'true';
+    const data = await fetchGoldSpotEurPerGram(force);
+    res.json(data);
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// ============================================================
+// KONVERTIM HURDA — scrap gold purchases (paid in cash)
+// Does NOT touch product inventory. Grams accumulate in this table.
+// Deducted from arka via the arka-ditore endpoint.
+// ============================================================
+async function nextHurdaNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const row = await queryOne("SELECT COUNT(*) AS c FROM hurda_purchases WHERE date LIKE ?", [year + '%']);
+  const next = (row?.c || 0) + 1;
+  return `KH${year}-${String(next).padStart(5, '0')}`;
+}
+
+function computeHurdaTotal(d) {
+  // Klienti dërgon total_amount të llogaritur në monedhën e pagesës (sepse
+  // price_per_gram tashmë është gjithmonë në EUR, ndërsa pagesa mund të jetë
+  // në LEK/EUR/USD/GBP/CHF — konvertimi bëhet klientit me kurset e datës).
+  if (d.total_amount != null && d.total_amount !== '') {
+    return +parseFloat(d.total_amount).toFixed(2) || 0;
+  }
+  const g = parseFloat(d.gram) || 0;
+  const p = parseFloat(d.price_per_gram) || 0;
+  return +(g * p).toFixed(2);
+}
+
+app.get('/api/hurda-purchases/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ purchase_no: await nextHurdaNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hurda-purchases/by-date/:date', async (req, res) => {
+  try {
+    res.json(await queryAll(
+      'SELECT * FROM hurda_purchases WHERE date = ? ORDER BY id ASC',
+      [req.params.date]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hurda-purchases/by-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    res.json(await queryAll(
+      'SELECT * FROM hurda_purchases WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC',
+      [from, to]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hurda-purchases/:id', async (req, res) => {
+  try {
+    const row = await queryOne('SELECT * FROM hurda_purchases WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hurda-purchases', async (req, res) => {
+  try {
+    const d = req.body || {};
+    if (!d.date) return res.status(400).json({ error: 'date required' });
+    const userProvidedNo = (d.purchase_no || '').trim();
+    const total_amount = computeHurdaTotal(d);
+    const doInsertHurda = (no) => run(
+      `INSERT INTO hurda_purchases (date, purchase_no, supplier_name, supplier_nipt,
+        gram, price_per_gram, currency, exchange_rate, total_amount, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        d.date, no,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+      ]
+    );
+    const purchase_no = userProvidedNo
+      ? (await doInsertHurda(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextHurdaNo(d.date), doInsertHurda);
+    const created = await queryOne('SELECT id FROM hurda_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
+    res.json({ success: true, id: created?.id, purchase_no });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/hurda-purchases/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const existing = await queryOne('SELECT * FROM hurda_purchases WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const total_amount = computeHurdaTotal(d);
+    await run(
+      `UPDATE hurda_purchases SET date=?, supplier_name=?, supplier_nipt=?,
+        gram=?, price_per_gram=?, currency=?, exchange_rate=?, total_amount=?, notes=?
+       WHERE id=?`,
+      [
+        d.date || existing.date,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+        id,
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/hurda-purchases/:id', async (req, res) => {
+  try {
+    await run('DELETE FROM hurda_purchases WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// BLERJE HAS — bulk gold-jewelry batch purchases (paid in cash).
+// Same shape as hurda_purchases: total grams + price/gram + supplier + cash payment.
+// Deducted from arka via the arka-ditore endpoint (like hurda).
+// ============================================================
+async function nextHasNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const row = await queryOne("SELECT COUNT(*) AS c FROM has_purchases WHERE date LIKE ?", [year + '%']);
+  const next = (row?.c || 0) + 1;
+  return `BH${year}-${String(next).padStart(5, '0')}`;
+}
+
+function computeHasTotal(d) {
+  if (d.total_amount != null && d.total_amount !== '') {
+    return +parseFloat(d.total_amount).toFixed(2) || 0;
+  }
+  const g = parseFloat(d.gram) || 0;
+  const p = parseFloat(d.price_per_gram) || 0;
+  return +(g * p).toFixed(2);
+}
+
+app.get('/api/has-purchases/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ purchase_no: await nextHasNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/has-purchases/by-date/:date', async (req, res) => {
+  try {
+    res.json(await queryAll(
+      'SELECT * FROM has_purchases WHERE date = ? ORDER BY id ASC',
+      [req.params.date]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/has-purchases/by-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    res.json(await queryAll(
+      'SELECT * FROM has_purchases WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC',
+      [from, to]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/has-purchases/:id', async (req, res) => {
+  try {
+    const row = await queryOne('SELECT * FROM has_purchases WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/has-purchases', async (req, res) => {
+  try {
+    const d = req.body || {};
+    if (!d.date) return res.status(400).json({ error: 'date required' });
+    const userProvidedNo = (d.purchase_no || '').trim();
+    const total_amount = computeHasTotal(d);
+    const doInsertHas = (no) => run(
+      `INSERT INTO has_purchases (date, purchase_no, supplier_name, supplier_nipt,
+        gram, price_per_gram, currency, exchange_rate, total_amount, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        d.date, no,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'EUR', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+      ]
+    );
+    const purchase_no = userProvidedNo
+      ? (await doInsertHas(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextHasNo(d.date), doInsertHas);
+    const created = await queryOne('SELECT id FROM has_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
+    res.json({ success: true, id: created?.id, purchase_no });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/has-purchases/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const existing = await queryOne('SELECT * FROM has_purchases WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const total_amount = computeHasTotal(d);
+    await run(
+      `UPDATE has_purchases SET date=?, supplier_name=?, supplier_nipt=?,
+        gram=?, price_per_gram=?, currency=?, exchange_rate=?, total_amount=?, notes=?
+       WHERE id=?`,
+      [
+        d.date || existing.date,
+        d.supplier_name || '', d.supplier_nipt || '',
+        parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
+        d.currency || 'EUR', parseFloat(d.exchange_rate) || 1,
+        total_amount, d.notes || '',
+        id,
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/has-purchases/:id', async (req, res) => {
+  try {
+    await run('DELETE FROM has_purchases WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1940,36 +2370,36 @@ function makeFleteEndpoints(kind, sign) {
   const itable = `flete_${kind}_items`;
   const path   = `/api/flete-${kind}`;
 
-  function nextRefNo(date) {
+  async function nextRefNo(date) {
     const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
     const prefix = kind === 'hyrje' ? 'H' : 'D';
-    const row = queryOne(`SELECT COUNT(*) AS c FROM ${table} WHERE date LIKE ?`, [year + '%']);
+    const row = await queryOne(`SELECT COUNT(*) AS c FROM ${table} WHERE date LIKE ?`, [year + '%']);
     const next = (row?.c || 0) + 1;
     return `${prefix}${year}-${String(next).padStart(5, '0')}`;
   }
 
-  function adjustStock(items, mult) {
+  async function adjustStock(items, mult) {
     for (const it of items) {
       if (it.product_id && it.qty) {
         const delta = mult * sign * (parseFloat(it.qty) || 0);
         if (delta !== 0) {
-          run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+          await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
         }
       }
     }
   }
 
   app.get(`${path}/next-no`, async (req, res) => {
-    try { res.json({ ref_no: nextRefNo(req.query.date) }); }
+    try { res.json({ ref_no: await nextRefNo(req.query.date) }); }
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   app.get(`${path}/by-date/:date`, async (req, res) => {
     try {
-      const rows = queryAll(`SELECT * FROM ${table} WHERE date = ? ORDER BY id ASC`, [req.params.date]);
+      const rows = await queryAll(`SELECT * FROM ${table} WHERE date = ? ORDER BY id ASC`, [req.params.date]);
       // For each, attach item count and total qty
-      const enriched = rows.map(r => {
-        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE flete_id = ?`, [r.id]);
+      const enriched = rows.map(async r => {
+        const stats = await queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE flete_id = ?`, [r.id]);
         return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
       });
       res.json(enriched);
@@ -1980,12 +2410,12 @@ function makeFleteEndpoints(kind, sign) {
     try {
       const { from, to } = req.query;
       if (!from || !to) return res.status(400).json({ error: 'from and to required' });
-      const rows = queryAll(
+      const rows = await queryAll(
         `SELECT * FROM ${table} WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC`,
         [from, to]
       );
-      const enriched = rows.map(r => {
-        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE flete_id = ?`, [r.id]);
+      const enriched = rows.map(async r => {
+        const stats = await queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE flete_id = ?`, [r.id]);
         return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
       });
       res.json(enriched);
@@ -1994,9 +2424,9 @@ function makeFleteEndpoints(kind, sign) {
 
   app.get(`${path}/:id`, async (req, res) => {
     try {
-      const head = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      const head = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
       if (!head) return res.status(404).json({ error: 'not found' });
-      const items = queryAll(`SELECT * FROM ${itable} WHERE flete_id = ? ORDER BY id ASC`, [req.params.id]);
+      const items = await queryAll(`SELECT * FROM ${itable} WHERE flete_id = ? ORDER BY id ASC`, [req.params.id]);
       res.json({ ...head, items });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2005,19 +2435,24 @@ function makeFleteEndpoints(kind, sign) {
     try {
       const d = req.body || {};
       if (!d.date) return res.status(400).json({ error: 'date required' });
-      const ref_no = (d.ref_no || '').trim() || nextRefNo(d.date);
-      run(`INSERT INTO ${table} (date, ref_no, notes) VALUES (?, ?, ?)`,
-        [d.date, ref_no, d.notes || '']);
-      const created = queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
+      const userProvidedNo = (d.ref_no || '').trim();
+      const doInsertHead = (no) => run(
+        `INSERT INTO ${table} (date, ref_no, notes) VALUES (?, ?, ?)`,
+        [d.date, no, d.notes || ''],
+      );
+      const ref_no = userProvidedNo
+        ? (await doInsertHead(userProvidedNo), userProvidedNo)
+        : await retryOnUniqueNo(() => nextRefNo(d.date), doInsertHead);
+      const created = await queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
       const newId = created?.id;
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
       for (const it of items) {
-        run(
+        await run(
           `INSERT INTO ${itable} (flete_id, product_id, barcode, name, qty) VALUES (?, ?, ?, ?, ?)`,
           [newId, it.product_id || null, it.barcode || '', it.name || '', parseFloat(it.qty) || 0]
         );
       }
-      adjustStock(items, +1);
+      await adjustStock(items, +1);
       res.json({ success: true, id: newId, ref_no });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2026,21 +2461,21 @@ function makeFleteEndpoints(kind, sign) {
     try {
       const { id } = req.params;
       const d = req.body || {};
-      const existing = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [id]);
+      const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [id]);
       if (!existing) return res.status(404).json({ error: 'not found' });
-      const oldItems = queryAll(`SELECT * FROM ${itable} WHERE flete_id = ?`, [id]);
-      adjustStock(oldItems, -1); // reverse old
-      run(`UPDATE ${table} SET date=?, notes=? WHERE id=?`,
+      const oldItems = await queryAll(`SELECT * FROM ${itable} WHERE flete_id = ?`, [id]);
+      await adjustStock(oldItems, -1); // reverse old
+      await run(`UPDATE ${table} SET date=?, notes=? WHERE id=?`,
         [d.date || existing.date, d.notes || '', id]);
-      run(`DELETE FROM ${itable} WHERE flete_id = ?`, [id]);
+      await run(`DELETE FROM ${itable} WHERE flete_id = ?`, [id]);
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
       for (const it of items) {
-        run(
+        await run(
           `INSERT INTO ${itable} (flete_id, product_id, barcode, name, qty) VALUES (?, ?, ?, ?, ?)`,
           [id, it.product_id || null, it.barcode || '', it.name || '', parseFloat(it.qty) || 0]
         );
       }
-      adjustStock(items, +1); // apply new
+      await adjustStock(items, +1); // apply new
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2048,10 +2483,10 @@ function makeFleteEndpoints(kind, sign) {
   app.delete(`${path}/:id`, async (req, res) => {
     try {
       const { id } = req.params;
-      const items = queryAll(`SELECT * FROM ${itable} WHERE flete_id = ?`, [id]);
-      adjustStock(items, -1);
-      run(`DELETE FROM ${itable} WHERE flete_id = ?`, [id]);
-      run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      const items = await queryAll(`SELECT * FROM ${itable} WHERE flete_id = ?`, [id]);
+      await adjustStock(items, -1);
+      await run(`DELETE FROM ${itable} WHERE flete_id = ?`, [id]);
+      await run(`DELETE FROM ${table} WHERE id = ?`, [id]);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2069,10 +2504,10 @@ function makeMagazinaEndpoints(kind, sign) {
   const itable = `magazina_${kind}_items`;
   const path   = `/api/magazina-${kind}`;
 
-  function nextRefNo(date) {
+  async function nextRefNo(date) {
     const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
     const prefix = kind === 'hyrje' ? 'MH' : 'MD';
-    const row = queryOne(`SELECT COUNT(*) AS c FROM ${table} WHERE date LIKE ?`, [year + '%']);
+    const row = await queryOne(`SELECT COUNT(*) AS c FROM ${table} WHERE date LIKE ?`, [year + '%']);
     const next = (row?.c || 0) + 1;
     return `${prefix}${year}-${String(next).padStart(5, '0')}`;
   }
@@ -2085,25 +2520,25 @@ function makeMagazinaEndpoints(kind, sign) {
     return { qty, price, disc, subtotal };
   }
 
-  function adjustStock(items, mult) {
+  async function adjustStock(items, mult) {
     for (const it of items) {
       if (it.product_id && it.qty) {
         const delta = mult * sign * (parseFloat(it.qty) || 0);
         if (delta !== 0) {
-          run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+          await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
         }
       }
     }
   }
 
-  function insertItems(headId, items) {
+  async function insertItems(headId, items) {
     let totalSub = 0, totalDisc = 0;
     for (const it of items) {
       const c = computeItem(it);
       const gross = +((c.qty * c.price)).toFixed(2);
       totalSub  += c.subtotal;
       totalDisc += +(gross - c.subtotal).toFixed(2);
-      run(
+      await run(
         `INSERT INTO ${itable} (magazina_id, product_id, barcode, name, qty, unit_price, discount_percent, subtotal)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [headId, it.product_id || null, it.barcode || '', it.name || '',
@@ -2114,15 +2549,15 @@ function makeMagazinaEndpoints(kind, sign) {
   }
 
   app.get(`${path}/next-no`, async (req, res) => {
-    try { res.json({ ref_no: nextRefNo(req.query.date) }); }
+    try { res.json({ ref_no: await nextRefNo(req.query.date) }); }
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   app.get(`${path}/by-date/:date`, async (req, res) => {
     try {
-      const rows = queryAll(`SELECT * FROM ${table} WHERE date = ? ORDER BY id ASC`, [req.params.date]);
-      const enriched = rows.map(r => {
-        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE magazina_id = ?`, [r.id]);
+      const rows = await queryAll(`SELECT * FROM ${table} WHERE date = ? ORDER BY id ASC`, [req.params.date]);
+      const enriched = rows.map(async r => {
+        const stats = await queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE magazina_id = ?`, [r.id]);
         return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
       });
       res.json(enriched);
@@ -2133,12 +2568,12 @@ function makeMagazinaEndpoints(kind, sign) {
     try {
       const { from, to } = req.query;
       if (!from || !to) return res.status(400).json({ error: 'from and to required' });
-      const rows = queryAll(
+      const rows = await queryAll(
         `SELECT * FROM ${table} WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC`,
         [from, to]
       );
-      const enriched = rows.map(r => {
-        const stats = queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE magazina_id = ?`, [r.id]);
+      const enriched = rows.map(async r => {
+        const stats = await queryOne(`SELECT COUNT(*) AS c, COALESCE(SUM(qty),0) AS q FROM ${itable} WHERE magazina_id = ?`, [r.id]);
         return { ...r, item_count: stats?.c || 0, total_qty: stats?.q || 0 };
       });
       res.json(enriched);
@@ -2147,9 +2582,9 @@ function makeMagazinaEndpoints(kind, sign) {
 
   app.get(`${path}/:id`, async (req, res) => {
     try {
-      const head = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      const head = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
       if (!head) return res.status(404).json({ error: 'not found' });
-      const items = queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ? ORDER BY id ASC`, [req.params.id]);
+      const items = await queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ? ORDER BY id ASC`, [req.params.id]);
       res.json({ ...head, items });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2158,22 +2593,25 @@ function makeMagazinaEndpoints(kind, sign) {
     try {
       const d = req.body || {};
       if (!d.date) return res.status(400).json({ error: 'date required' });
-      const ref_no = (d.ref_no || '').trim() || nextRefNo(d.date);
+      const userProvidedNo = (d.ref_no || '').trim();
       const currency = d.currency || 'LEK';
       const exchange_rate = parseFloat(d.exchange_rate) || 1;
-      run(
+      const doInsertMagHead = (no) => run(
         `INSERT INTO ${table} (date, warehouse_code, ref_no, currency, exchange_rate, subtotal, total_discount, total, notes)
          VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?)`,
-        [d.date, d.warehouse_code || '', ref_no, currency, exchange_rate, d.notes || '']
+        [d.date, d.warehouse_code || '', no, currency, exchange_rate, d.notes || ''],
       );
-      const created = queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
+      const ref_no = userProvidedNo
+        ? (await doInsertMagHead(userProvidedNo), userProvidedNo)
+        : await retryOnUniqueNo(() => nextRefNo(d.date), doInsertMagHead);
+      const created = await queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
       const newId = created?.id;
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
-      const t = insertItems(newId, items);
+      const t = await insertItems(newId, items);
       const total = +(t.subtotal).toFixed(2);
-      run(`UPDATE ${table} SET subtotal=?, total_discount=?, total=? WHERE id=?`,
+      await run(`UPDATE ${table} SET subtotal=?, total_discount=?, total=? WHERE id=?`,
         [t.subtotal, t.total_discount, total, newId]);
-      adjustStock(items, +1);
+      await adjustStock(items, +1);
       res.json({ success: true, id: newId, ref_no });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2182,23 +2620,23 @@ function makeMagazinaEndpoints(kind, sign) {
     try {
       const { id } = req.params;
       const d = req.body || {};
-      const existing = queryOne(`SELECT * FROM ${table} WHERE id = ?`, [id]);
+      const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [id]);
       if (!existing) return res.status(404).json({ error: 'not found' });
-      const oldItems = queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ?`, [id]);
-      adjustStock(oldItems, -1);
+      const oldItems = await queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ?`, [id]);
+      await adjustStock(oldItems, -1);
       const currency = d.currency || existing.currency || 'LEK';
       const exchange_rate = parseFloat(d.exchange_rate) || 1;
-      run(
+      await run(
         `UPDATE ${table} SET date=?, warehouse_code=?, currency=?, exchange_rate=?, notes=? WHERE id=?`,
         [d.date || existing.date, d.warehouse_code || '', currency, exchange_rate, d.notes || '', id]
       );
-      run(`DELETE FROM ${itable} WHERE magazina_id = ?`, [id]);
+      await run(`DELETE FROM ${itable} WHERE magazina_id = ?`, [id]);
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
-      const t = insertItems(id, items);
+      const t = await insertItems(id, items);
       const total = +(t.subtotal).toFixed(2);
-      run(`UPDATE ${table} SET subtotal=?, total_discount=?, total=? WHERE id=?`,
+      await run(`UPDATE ${table} SET subtotal=?, total_discount=?, total=? WHERE id=?`,
         [t.subtotal, t.total_discount, total, id]);
-      adjustStock(items, +1);
+      await adjustStock(items, +1);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2206,10 +2644,10 @@ function makeMagazinaEndpoints(kind, sign) {
   app.delete(`${path}/:id`, async (req, res) => {
     try {
       const { id } = req.params;
-      const items = queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ?`, [id]);
-      adjustStock(items, -1);
-      run(`DELETE FROM ${itable} WHERE magazina_id = ?`, [id]);
-      run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      const items = await queryAll(`SELECT * FROM ${itable} WHERE magazina_id = ?`, [id]);
+      await adjustStock(items, -1);
+      await run(`DELETE FROM ${itable} WHERE magazina_id = ?`, [id]);
+      await run(`DELETE FROM ${table} WHERE id = ?`, [id]);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -2222,9 +2660,9 @@ makeMagazinaEndpoints('dalje', -1);
 app.get('/api/purchase-invoices/:id/payments', async (req, res) => {
   try {
     const { id } = req.params;
-    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
+    const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
-    const payments = queryAll(
+    const payments = await queryAll(
       'SELECT * FROM purchase_payments WHERE purchase_id = ? ORDER BY date ASC, id ASC',
       [id]
     );
@@ -2245,18 +2683,18 @@ app.post('/api/purchase-invoices/:id/payments', async (req, res) => {
     const d = req.body || {};
     const amount = parseFloat(d.amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: 'invalid amount' });
-    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
+    const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
     const due = Math.max(0, (inv.total_with_vat || 0) - (inv.amount_paid || 0));
     if (amount > due + 0.005) return res.status(400).json({ error: `max ${due.toFixed(2)}` });
     const pm = ['cash','bank','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
-    run(
+    await run(
       `INSERT INTO purchase_payments (purchase_id, date, amount, payment_method, notes) VALUES (?, ?, ?, ?, ?)`,
       [id, d.date || new Date().toISOString().slice(0, 10), amount, pm, d.notes || '']
     );
     const newPaid = +((inv.amount_paid || 0) + amount).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
-    run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, id]);
+    await run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, id]);
     res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2264,14 +2702,14 @@ app.post('/api/purchase-invoices/:id/payments', async (req, res) => {
 app.delete('/api/purchase-payments/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const pay = queryOne('SELECT * FROM purchase_payments WHERE id = ?', [id]);
+    const pay = await queryOne('SELECT * FROM purchase_payments WHERE id = ?', [id]);
     if (!pay) return res.status(404).json({ error: 'not found' });
-    const inv = queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [pay.purchase_id]);
+    const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [pay.purchase_id]);
     if (!inv) return res.status(404).json({ error: 'invoice missing' });
-    run('DELETE FROM purchase_payments WHERE id = ?', [id]);
+    await run('DELETE FROM purchase_payments WHERE id = ?', [id]);
     const newPaid = +Math.max(0, (inv.amount_paid || 0) - (pay.amount || 0)).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
-    run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.purchase_id]);
+    await run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.purchase_id]);
     res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2304,7 +2742,7 @@ app.get('/api/supplier-debts', async (req, res) => {
     if (from) { sql += ' AND pi.date >= ?'; params.push(from); }
     if (to)   { sql += ' AND pi.date <= ?'; params.push(to); }
     sql += ' ORDER BY pi.date DESC, pi.id DESC';
-    res.json(queryAll(sql, params));
+    res.json(await queryAll(sql, params));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2336,7 +2774,7 @@ app.get('/api/supplier-debts/summary', async (req, res) => {
         supplier_name COLLATE NOCASE ASC,
         supplier_nipt ASC
     `;
-    res.json(queryAll(sql, params));
+    res.json(await queryAll(sql, params));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2359,7 +2797,7 @@ app.get('/api/supplier-activity', async (req, res) => {
     }
     if (from) { conds.push('date >= ?'); params.push(from); }
     if (to)   { conds.push('date <= ?'); params.push(to); }
-    const invoices = queryAll(
+    const invoices = await queryAll(
       `SELECT * FROM purchase_invoices WHERE ${conds.join(' AND ')} ORDER BY date ASC, id ASC`,
       params
     );
@@ -2372,7 +2810,7 @@ app.get('/api/supplier-activity', async (req, res) => {
     let payWhere = `p.purchase_id IN (${placeholders})`;
     if (from) { payWhere += ' AND p.date >= ?'; payParams.push(from); }
     if (to)   { payWhere += ' AND p.date <= ?'; payParams.push(to); }
-    const payments = queryAll(
+    const payments = await queryAll(
       `SELECT p.*, pi.invoice_no, pi.date AS invoice_date, pi.total_with_vat AS invoice_total
          FROM purchase_payments p
          JOIN purchase_invoices pi ON pi.id = p.purchase_id
@@ -2406,7 +2844,7 @@ function clientFullName(c) {
 
 app.get('/api/clients', async (req, res) => {
   try {
-    const rows = queryAll('SELECT * FROM clients ORDER BY last_name, first_name', []);
+    const rows = await queryAll('SELECT * FROM clients ORDER BY last_name, first_name', []);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2416,7 +2854,7 @@ app.get('/api/clients/search', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
     const like = `%${q}%`;
-    const rows = queryAll(
+    const rows = await queryAll(
       `SELECT * FROM clients
         WHERE nipt LIKE ? OR first_name LIKE ? OR last_name LIKE ?
            OR (first_name || ' ' || last_name) LIKE ? OR phone LIKE ?
@@ -2429,7 +2867,7 @@ app.get('/api/clients/search', async (req, res) => {
 
 app.get('/api/clients/:id', async (req, res) => {
   try {
-    const c = queryOne('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+    const c = await queryOne('SELECT * FROM clients WHERE id = ?', [req.params.id]);
     if (!c) return res.status(404).json({ error: 'not found' });
     res.json(c);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2438,7 +2876,7 @@ app.get('/api/clients/:id', async (req, res) => {
 app.post('/api/clients', async (req, res) => {
   try {
     const d = req.body || {};
-    run(
+    await run(
       `INSERT INTO clients (nipt, first_name, last_name, address, phone, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [d.nipt || '', d.first_name || '', d.last_name || '', d.address || '', d.phone || '', d.notes || '']
@@ -2451,7 +2889,7 @@ app.put('/api/clients/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const d = req.body || {};
-    run(
+    await run(
       `UPDATE clients SET nipt=?, first_name=?, last_name=?, address=?, phone=?, notes=? WHERE id=?`,
       [d.nipt || '', d.first_name || '', d.last_name || '', d.address || '', d.phone || '', d.notes || '', id]
     );
@@ -2461,7 +2899,7 @@ app.put('/api/clients/:id', async (req, res) => {
 
 app.delete('/api/clients/:id', async (req, res) => {
   try {
-    run('DELETE FROM clients WHERE id = ?', [req.params.id]);
+    await run('DELETE FROM clients WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2487,14 +2925,15 @@ app.get('/api/inventory-summary', async (req, res) => {
       return [];
     };
 
-    const products = queryAll(
+    const products = await queryAll(
       `SELECT id, name, sku, barcode, category, unit, stock, cost_price, sell_price
        FROM products WHERE COALESCE(active, 1) = 1
        ORDER BY name COLLATE NOCASE ASC`
     );
 
     // IN — purchase invoices (price in LEK = price * exchange_rate)
-    const inPurchase = queryAll(
+    // Filtruar sipas periudhës — për shfaqjen e aktivitetit hyrës në periudhë.
+    const inPurchase = await queryAll(
       `SELECT pi.product_id AS pid,
               SUM(pi.qty) AS qty,
               SUM(pi.qty * pi.purchase_price_no_vat * COALESCE(p.exchange_rate, 1)) AS value_no_vat_lek,
@@ -2508,7 +2947,8 @@ app.get('/api/inventory-summary', async (req, res) => {
     );
 
     // IN — magazina hyrje (pa TVSH → TVSH = 0, me TVSH = pa TVSH)
-    const inMag = queryAll(
+    // Filtruar sipas periudhës — për shfaqjen e aktivitetit hyrës në periudhë.
+    const inMag = await queryAll(
       `SELECT mi.product_id AS pid,
               SUM(mi.qty) AS qty,
               SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek
@@ -2519,12 +2959,50 @@ app.get('/api/inventory-summary', async (req, res) => {
       dateParams()
     );
 
+    // "Deri në `to`" — për llogaritjen e kostos mesatare të ponderuar që reflekton
+    // të gjithë historikun e blerjeve deri në fund të periudhës. Kështu një artikull
+    // i shitur sot që u ble muajin e kaluar merr koston reale të blerjes, jo 0.
+    const upToCond = (parent) => to ? `AND ${parent}.date <= ?` : '';
+    const upToParams = () => to ? [to] : [];
+
+    const inPurchaseHist = await queryAll(
+      `SELECT pi.product_id AS pid,
+              SUM(pi.qty) AS qty,
+              SUM(pi.qty * pi.purchase_price_no_vat * COALESCE(p.exchange_rate, 1)) AS value_no_vat_lek,
+              SUM(pi.vat_amount      * COALESCE(p.exchange_rate, 1)) AS vat_lek,
+              SUM(pi.total_with_vat  * COALESCE(p.exchange_rate, 1)) AS value_with_vat_lek
+       FROM purchase_items pi
+       JOIN purchase_invoices p ON p.id = pi.purchase_id
+       WHERE pi.product_id IS NOT NULL ${upToCond('p')}
+       GROUP BY pi.product_id`,
+      upToParams()
+    );
+
+    const inMagHist = await queryAll(
+      `SELECT mi.product_id AS pid,
+              SUM(mi.qty) AS qty,
+              SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek
+       FROM magazina_hyrje_items mi
+       JOIN magazina_hyrje m ON m.id = mi.magazina_id
+       WHERE mi.product_id IS NOT NULL ${upToCond('m')}
+       GROUP BY mi.product_id`,
+      upToParams()
+    );
+
     // OUT — sales (skip cancelled; credit notes have negative qty so they
-    // self-net within the sum)
-    const outSales = queryAll(
-      `SELECT ii.product_id AS pid, SUM(ii.qty) AS qty
+    // self-net within the sum).
+    // Përfshin edhe COGS të llogaritur nga `products.cost_price` × kursi i secilës
+    // faturë — që fitimi/marzhi të pasqyrojë koston "e vendosur" në kartën e produktit,
+    // jo mesataren e ponderuar historike (që mund të ndryshojë).
+    const outSales = await queryAll(
+      `SELECT ii.product_id AS pid,
+              SUM(ii.qty) AS qty,
+              SUM(ii.subtotal_no_vat * COALESCE(i.exchange_rate, 1)) AS sales_no_vat_lek,
+              SUM(ii.total_with_vat  * COALESCE(i.exchange_rate, 1)) AS sales_with_vat_lek,
+              SUM(ii.qty * COALESCE(p.cost_price, 0) * COALESCE(i.exchange_rate, 1)) AS cogs_from_product_lek
        FROM invoice_items ii
-       JOIN invoices i ON i.id = ii.invoice_id
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
        WHERE ii.product_id IS NOT NULL
          AND COALESCE(i.cancelled, 0) = 0
          ${dateCond('i')}
@@ -2533,7 +3011,7 @@ app.get('/api/inventory-summary', async (req, res) => {
     );
 
     // OUT — magazina dalje
-    const outMag = queryAll(
+    const outMag = await queryAll(
       `SELECT mi.product_id AS pid, SUM(mi.qty) AS qty
        FROM magazina_dalje_items mi
        JOIN magazina_dalje m ON m.id = mi.magazina_id
@@ -2547,36 +3025,59 @@ app.get('/api/inventory-summary', async (req, res) => {
       for (const r of rows) m.set(r[key], r);
       return m;
     };
-    const mInPurch = mapBy(inPurchase);
-    const mInMag   = mapBy(inMag);
-    const mOutSale = mapBy(outSales);
-    const mOutMag  = mapBy(outMag);
+    const mInPurch     = mapBy(inPurchase);
+    const mInMag       = mapBy(inMag);
+    const mInPurchHist = mapBy(inPurchaseHist);
+    const mInMagHist   = mapBy(inMagHist);
+    const mOutSale     = mapBy(outSales);
+    const mOutMag      = mapBy(outMag);
 
     const rows = products.map(p => {
       const ip = mInPurch.get(p.id) || { qty: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 };
       const im = mInMag.get(p.id)   || { qty: 0, value_no_vat_lek: 0 };
-      const os = mOutSale.get(p.id) || { qty: 0 };
+      const iph = mInPurchHist.get(p.id) || { qty: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 };
+      const imh = mInMagHist.get(p.id)   || { qty: 0, value_no_vat_lek: 0 };
+      const os = mOutSale.get(p.id) || { qty: 0, sales_no_vat_lek: 0, sales_with_vat_lek: 0 };
       const om = mOutMag.get(p.id)  || { qty: 0 };
 
+      // Aktivitet HYRËS për periudhën (për shfaqje në rresht)
       const qty_in_purchase    = +(ip.qty || 0);
       const qty_in_magazina    = +(im.qty || 0);
       const total_in           = qty_in_purchase + qty_in_magazina;
-
-      const value_in_no_vat_lek   = +((ip.value_no_vat_lek   || 0) + (im.value_no_vat_lek || 0));
-      const vat_in_lek            = +(ip.vat_lek            || 0);
-      const value_in_with_vat_lek = +((ip.value_with_vat_lek || 0) + (im.value_no_vat_lek || 0));
 
       const qty_out_sales     = +(os.qty || 0);
       const qty_out_magazina  = +(om.qty || 0);
       const total_out         = qty_out_sales + qty_out_magazina;
       const net_qty           = +(total_in - total_out).toFixed(4);
 
-      const avg_price_no_vat_lek   = total_in > 0 ? +(value_in_no_vat_lek   / total_in).toFixed(2) : 0;
-      const avg_price_with_vat_lek = total_in > 0 ? +(value_in_with_vat_lek / total_in).toFixed(2) : 0;
+      // Kosto mesatare e ponderuar HISTORIKE (nga të gjitha blerjet deri në `to`)
+      // — përdoret për COGS dhe vlerën e stokut. Kështu artikujt e shitur nga
+      // stoku i vjetër marrin koston reale, jo 0 kur nuk ka blerje në periudhë.
+      const total_in_hist = +((iph.qty || 0) + (imh.qty || 0));
+      const value_in_no_vat_lek_hist   = +((iph.value_no_vat_lek   || 0) + (imh.value_no_vat_lek || 0));
+      const value_in_with_vat_lek_hist = +((iph.value_with_vat_lek || 0) + (imh.value_no_vat_lek || 0));
+
+      const avg_price_no_vat_lek   = total_in_hist > 0 ? +(value_in_no_vat_lek_hist   / total_in_hist).toFixed(2) : 0;
+      const avg_price_with_vat_lek = total_in_hist > 0 ? +(value_in_with_vat_lek_hist / total_in_hist).toFixed(2) : 0;
 
       const total_value_no_vat_lek   = +(net_qty * avg_price_no_vat_lek).toFixed(2);
       const total_value_with_vat_lek = +(net_qty * avg_price_with_vat_lek).toFixed(2);
       const total_value_vat_lek      = +(total_value_with_vat_lek - total_value_no_vat_lek).toFixed(2);
+
+      // Profit — COGS on units actually sold (excludes magazina dalje transfers).
+      // Përparësi: kosto nga karta e produktit (`products.cost_price` × kursi i shitjes)
+      // sepse kjo pasqyron pritshmërinë e përdoruesit dhe është stabile.
+      // Fallback: mesatarja e ponderuar historike e blerjeve deri në `to`.
+      const sales_no_vat_lek    = +(os.sales_no_vat_lek   || 0);
+      const sales_with_vat_lek  = +(os.sales_with_vat_lek || 0);
+      const cogs_from_product   = +(os.cogs_from_product_lek || 0);
+      const cogs_no_vat_lek     = cogs_from_product > 0
+        ? +cogs_from_product.toFixed(2)
+        : +(qty_out_sales * avg_price_no_vat_lek).toFixed(2);
+      const profit_no_vat_lek   = +(sales_no_vat_lek - cogs_no_vat_lek).toFixed(2);
+      const profit_margin_pct   = sales_no_vat_lek > 0
+        ? +((profit_no_vat_lek / sales_no_vat_lek) * 100).toFixed(2)
+        : 0;
 
       return {
         id: p.id, name: p.name, sku: p.sku, barcode: p.barcode,
@@ -2591,6 +3092,9 @@ app.get('/api/inventory-summary', async (req, res) => {
         // Pa TVSH / Me TVSH
         avg_price_no_vat_lek, avg_price_with_vat_lek,
         total_value_no_vat_lek, total_value_vat_lek, total_value_with_vat_lek,
+        // Fitim
+        sales_no_vat_lek, sales_with_vat_lek,
+        cogs_no_vat_lek, profit_no_vat_lek, profit_margin_pct,
       };
     });
 
@@ -2602,13 +3106,52 @@ app.get('/api/inventory-summary', async (req, res) => {
       total_value_no_vat_lek:   a.total_value_no_vat_lek   + r.total_value_no_vat_lek,
       total_value_vat_lek:      a.total_value_vat_lek      + r.total_value_vat_lek,
       total_value_with_vat_lek: a.total_value_with_vat_lek + r.total_value_with_vat_lek,
+      sales_no_vat_lek:         a.sales_no_vat_lek         + r.sales_no_vat_lek,
+      cogs_no_vat_lek:          a.cogs_no_vat_lek          + r.cogs_no_vat_lek,
+      profit_no_vat_lek:        a.profit_no_vat_lek        + r.profit_no_vat_lek,
     }), {
       total_in: 0, total_out: 0, net_qty: 0,
       total_value_lek: 0,
       total_value_no_vat_lek: 0, total_value_vat_lek: 0, total_value_with_vat_lek: 0,
+      sales_no_vat_lek: 0, cogs_no_vat_lek: 0, profit_no_vat_lek: 0,
     });
 
-    res.json({ rows, totals });
+    // Përmbledhje e Shitjes/Kostos/Fitimit sipas monedhës origjinale të faturës
+    // (pa konvertim në LEK) — për shfaqjen në Dashboard sipas monedhës.
+    const profitByCurrencyRaw = await queryAll(
+      `SELECT
+         COALESCE(i.currency, 'LEK') AS currency,
+         SUM(ii.qty) AS qty,
+         SUM(ii.subtotal_no_vat)                       AS sales_no_vat,
+         SUM(ii.total_with_vat)                        AS sales_with_vat,
+         SUM(ii.qty * COALESCE(p.cost_price, 0))       AS cogs
+       FROM invoice_items ii
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE ii.product_id IS NOT NULL
+         AND COALESCE(i.cancelled, 0) = 0
+         ${dateCond('i')}
+       GROUP BY COALESCE(i.currency, 'LEK')
+       ORDER BY currency ASC`,
+      dateParams()
+    );
+    const profitByCurrency = {};
+    for (const r of profitByCurrencyRaw) {
+      const sales = +(+r.sales_no_vat || 0).toFixed(2);
+      const cogs  = +(+r.cogs || 0).toFixed(2);
+      const profit = +(sales - cogs).toFixed(2);
+      const margin = sales > 0 ? +((profit / sales) * 100).toFixed(2) : 0;
+      profitByCurrency[r.currency] = {
+        qty:           +(+r.qty || 0),
+        sales_no_vat:  sales,
+        sales_with_vat:+(+r.sales_with_vat || 0).toFixed(2),
+        cogs,
+        profit,
+        margin_pct:    margin,
+      };
+    }
+
+    res.json({ rows, totals, profitByCurrency });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2629,180 +3172,309 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const { date } = req.params;
     if (!date) return res.status(400).json({ error: 'date required' });
 
-    // Për çdo faturë, ndaj totalin në 4 pjesë: cash, pos, bank, debt.
-    //   pm='cash'  → cash_part = total
-    //   pm='pos'   → pos_part  = total
-    //   pm='bank'  → bank_part = total
-    //   pm='debt'  → debt_part = total
-    //   pm='mikse' → ndahet nga kolonat paid_cash/paid_pos/paid_bank; pjesa e mbetur (>0) = debt_part
-    // Kjo siguron që pos/banka e marrin totalin edhe nga faturat e pastra pos/bankë.
-    const salesAgg = queryOne(
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const zeroPerCur = () => ({ LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 });
+    const fx = (obj) => {
+      const out = {};
+      for (const c of CURS) out[c] = +(obj[c] || 0).toFixed(2);
+      return out;
+    };
+
+    // Ndarja e faturës në cash/pos/bank/debt për 'mikse', ose gjithë totali
+    // për pm='cash'|'pos'|'bank'|'debt'. Këto llogariten pastaj për çdo monedhë.
+    // Për 'debt' me parapagim kesh: amount_paid > 0 → pjesa e paguar hyn te
+    // kesh_nga_shitjet (nëpërmjet formulës xhiro − bank − pos − due), dhe
+    // amount_due mban vetëm mbetjen. Amount_paid këtu është snapshot i
+    // regjistrimit (pagesat e mëpasme nga Detyrimet nuk hyjnë në arkën e ditës).
+    const salesRows = await queryAll(
       `SELECT
-         COALESCE(SUM(total_with_vat * COALESCE(exchange_rate, 1)), 0) AS xhiro_total,
-         COALESCE(SUM(
-           (CASE
-              WHEN payment_method = 'bank'  THEN total_with_vat
-              WHEN payment_method = 'mikse' THEN COALESCE(paid_bank, 0)
-              ELSE 0 END) * COALESCE(exchange_rate, 1)
-         ), 0) AS paid_bank,
-         COALESCE(SUM(
-           (CASE
-              WHEN payment_method = 'pos'   THEN total_with_vat
-              WHEN payment_method = 'mikse' THEN COALESCE(paid_pos, 0)
-              ELSE 0 END) * COALESCE(exchange_rate, 1)
-         ), 0) AS paid_pos,
-         COALESCE(SUM(
-           (CASE
-              WHEN payment_method = 'debt'  THEN total_with_vat
-              WHEN payment_method = 'mikse' THEN
-                CASE WHEN (total_with_vat - COALESCE(paid_cash, 0) - COALESCE(paid_pos, 0) - COALESCE(paid_bank, 0)) > 0
-                     THEN  total_with_vat - COALESCE(paid_cash, 0) - COALESCE(paid_pos, 0) - COALESCE(paid_bank, 0)
-                     ELSE 0 END
-              ELSE 0 END) * COALESCE(exchange_rate, 1)
-         ), 0) AS amount_due,
-         COUNT(*) AS invoice_count
-       FROM invoices
-       WHERE date = ? AND COALESCE(cancelled, 0) = 0`,
-      [date]
-    ) || {};
-
-    const expAgg = queryOne(
-      `SELECT
-         COALESCE(SUM(COALESCE(amount, 0) * COALESCE(exchange_rate, 1)), 0) AS expenses_lek,
-         COUNT(*) AS expense_count
-       FROM expense_entries
-       WHERE date = ?`,
-      [date]
-    ) || {};
-
-    // Fatura blerje të paguara kesh: payment_method='cash' → amount_paid është kesh.
-    // Për 'mikse' do na duhej një kolonë paid_cash që purchase_invoices ende nuk e ka.
-    const purAgg = queryOne(
-      `SELECT
-         COALESCE(SUM(COALESCE(amount_paid, 0) * COALESCE(exchange_rate, 1)), 0) AS purchase_cash_lek,
-         COUNT(*) AS purchase_count
-       FROM purchase_invoices
-       WHERE date = ? AND payment_method = 'cash'`,
-      [date]
-    ) || {};
-
-    const xhiro_total = +salesAgg.xhiro_total.toFixed(2);
-    const paid_bank   = +salesAgg.paid_bank.toFixed(2);
-    const paid_pos    = +salesAgg.paid_pos.toFixed(2);
-    const amount_due  = +salesAgg.amount_due.toFixed(2);
-    const expenses    = +expAgg.expenses_lek.toFixed(2);
-    const purchase_cash = +purAgg.purchase_cash_lek.toFixed(2);
-
-    const physRow = queryOne(
-      `SELECT COALESCE(opening_lek, 0)          AS opening,
-              COALESCE(physical_cash_lek, 0)    AS phys,
-              COALESCE(closeout_to_safe_lek, 0) AS to_safe
-         FROM daily_records WHERE date = ?`,
+         COALESCE(i.currency, 'LEK')          AS cur,
+         COALESCE(i.total_with_vat, 0)        AS total,
+         COALESCE(i.payment_method, 'cash')   AS pm,
+         COALESCE(i.paid_cash, 0)             AS paid_cash,
+         COALESCE(i.paid_pos, 0)              AS paid_pos,
+         COALESCE(i.paid_bank, 0)             AS paid_bank,
+         (COALESCE(i.amount_paid, 0)
+           - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)
+         )                                    AS initial_paid
+       FROM invoices i
+       WHERE i.date = ? AND COALESCE(i.cancelled, 0) = 0`,
       [date]
     );
-    const opening_cash        = +((physRow?.opening || 0)).toFixed(2);
 
-    // Cash receipts from sales = total - bank - pos - debt
-    const cash_from_sales = +(xhiro_total - paid_bank - paid_pos - amount_due).toFixed(2);
-    const cash_balance    = +(opening_cash + cash_from_sales - expenses - purchase_cash).toFixed(2);
+    const xhiro_total = zeroPerCur();
+    const paid_bank   = zeroPerCur();
+    const paid_pos    = zeroPerCur();
+    const amount_due  = zeroPerCur();
+    for (const r of salesRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in xhiro_total)) continue;
+      xhiro_total[c] += r.total;
+      if (r.pm === 'bank') paid_bank[c] += r.total;
+      else if (r.pm === 'pos') paid_pos[c] += r.total;
+      else if (r.pm === 'debt') {
+        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const due     = Math.max(0, r.total - paidNow);
+        amount_due[c] += due;
+        // paidNow bie te kesh_nga_shitjet automatikisht (xhiro − bank − pos − due).
+      }
+      else if (r.pm === 'mikse') {
+        paid_bank[c] += r.paid_bank;
+        paid_pos[c]  += r.paid_pos;
+        const debt = r.total - r.paid_cash - r.paid_pos - r.paid_bank;
+        if (debt > 0) amount_due[c] += debt;
+      }
+    }
 
-    const physical_cash       = +((physRow?.phys || 0)).toFixed(2);
-    const closeout_to_safe    = +((physRow?.to_safe || 0)).toFixed(2);
-    const carryover_next_day  = +Math.max(0, physical_cash - closeout_to_safe).toFixed(2);
-    const difference          = +(physical_cash - cash_balance).toFixed(2);
+    const expRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount, 0)       AS amt
+         FROM expense_entries WHERE date = ?`,
+      [date]
+    );
+    const expenses = zeroPerCur();
+    for (const r of expRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in expenses) expenses[c] += r.amt;
+    }
+
+    // Fatura Blerje kesh (payment_method='cash') → amount_paid në monedhën origjinale.
+    const purRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount_paid, 0)  AS amt
+         FROM purchase_invoices
+         WHERE date = ? AND payment_method = 'cash'`,
+      [date]
+    );
+    const purchase_cash = zeroPerCur();
+    for (const r of purRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in purchase_cash) purchase_cash[c] += r.amt;
+    }
+
+    // Hurdë (scrap gold) purchases — paid fully in cash, deducted from arka per currency
+    const hurdaRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(total_amount, 0) AS amt
+         FROM hurda_purchases WHERE date = ?`,
+      [date]
+    );
+    const hurda_cash = zeroPerCur();
+    let hurda_gram_total = 0;
+    for (const r of hurdaRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in hurda_cash) hurda_cash[c] += r.amt;
+    }
+    const hurdaGramRow = await queryOne('SELECT COALESCE(SUM(gram),0) AS g FROM hurda_purchases WHERE date = ?', [date]);
+    hurda_gram_total = +(hurdaGramRow?.g || 0).toFixed(3);
+
+    // HAS (bulk gold-jewelry batch) purchases — same treatment as hurda: cash out per currency
+    const hasRows = await queryAll(
+      `SELECT COALESCE(currency, 'EUR') AS cur,
+              COALESCE(total_amount, 0) AS amt
+         FROM has_purchases WHERE date = ?`,
+      [date]
+    );
+    const has_cash = zeroPerCur();
+    let has_gram_total = 0;
+    for (const r of hasRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (c in has_cash) has_cash[c] += r.amt;
+    }
+    const hasGramRow = await queryOne('SELECT COALESCE(SUM(gram),0) AS g FROM has_purchases WHERE date = ?', [date]);
+    has_gram_total = +(hasGramRow?.g || 0).toFixed(3);
+
+    const dailyRow = await queryOne(
+      `SELECT COALESCE(opening_lek, 0)              AS opening_LEK,
+              COALESCE(opening_eur, 0)              AS opening_EUR,
+              COALESCE(opening_usd, 0)              AS opening_USD,
+              COALESCE(opening_gbp, 0)              AS opening_GBP,
+              COALESCE(opening_chf, 0)              AS opening_CHF,
+              COALESCE(physical_cash_lek, 0)        AS phys_LEK,
+              COALESCE(physical_cash_eur, 0)        AS phys_EUR,
+              COALESCE(physical_cash_usd, 0)        AS phys_USD,
+              COALESCE(physical_cash_gbp, 0)        AS phys_GBP,
+              COALESCE(physical_cash_chf, 0)        AS phys_CHF,
+              COALESCE(closeout_to_safe_lek, 0)     AS safe_LEK,
+              COALESCE(closeout_to_safe_eur, 0)     AS safe_EUR,
+              COALESCE(closeout_to_safe_usd, 0)     AS safe_USD,
+              COALESCE(closeout_to_safe_gbp, 0)     AS safe_GBP,
+              COALESCE(closeout_to_safe_chf, 0)     AS safe_CHF
+         FROM daily_records WHERE date = ?`,
+      [date]
+    ) || {};
+
+    const opening_cash   = zeroPerCur();
+    const physical_cash  = zeroPerCur();
+    const closeout_to_safe = zeroPerCur();
+    for (const c of CURS) {
+      opening_cash[c]     = dailyRow[`opening_${c}`] || 0;
+      physical_cash[c]    = dailyRow[`phys_${c}`]    || 0;
+      closeout_to_safe[c] = dailyRow[`safe_${c}`]    || 0;
+    }
+
+    // Kesh nga shitjet (për çdo monedhë) = xhiro − bankë − pos − borxh
+    const cash_from_sales = zeroPerCur();
+    const cash_balance    = zeroPerCur();
+    const carryover_next_day = zeroPerCur();
+    const difference = zeroPerCur();
+    for (const c of CURS) {
+      cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
+      cash_balance[c]    = opening_cash[c] + cash_from_sales[c] - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
+      carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
+      difference[c]      = physical_cash[c] - cash_balance[c];
+    }
 
     res.json({
       date,
-      xhiro_total,
-      paid_bank,
-      paid_pos,
-      amount_due,
-      opening_cash,
-      cash_from_sales,
-      expenses,
-      purchase_cash,
-      cash_balance,
-      physical_cash,
-      difference,
-      closeout_to_safe,
-      carryover_next_day,
+      currencies: CURS,
+      xhiro_total:       fx(xhiro_total),
+      paid_bank:         fx(paid_bank),
+      paid_pos:          fx(paid_pos),
+      amount_due:        fx(amount_due),
+      opening_cash:      fx(opening_cash),
+      cash_from_sales:   fx(cash_from_sales),
+      expenses:          fx(expenses),
+      purchase_cash:     fx(purchase_cash),
+      hurda_cash:        fx(hurda_cash),
+      hurda_gram_total,
+      has_cash:          fx(has_cash),
+      has_gram_total,
+      cash_balance:      fx(cash_balance),
+      physical_cash:     fx(physical_cash),
+      difference:        fx(difference),
+      closeout_to_safe:  fx(closeout_to_safe),
+      carryover_next_day: fx(carryover_next_day),
       counts: {
-        invoices: salesAgg.invoice_count || 0,
-        expenses: expAgg.expense_count || 0,
-        purchases_cash: purAgg.purchase_count || 0,
+        invoices: salesRows.length,
+        expenses: expRows.length,
+        purchases_cash: purRows.length,
+        hurda_purchases: hurdaRows.length,
+        has_purchases: hasRows.length,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Mbyllje e ditës: ndaj gjendjen fizike midis kasafortës dhe gjendjes fillestare të ditës pasardhëse.
-//   to_safe: shkruhet tek closeout_to_safe_lek për këtë datë
-//   carry:   physical_cash - to_safe; shkruhet tek opening_lek për datën pasardhëse
+// Mbyllje e ditës për çdo monedhë: ndaj gjendjen fizike midis kasafortës dhe
+// gjendjes fillestare të ditës pasardhëse.
+//   to_safe: { LEK, EUR, USD, GBP, CHF } → closeout_to_safe_{cur} për këtë datë
+//   carry:   physical_cash_{cur} - to_safe[cur] → opening_{cur} për datën pasardhëse
 app.post('/api/arka-ditore/:date/closeout', async (req, res) => {
   try {
     const { date } = req.params;
-    const toSafe = Math.max(0, parseFloat(req.body?.to_safe_lek) || 0);
-
-    const today = queryOne('SELECT COALESCE(physical_cash_lek, 0) AS phys FROM daily_records WHERE date = ?', [date]);
-    const physical = +(today?.phys || 0);
-    const carry = +Math.max(0, physical - toSafe).toFixed(2);
-
-    // Update today's closeout_to_safe
-    const existsToday = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
-    if (existsToday) {
-      run('UPDATE daily_records SET closeout_to_safe_lek = ? WHERE date = ?', [toSafe, date]);
-    } else {
-      run('INSERT INTO daily_records (date, closeout_to_safe_lek) VALUES (?, ?)', [date, toSafe]);
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const body = req.body || {};
+    // Accept either { to_safe: {LEK, EUR, ...} } or legacy { to_safe_lek }
+    const toSafe = {};
+    for (const c of CURS) {
+      const raw = body.to_safe?.[c] ?? body[`to_safe_${c.toLowerCase()}`] ?? 0;
+      toSafe[c] = Math.max(0, parseFloat(raw) || 0);
     }
 
-    // Compute next day's date
+    const today = await queryOne(
+      `SELECT COALESCE(physical_cash_lek, 0) AS phys_LEK,
+              COALESCE(physical_cash_eur, 0) AS phys_EUR,
+              COALESCE(physical_cash_usd, 0) AS phys_USD,
+              COALESCE(physical_cash_gbp, 0) AS phys_GBP,
+              COALESCE(physical_cash_chf, 0) AS phys_CHF
+         FROM daily_records WHERE date = ?`,
+      [date]
+    ) || {};
+    const carry = {};
+    for (const c of CURS) {
+      const phys = +(today[`phys_${c}`] || 0);
+      carry[c] = +Math.max(0, phys - toSafe[c]).toFixed(2);
+    }
+
+    const existsToday = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    const closeoutCols = CURS.map(c => `closeout_to_safe_${c.toLowerCase()}`);
+    const closeoutVals = CURS.map(c => toSafe[c]);
+    if (existsToday) {
+      const setClause = closeoutCols.map(col => `${col} = ?`).join(', ');
+      await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...closeoutVals, date]);
+    } else {
+      const cols = closeoutCols.join(', ');
+      const placeholders = closeoutCols.map(() => '?').join(', ');
+      await run(`INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`, [date, ...closeoutVals]);
+    }
+
     const d = new Date(date + 'T12:00:00');
     d.setDate(d.getDate() + 1);
     const nextDate = d.toISOString().split('T')[0];
 
-    // Write carry-over into next day's opening_lek
-    const existsNext = queryOne('SELECT id FROM daily_records WHERE date = ?', [nextDate]);
+    const existsNext = await queryOne('SELECT id FROM daily_records WHERE date = ?', [nextDate]);
+    const openCols = CURS.map(c => `opening_${c.toLowerCase()}`);
+    const openVals = CURS.map(c => carry[c]);
     if (existsNext) {
-      run('UPDATE daily_records SET opening_lek = ? WHERE date = ?', [carry, nextDate]);
+      const setClause = openCols.map(col => `${col} = ?`).join(', ');
+      await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...openVals, nextDate]);
     } else {
-      run('INSERT INTO daily_records (date, opening_lek) VALUES (?, ?)', [nextDate, carry]);
+      const cols = openCols.join(', ');
+      const placeholders = openCols.map(() => '?').join(', ');
+      await run(`INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`, [nextDate, ...openVals]);
     }
 
-    res.json({ success: true, to_safe_lek: toSafe, carry_lek: carry, next_date: nextDate });
+    res.json({ success: true, to_safe: toSafe, carry, next_date: nextDate });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Kasaforta: bilanci kumulativ + historiku i lëvizjeve (derdhje + closeout − tërheqje).
+// Kasaforta: bilanci kumulativ + historiku i lëvizjeve (derdhje + closeout − tërheqje)
+// për çdo monedhë (LEK, EUR, USD, GBP, CHF).
 app.get('/api/kasaforta', async (req, res) => {
   try {
-    const rows = queryAll(
-      `SELECT date,
-              COALESCE(safe_deposit_lek, 0)     AS safe_deposit,
-              COALESCE(safe_withdraw_lek, 0)    AS safe_withdraw,
-              COALESCE(closeout_to_safe_lek, 0) AS closeout_in
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const selectCols = CURS.flatMap(c => {
+      const lc = c.toLowerCase();
+      return [
+        `COALESCE(safe_deposit_${lc}, 0)     AS dep_${c}`,
+        `COALESCE(safe_withdraw_${lc}, 0)    AS wd_${c}`,
+        `COALESCE(closeout_to_safe_${lc}, 0) AS co_${c}`,
+      ];
+    }).join(', ');
+    const whereActivity = CURS.flatMap(c => {
+      const lc = c.toLowerCase();
+      return [
+        `COALESCE(safe_deposit_${lc}, 0) > 0`,
+        `COALESCE(safe_withdraw_${lc}, 0) > 0`,
+        `COALESCE(closeout_to_safe_${lc}, 0) > 0`,
+      ];
+    }).join(' OR ');
+
+    const rows = await queryAll(
+      `SELECT date, ${selectCols}
          FROM daily_records
-         WHERE COALESCE(safe_deposit_lek, 0) > 0
-            OR COALESCE(safe_withdraw_lek, 0) > 0
-            OR COALESCE(closeout_to_safe_lek, 0) > 0
+         WHERE ${whereActivity}
          ORDER BY date ASC`
     );
 
-    let running = 0;
+    const running = { LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 };
     const history = rows.map(r => {
-      const net = (r.safe_deposit + r.closeout_in) - r.safe_withdraw;
-      running += net;
-      return {
-        date: r.date,
-        deposit_lek:  +r.safe_deposit.toFixed(2),
-        closeout_in:  +r.closeout_in.toFixed(2),
-        withdraw_lek: +r.safe_withdraw.toFixed(2),
-        net_lek:      +net.toFixed(2),
-        balance_lek:  +running.toFixed(2),
-      };
+      const perCur = {};
+      for (const c of CURS) {
+        const net = (r[`dep_${c}`] + r[`co_${c}`]) - r[`wd_${c}`];
+        const balanceBefore = running[c];
+        running[c] += net;
+        perCur[c] = {
+          deposit:  +r[`dep_${c}`].toFixed(2),
+          closeout_in: +r[`co_${c}`].toFixed(2),
+          withdraw: +r[`wd_${c}`].toFixed(2),
+          net:      +net.toFixed(2),
+          balance_before: +balanceBefore.toFixed(2),
+          balance:  +running[c].toFixed(2),
+        };
+      }
+      return { date: r.date, ...perCur };
     });
 
+    const balance = {};
+    for (const c of CURS) balance[c] = +running[c].toFixed(2);
+
     res.json({
-      balance_lek: +running.toFixed(2),
+      currencies: CURS,
+      balance,
+      // Backwards compat: keep balance_lek for any old caller
+      balance_lek: balance.LEK,
       history: history.reverse(),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2815,20 +3487,24 @@ app.get('/api/kasaforta', async (req, res) => {
 // Shuma agregate për datë sinkronizohet edhe në daily_records.safe_withdraw_lek/eur
 // që raportet ekzistuese (Kasaforta, permbledhëse) të vazhdojnë të punojnë.
 
-function syncSafeWithdrawTotals(date) {
-  const agg = queryOne(
-    `SELECT COALESCE(SUM(amount_lek), 0) AS lek,
-            COALESCE(SUM(amount_eur), 0) AS eur
+const CURS_SW = ['lek', 'eur', 'usd', 'gbp', 'chf'];
+
+async function syncSafeWithdrawTotals(date) {
+  const agg = await queryOne(
+    `SELECT ${CURS_SW.map(c => `COALESCE(SUM(amount_${c}), 0) AS ${c}`).join(', ')}
        FROM safe_withdrawals WHERE date = ?`,
     [date]
-  ) || { lek: 0, eur: 0 };
-  const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  ) || {};
+  const existing = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  const cols = CURS_SW.map(c => `safe_withdraw_${c}`);
+  const vals = CURS_SW.map(c => +(agg[c] || 0).toFixed(2));
   if (existing) {
-    run('UPDATE daily_records SET safe_withdraw_lek = ?, safe_withdraw_eur = ? WHERE date = ?',
-      [+agg.lek.toFixed(2), +agg.eur.toFixed(2), date]);
+    const setClause = cols.map(col => `${col} = ?`).join(', ');
+    await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...vals, date]);
   } else {
-    run('INSERT INTO daily_records (date, safe_withdraw_lek, safe_withdraw_eur) VALUES (?, ?, ?)',
-      [date, +agg.lek.toFixed(2), +agg.eur.toFixed(2)]);
+    const colList = cols.join(', ');
+    const placeholders = cols.map(() => '?').join(', ');
+    await run(`INSERT INTO daily_records (date, ${colList}) VALUES (?, ${placeholders})`, [date, ...vals]);
   }
 }
 
@@ -2840,8 +3516,9 @@ app.get('/api/safe-withdrawals', async (req, res) => {
     if (from) { where += ' AND date >= ?'; params.push(from); }
     if (to)   { where += ' AND date <= ?'; params.push(to); }
     const lim = Math.min(parseInt(limit) || 200, 500);
-    const rows = queryAll(
-      `SELECT id, date, amount_lek, amount_eur, person, note, created_at
+    const rows = await queryAll(
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              person, note, created_at
          FROM safe_withdrawals
         WHERE ${where}
         ORDER BY date DESC, created_at DESC
@@ -2857,17 +3534,24 @@ app.post('/api/safe-withdrawals', async (req, res) => {
     const d = req.body || {};
     const date = d.date;
     if (!date) return res.status(400).json({ error: 'date required' });
-    const lek = parseFloat(d.amount_lek) || 0;
-    const eur = parseFloat(d.amount_eur) || 0;
-    if (lek <= 0 && eur <= 0) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
+    const amounts = {};
+    let anyPositive = false;
+    for (const c of CURS_SW) {
+      const v = parseFloat(d[`amount_${c}`]) || 0;
+      amounts[c] = v;
+      if (v > 0) anyPositive = true;
+    }
+    if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
-    run(
-      `INSERT INTO safe_withdrawals (date, amount_lek, amount_eur, person, note)
-       VALUES (?, ?, ?, ?, ?)`,
-      [date, lek, eur, person, note]
+    const cols = CURS_SW.map(c => `amount_${c}`);
+    const vals = CURS_SW.map(c => amounts[c]);
+    await run(
+      `INSERT INTO safe_withdrawals (date, ${cols.join(', ')}, person, note)
+       VALUES (?, ${cols.map(() => '?').join(', ')}, ?, ?)`,
+      [date, ...vals, person, note]
     );
-    syncSafeWithdrawTotals(date);
+    await syncSafeWithdrawTotals(date);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2875,26 +3559,149 @@ app.post('/api/safe-withdrawals', async (req, res) => {
 app.delete('/api/safe-withdrawals/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const row = queryOne('SELECT date FROM safe_withdrawals WHERE id = ?', [id]);
+    const row = await queryOne('SELECT date FROM safe_withdrawals WHERE id = ?', [id]);
     if (!row) return res.status(404).json({ error: 'not found' });
-    run('DELETE FROM safe_withdrawals WHERE id = ?', [id]);
-    syncSafeWithdrawTotals(row.date);
+    await run('DELETE FROM safe_withdrawals WHERE id = ?', [id]);
+    await syncSafeWithdrawTotals(row.date);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Ruaj gjendjen fizike të arkës (e numëruar dorazi) për një datë.
+// ============================================================
+// SAFE CONVERSIONS — Konvertim valute brenda kasafortës
+// ============================================================
+// Ekuivalenti: tërhiq shumën nga një monedhë, derdh ekuivalentin në një tjetër.
+// Prek daily_records: safe_withdraw_{from} += from_amount, safe_deposit_{to} += to_amount.
+
+async function syncSafeConvertTotals(date) {
+  const CURS_CV = ['lek', 'eur', 'usd', 'gbp', 'chf'];
+  // withdraw = shitje (from_amount) për çdo monedhë kur ajo është "from"
+  // deposit  = derdhje (to_amount)   për çdo monedhë kur ajo është "to"
+  const wdParts = CURS_CV.map(c =>
+    `COALESCE((SELECT SUM(from_amount) FROM safe_conversions WHERE date = ? AND UPPER(from_currency) = '${c.toUpperCase()}'), 0)`
+  );
+  const dpParts = CURS_CV.map(c =>
+    `COALESCE((SELECT SUM(to_amount)   FROM safe_conversions WHERE date = ? AND UPPER(to_currency)   = '${c.toUpperCase()}'), 0)`
+  );
+  // Për parë sigurojmë që sums e safe_withdrawals normale ekzistojnë, pastaj ripërsërisim me convert-in.
+  const swAgg = await queryOne(
+    `SELECT ${CURS_CV.map(c => `COALESCE(SUM(amount_${c}), 0) AS sw_${c}`).join(', ')}
+       FROM safe_withdrawals WHERE date = ?`,
+    [date]
+  ) || {};
+  // Merr shumat e konvertimit
+  const cvW = await queryOne(
+    `SELECT ${wdParts.map((p, i) => `${p} AS cw_${CURS_CV[i]}`).join(', ')}`,
+    [...CURS_CV.map(() => date)]
+  ) || {};
+  const cvD = await queryOne(
+    `SELECT ${dpParts.map((p, i) => `${p} AS cd_${CURS_CV[i]}`).join(', ')}`,
+    [...CURS_CV.map(() => date)]
+  ) || {};
+
+  const existing = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  const wdCols = CURS_CV.map(c => `safe_withdraw_${c}`);
+  const dpCols = CURS_CV.map(c => `safe_deposit_${c}`);
+  const wdVals = CURS_CV.map(c => +((swAgg[`sw_${c}`] || 0) + (cvW[`cw_${c}`] || 0)).toFixed(2));
+  const dpVals = CURS_CV.map(c => +(cvD[`cd_${c}`] || 0).toFixed(2));
+
+  if (existing) {
+    const setClause = [...wdCols, ...dpCols].map(col => `${col} = ?`).join(', ');
+    await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...wdVals, ...dpVals, date]);
+  } else {
+    const cols = [...wdCols, ...dpCols].join(', ');
+    const placeholders = [...wdCols, ...dpCols].map(() => '?').join(', ');
+    await run(`INSERT INTO daily_records (date, ${cols}) VALUES (?, ${placeholders})`, [date, ...wdVals, ...dpVals]);
+  }
+}
+
+app.get('/api/safe-conversions', async (req, res) => {
+  try {
+    const { from, to, limit } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND date >= ?'; params.push(from); }
+    if (to)   { where += ' AND date <= ?'; params.push(to); }
+    const lim = Math.min(parseInt(limit) || 200, 500);
+    const rows = await queryAll(
+      `SELECT id, date, from_currency, from_amount, to_currency, to_amount,
+              exchange_rate, note, created_at
+         FROM safe_conversions
+        WHERE ${where}
+        ORDER BY date DESC, created_at DESC
+        LIMIT ${lim}`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/safe-conversions', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date = d.date;
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const fromCurrency = String(d.from_currency || '').toUpperCase();
+    const toCurrency   = String(d.to_currency   || '').toUpperCase();
+    if (!CURS.includes(fromCurrency)) return res.status(400).json({ error: 'from_currency invalid' });
+    if (!CURS.includes(toCurrency))   return res.status(400).json({ error: 'to_currency invalid' });
+    if (fromCurrency === toCurrency)  return res.status(400).json({ error: 'monedhat duhet të jenë të ndryshme' });
+    const fromAmount = parseFloat(d.from_amount) || 0;
+    const toAmount   = parseFloat(d.to_amount)   || 0;
+    if (fromAmount <= 0) return res.status(400).json({ error: 'from_amount duhet > 0' });
+    if (toAmount   <= 0) return res.status(400).json({ error: 'to_amount duhet > 0' });
+    const exchangeRate = parseFloat(d.exchange_rate) || +(toAmount / fromAmount).toFixed(6);
+    const note = String(d.note || '').trim();
+    await run(
+      `INSERT INTO safe_conversions
+        (date, from_currency, from_amount, to_currency, to_amount, exchange_rate, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [date, fromCurrency, fromAmount, toCurrency, toAmount, exchangeRate, note]
+    );
+    await syncSafeConvertTotals(date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/safe-conversions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await queryOne('SELECT date FROM safe_conversions WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await run('DELETE FROM safe_conversions WHERE id = ?', [id]);
+    await syncSafeConvertTotals(row.date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ruaj gjendjen fizike të arkës (e numëruar dorazi) për një datë, për çdo monedhë.
+// Pranon { physical_cash: { LEK, EUR, USD, GBP, CHF } } ose formatin e vjetër
+// { physical_cash_lek } për prapa-kompatibilitet.
 app.post('/api/arka-ditore/:date/physical', async (req, res) => {
   try {
     const { date } = req.params;
-    const value = parseFloat(req.body?.physical_cash_lek) || 0;
-    const existing = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
-    if (existing) {
-      run('UPDATE daily_records SET physical_cash_lek = ? WHERE date = ?', [value, date]);
-    } else {
-      run('INSERT INTO daily_records (date, physical_cash_lek) VALUES (?, ?)', [date, value]);
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const body = req.body || {};
+    const vals = {};
+    for (const c of CURS) {
+      const raw = body.physical_cash?.[c] ?? body[`physical_cash_${c.toLowerCase()}`] ?? null;
+      if (raw !== null) vals[c] = parseFloat(raw) || 0;
     }
-    res.json({ success: true, physical_cash_lek: value });
+    if (Object.keys(vals).length === 0) return res.status(400).json({ error: 'no values provided' });
+
+    const existing = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+    const cols = Object.keys(vals).map(c => `physical_cash_${c.toLowerCase()}`);
+    const values = Object.values(vals);
+    if (existing) {
+      const setClause = cols.map(col => `${col} = ?`).join(', ');
+      await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...values, date]);
+    } else {
+      const colList = cols.join(', ');
+      const placeholders = cols.map(() => '?').join(', ');
+      await run(`INSERT INTO daily_records (date, ${colList}) VALUES (?, ${placeholders})`, [date, ...values]);
+    }
+    res.json({ success: true, physical_cash: vals });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2910,8 +3717,9 @@ app.post('/api/arka-ditore/:date/physical', async (req, res) => {
 // Sales items — burimi: Fatura Shitje (invoice_items).
 app.get('/api/reports/sales-items', async (req, res) => {
   try {
-    const { from, to, q, material } = req.query;
+    const { from, to, q, material, detailed } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    const isDetailed = detailed === '1' || detailed === 'true';
 
     const params = [from, to];
     let where = `i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0`;
@@ -2925,7 +3733,70 @@ app.get('/api/reports/sales-items', async (req, res) => {
       params.push(material);
     }
 
-    const rows = queryAll(
+    // Rreshtat e detajuar — një rresht për çdo shitje (invoice item), pa mbledhje.
+    const rowsDetailed = isDetailed ? await queryAll(
+      `SELECT
+         ii.id AS item_id,
+         i.id  AS invoice_id,
+         i.date,
+         i.invoice_no,
+         COALESCE(i.customer_name, '') AS customer_name,
+         COALESCE(i.currency, 'LEK')   AS currency,
+         COALESCE(i.exchange_rate, 1)  AS exchange_rate,
+         COALESCE(i.is_credit_note, 0) AS is_credit_note,
+         COALESCE(ii.product_id, 0)                     AS product_id,
+         COALESCE(NULLIF(ii.barcode, ''), p.barcode, '') AS barcode,
+         COALESCE(NULLIF(ii.name, ''), p.name, '')       AS name,
+         COALESCE(p.sku, '')      AS sku,
+         COALESCE(p.category, '') AS category,
+         COALESCE(p.material, '') AS material,
+         COALESCE(p.unit, 'copë') AS unit,
+         ii.qty AS qty,
+         ii.unit_price_no_vat AS unit_price,
+         ii.discount_percent  AS discount_percent,
+         ii.subtotal_no_vat   AS subtotal_no_vat,
+         ii.vat_amount        AS vat_amount,
+         ii.total_with_vat    AS total_with_vat
+       FROM invoice_items ii
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE ${where}
+       ORDER BY i.date ASC, i.invoice_no ASC, ii.id ASC`,
+      params
+    ).map(r => {
+      const rate      = +(r.exchange_rate || 1);
+      const qty       = +(r.qty || 0);
+      const unitOrig  = +(r.unit_price || 0);
+      const discPct   = +(r.discount_percent || 0);
+      const subOrig   = +(r.subtotal_no_vat || 0);
+      const vatOrig   = +(r.vat_amount || 0);
+      const totOrig   = +(r.total_with_vat || 0);
+      const discOrig  = +(qty * unitOrig * discPct / 100);
+      return {
+        item_id: r.item_id, invoice_id: r.invoice_id,
+        date: r.date, invoice_no: r.invoice_no,
+        customer_name: r.customer_name,
+        currency: r.currency, exchange_rate: rate,
+        is_credit_note: !!r.is_credit_note,
+        product_id: r.product_id, barcode: r.barcode, name: r.name,
+        sku: r.sku, category: r.category, material: r.material, unit: r.unit,
+        qty,
+        unit_price:           +unitOrig.toFixed(2),
+        discount_percent:     discPct,
+        discount:             +discOrig.toFixed(2),
+        value_no_vat:         +subOrig.toFixed(2),
+        vat:                  +vatOrig.toFixed(2),
+        value_with_vat:       +totOrig.toFixed(2),
+        // Ekuivalentët në LEK për krahasim vizual
+        unit_price_lek:       +(unitOrig * rate).toFixed(2),
+        discount_lek:         +(discOrig * rate).toFixed(2),
+        value_no_vat_lek:     +(subOrig * rate).toFixed(2),
+        vat_lek:              +(vatOrig * rate).toFixed(2),
+        value_with_vat_lek:   +(totOrig * rate).toFixed(2),
+      };
+    }) : null;
+
+    const rows = await queryAll(
       `SELECT
          COALESCE(ii.product_id, 0) AS product_id,
          COALESCE(NULLIF(ii.barcode, ''), p.barcode, '') AS barcode,
@@ -2985,7 +3856,36 @@ app.get('/api/reports/sales-items', async (req, res) => {
       tjeter:  rows.filter(r => r.material !== 'flori' && r.material !== 'diamant').reduce(addInto, emptyTotals()),
     };
 
-    res.json({ rows, totals, totalsByMaterial });
+    // Totalet e grupuara sipas monedhës origjinale të faturës — pa konvertim në LEK.
+    // Përdorin të njëjtat filtra (datë, q, material) si query kryesor.
+    const totalsByCurrencyRaw = await queryAll(
+      `SELECT
+         COALESCE(i.currency, 'LEK') AS currency,
+         SUM(ii.qty) AS qty,
+         SUM(ii.qty * ii.unit_price_no_vat * (ii.discount_percent / 100.0)) AS discount,
+         SUM(ii.subtotal_no_vat) AS value_no_vat,
+         SUM(ii.vat_amount)      AS vat,
+         SUM(ii.total_with_vat)  AS value_with_vat
+       FROM invoice_items ii
+       JOIN invoices i      ON i.id = ii.invoice_id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE ${where}
+       GROUP BY COALESCE(i.currency, 'LEK')
+       ORDER BY currency ASC`,
+      params
+    );
+    const totalsByCurrency = {};
+    for (const r of totalsByCurrencyRaw) {
+      totalsByCurrency[r.currency] = {
+        qty:                +(+r.qty || 0),
+        discount:           +(+r.discount || 0).toFixed(2),
+        value_no_vat:       +(+r.value_no_vat || 0).toFixed(2),
+        vat:                +(+r.vat || 0).toFixed(2),
+        value_with_vat:     +(+r.value_with_vat || 0).toFixed(2),
+      };
+    }
+
+    res.json({ rows, rowsDetailed, totals, totalsByMaterial, totalsByCurrency });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2993,11 +3893,12 @@ app.get('/api/reports/sales-items', async (req, res) => {
 // (magazina_hyrje_items, pa TVSH → trajtohet si TVSH = 0).
 app.get('/api/reports/purchase-items', async (req, res) => {
   try {
-    const { from, to, q } = req.query;
+    const { from, to, q, category } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
 
-    const ql = (q || '').trim();
+    const ql   = (q || '').trim();
     const like = ql ? `%${ql}%` : null;
+    const cat  = (category || '').trim();
 
     // ── Fatura Blerje
     const purchaseParams = [from, to];
@@ -3006,7 +3907,11 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       purchaseWhere += ` AND (pit.barcode LIKE ? OR pit.name LIKE ? OR p.sku LIKE ?)`;
       purchaseParams.push(like, like, like);
     }
-    const purchases = queryAll(
+    if (cat) {
+      purchaseWhere += ` AND COALESCE(p.category, '') = ?`;
+      purchaseParams.push(cat);
+    }
+    const purchases = await queryAll(
       `SELECT
          COALESCE(pit.product_id, 0) AS product_id,
          COALESCE(NULLIF(pit.barcode, ''), p.barcode, '') AS barcode,
@@ -3038,7 +3943,11 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       magWhere += ` AND (mi.barcode LIKE ? OR mi.name LIKE ? OR p.sku LIKE ?)`;
       magParams.push(like, like, like);
     }
-    const mags = queryAll(
+    if (cat) {
+      magWhere += ` AND COALESCE(p.category, '') = ?`;
+      magParams.push(cat);
+    }
+    const mags = await queryAll(
       `SELECT
          COALESCE(mi.product_id, 0) AS product_id,
          COALESCE(NULLIF(mi.barcode, ''), p.barcode, '') AS barcode,
@@ -3121,7 +4030,16 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       value_with_vat_lek: a.value_with_vat_lek + r.value_with_vat_lek,
     }), { qty: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
 
-    res.json({ rows, totals });
+    // Lista e kategorive për të mbushur filtër-in në frontend
+    // (nga produktet aktive që kanë të paktën një kategori të vendosur).
+    const categoryRows = await queryAll(
+      `SELECT DISTINCT category FROM products
+       WHERE COALESCE(active, 1) = 1 AND COALESCE(category, '') != ''
+       ORDER BY category ASC`
+    );
+    const categories = categoryRows.map(r => r.category);
+
+    res.json({ rows, totals, categories });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3143,7 +4061,7 @@ app.get('/api/reports/sales-items/docs', async (req, res) => {
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const params = [from, to];
     const matchSQL = buildItemMatchSQL('ii', product_id, barcode, name, params);
-    const rows = queryAll(
+    const rows = await queryAll(
       `SELECT
          i.id              AS invoice_id,
          i.date            AS date,
@@ -3186,7 +4104,7 @@ app.get('/api/reports/purchase-items/docs', async (req, res) => {
     // Fatura Blerje
     const pParams = [from, to];
     const pMatch  = buildItemMatchSQL('pit', product_id, barcode, name, pParams);
-    const purchases = queryAll(
+    const purchases = await queryAll(
       `SELECT
          'purchase' AS source,
          pi.id            AS doc_id,
@@ -3214,7 +4132,7 @@ app.get('/api/reports/purchase-items/docs', async (req, res) => {
     // Magazina Hyrje (pa TVSH)
     const mParams = [from, to];
     const mMatch  = buildItemMatchSQL('mi', product_id, barcode, name, mParams);
-    const mags = queryAll(
+    const mags = await queryAll(
       `SELECT
          'magazina' AS source,
          m.id            AS doc_id,
@@ -3259,8 +4177,8 @@ app.get('/api/reports/purchase-items/docs', async (req, res) => {
 // Çdo zë ka monedhën e vet + kursin manual; agregojmë sipas monedhës.
 // Monedhat jashtë LEK/EUR/USD (p.sh. GBP, CHF) konvertohen në LEK dhe shtohen
 // te expenses_lek për të ruajtur përputhshmërinë me MonthlySummary/EndOfDay.
-function syncExpenseTotals(date) {
-  const groups = queryAll(
+async function syncExpenseTotals(date) {
+  const groups = await queryAll(
     `SELECT
        COALESCE(currency, 'LEK') AS cur,
        COALESCE(SUM(amount), 0) AS amt,
@@ -3276,14 +4194,14 @@ function syncExpenseTotals(date) {
     else if (g.cur === 'USD') usd += g.amt;
     else                      lek += g.amt_lek;
   }
-  const exists = queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
+  const exists = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
   if (exists) {
-    run(
+    await run(
       `UPDATE daily_records SET expenses_lek = ?, expenses_eur = ?, expenses_usd = ? WHERE date = ?`,
       [lek, eur, usd, date]
     );
   } else {
-    run(
+    await run(
       `INSERT INTO daily_records (date, expenses_lek, expenses_eur, expenses_usd) VALUES (?, ?, ?, ?)`,
       [date, lek, eur, usd]
     );
@@ -3291,11 +4209,23 @@ function syncExpenseTotals(date) {
 }
 
 // ── Kategoritë e shpenzimeve ─────────────────────────────────
+// Lista e kategorive të produkteve (për filtra në disa faqe).
+app.get('/api/products/categories', async (req, res) => {
+  try {
+    const rows = await queryAll(
+      `SELECT DISTINCT category FROM products
+       WHERE COALESCE(active, 1) = 1 AND COALESCE(category, '') != ''
+       ORDER BY category COLLATE NOCASE ASC`
+    );
+    res.json(rows.map(r => r.category));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/expense-categories', async (req, res) => {
   try {
     const includeInactive = req.query.all === '1';
     const where = includeInactive ? '' : 'WHERE COALESCE(active, 1) = 1';
-    res.json(queryAll(`SELECT * FROM expense_categories ${where} ORDER BY name COLLATE NOCASE ASC`));
+    res.json(await queryAll(`SELECT * FROM expense_categories ${where} ORDER BY name COLLATE NOCASE ASC`));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3303,11 +4233,11 @@ app.post('/api/expense-categories', async (req, res) => {
   try {
     const { name, description } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
-    run(
+    await run(
       `INSERT INTO expense_categories (name, description, active) VALUES (?, ?, 1)`,
       [name.trim(), description || '']
     );
-    const row = queryOne('SELECT * FROM expense_categories ORDER BY id DESC LIMIT 1');
+    const row = await queryOne('SELECT * FROM expense_categories ORDER BY id DESC LIMIT 1');
     res.json(row);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3317,17 +4247,17 @@ app.put('/api/expense-categories/:id', async (req, res) => {
     const { id } = req.params;
     const { name, description, active } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
-    run(
+    await run(
       `UPDATE expense_categories SET name = ?, description = ?, active = ? WHERE id = ?`,
       [name.trim(), description || '', active === 0 ? 0 : 1, id]
     );
-    res.json(queryOne('SELECT * FROM expense_categories WHERE id = ?', [id]));
+    res.json(await queryOne('SELECT * FROM expense_categories WHERE id = ?', [id]));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/expense-categories/:id', async (req, res) => {
   try {
-    run('DELETE FROM expense_categories WHERE id = ?', [req.params.id]);
+    await run('DELETE FROM expense_categories WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3343,7 +4273,7 @@ function pickCurrency(cur) {
 app.get('/api/expense-entries/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const rows = queryAll(
+    const rows = await queryAll(
       `SELECT e.*, c.name AS category_name,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
        FROM expense_entries e
@@ -3370,7 +4300,7 @@ app.post('/api/expense-entries', async (req, res) => {
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
     if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
-    run(
+    await run(
       `INSERT INTO expense_entries (date, category_id, description, currency, amount, exchange_rate,
          amount_lek, amount_eur, amount_usd)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -3385,8 +4315,8 @@ app.post('/api/expense-entries', async (req, res) => {
         cur === 'USD' ? amt : 0,
       ]
     );
-    syncExpenseTotals(date);
-    const row = queryOne(
+    await syncExpenseTotals(date);
+    const row = await queryOne(
       `SELECT e.*, c.name AS category_name,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
        FROM expense_entries e LEFT JOIN expense_categories c ON c.id = e.category_id
@@ -3400,13 +4330,13 @@ app.put('/api/expense-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
-    const existing = queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
+    const existing = await queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
     if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
-    run(
+    await run(
       `UPDATE expense_entries SET date = ?, category_id = ?, description = ?,
          currency = ?, amount = ?, exchange_rate = ?,
          amount_lek = ?, amount_eur = ?, amount_usd = ?
@@ -3422,9 +4352,9 @@ app.put('/api/expense-entries/:id', async (req, res) => {
         id,
       ]
     );
-    syncExpenseTotals(existing.date);
-    if (date && date !== existing.date) syncExpenseTotals(date);
-    res.json(queryOne(
+    await syncExpenseTotals(existing.date);
+    if (date && date !== existing.date) await syncExpenseTotals(date);
+    res.json(await queryOne(
       `SELECT e.*, c.name AS category_name,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
        FROM expense_entries e LEFT JOIN expense_categories c ON c.id = e.category_id
@@ -3436,9 +4366,9 @@ app.put('/api/expense-entries/:id', async (req, res) => {
 app.delete('/api/expense-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
-    run('DELETE FROM expense_entries WHERE id = ?', [id]);
-    if (existing) syncExpenseTotals(existing.date);
+    const existing = await queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
+    await run('DELETE FROM expense_entries WHERE id = ?', [id]);
+    if (existing) await syncExpenseTotals(existing.date);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3460,7 +4390,7 @@ app.get('/api/reports/expenses', async (req, res) => {
       params.push(String(currency).toUpperCase());
     }
 
-    const entries = queryAll(
+    const entries = await queryAll(
       `SELECT e.*, c.name AS category_name,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
        FROM expense_entries e
@@ -3521,7 +4451,7 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
     }
 
     // Çdo faturë: konvertuar në LEK me kursin e vet.
-    const invoices = queryAll(
+    const invoices = await queryAll(
       `SELECT
          i.id, i.date, i.invoice_no, i.currency,
          COALESCE(i.exchange_rate, 1)     AS exchange_rate,
@@ -3627,9 +4557,36 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
 });
 
 // ============================================================
-// START SERVER
+// STATIC FRONTEND (only in production — dev uses Vite dev server)
 // ============================================================
-const PORT = 3001;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// When packaged inside Electron, the built React app lives in ../dist and is
+// served from the same origin as the API so relative `/api/*` paths work with
+// no proxy. In dev (`npm run dev`), Vite serves the frontend and proxies /api
+// to this server; the block below is a no-op because dist/ doesn't exist yet.
+const distDir = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^\/(?!api|uploads).*/, (req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
+
+// ============================================================
+// START SERVER (HTTP + WebSocket on the same port)
+// ============================================================
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
+const httpServer = http.createServer(app);
+
+// WebSocket endpoint. Vite dev proxy needs to forward /ws with ws: true — see
+// vite.config.js. In production the Electron window loads over the same origin.
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+wss.on('connection', (ws) => {
+  wsClients.add(ws);
+  ws.on('close', () => wsClients.delete(ws));
+  ws.on('error', () => wsClients.delete(ws));
+  try { ws.send(JSON.stringify({ type: 'hello', at: Date.now() })); } catch (_) {}
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT} (ws on /ws)`);
 });

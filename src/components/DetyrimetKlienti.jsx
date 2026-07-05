@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { exportToExcel, exportToPdf, formatNum } from '../utils/export.js'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -224,7 +225,8 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     const amtToCharge = payCurrency === inv.currency
       ? `${fmt(due)} ${inv.currency}`
       : `${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
-    if (!confirm(`Të mbyllet borxhi plotësisht me ${amtToCharge} (${method === 'bank' ? 'Bankë' : 'Cash'}, datë ${date})?`)) return
+    const methodLabel = method === 'pos' ? 'POS' : 'Cash'
+    if (!confirm(`Të mbyllet borxhi plotësisht me ${amtToCharge} (${methodLabel}, datë ${date})?`)) return
     const ccyNote = payCurrency !== inv.currency
       ? `Mbyllje me ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
       : 'Mbyllje e plotë e borxhit'
@@ -385,7 +387,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                   <label className="form-label">Mënyra</label>
                   <select value={method} onChange={e => setMethod(e.target.value)} className="input-field">
                     <option value="cash">💵 Cash</option>
-                    <option value="bank">🏦 Bankë</option>
+                    <option value="pos">💳 POS</option>
                   </select>
                 </div>
                 <div className="col-span-4">
@@ -713,6 +715,8 @@ function AllClientsSummary({ onPick, dateRange, refreshKey }) {
 function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, dateRange }) {
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
+  // date-asc: më e vjetra e para · date-desc: më e reja e para · name: alfabet
+  const [sortBy, setSortBy]     = useState('date-asc')
 
   useEffect(() => {
     setLoading(true)
@@ -740,6 +744,18 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
     return acc
   }, { tot: 0, paid: 0, due: 0, totLek: 0, paidLek: 0, dueLek: 0 })
 
+  // Totalet e grupuara sipas monedhës origjinale — pa konvertim në LEK.
+  const totalsByCur = invoices.reduce((acc, inv) => {
+    const cur = inv.currency || 'LEK'
+    if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0 }
+    const due = n(inv.amount_due != null ? inv.amount_due : (inv.total_with_vat - inv.amount_paid))
+    acc[cur].tot  += n(inv.total_with_vat)
+    acc[cur].paid += n(inv.amount_paid)
+    acc[cur].due  += due
+    return acc
+  }, {})
+  const currenciesInList = Object.keys(totalsByCur).sort()
+
   // Group invoices by client (key = NIPT or name) — also track LEK aggregates
   const groups = {}
   for (const inv of invoices) {
@@ -752,6 +768,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
         nipt: inv.customer_nipt || '',
         list: [],
         total: 0, paid: 0, due: 0,
+        oldestDate: inv.date,
       }
     }
     const g = groups[key]
@@ -765,10 +782,30 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
     g.paidLek  += n(inv.amount_paid) * rate
     g.dueLek   += due * rate
     if ((inv.currency || 'LEK') !== 'LEK') g.hasForeign = true
+    if (inv.date && (!g.oldestDate || inv.date < g.oldestDate)) g.oldestDate = inv.date
   }
-  const groupArr = Object.values(groups).sort((a, b) =>
-    (a.name || '~~').localeCompare(b.name || '~~', 'sq', { sensitivity: 'base' })
-  )
+  // Renditje sipas zgjedhjes së përdoruesit.
+  const invoiceCmp = sortBy === 'date-desc'
+    ? (a, b) => (b.date || '').localeCompare(a.date || '')
+    : (a, b) => (a.date || '').localeCompare(b.date || '')
+  for (const g of Object.values(groups)) {
+    g.list.sort(invoiceCmp)
+  }
+  let groupArr
+  if (sortBy === 'name') {
+    groupArr = Object.values(groups).sort((a, b) =>
+      (a.name || '~~').localeCompare(b.name || '~~', 'sq', { sensitivity: 'base' })
+    )
+  } else if (sortBy === 'date-desc') {
+    // Grupi që ka faturën më të re del i pari.
+    const newestOf = (g) => g.list.reduce((mx, inv) => inv.date > mx ? inv.date : mx, '')
+    groupArr = Object.values(groups).sort((a, b) => newestOf(b).localeCompare(newestOf(a)))
+  } else {
+    // date-asc: grupi që ka faturën më të vjetër del i pari.
+    groupArr = Object.values(groups).sort((a, b) =>
+      (a.oldestDate || '9999-12-31').localeCompare(b.oldestDate || '9999-12-31')
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -789,11 +826,21 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
 
       {/* Invoices grouped by client */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between flex-wrap gap-3">
           <h3 className="text-sm font-bold text-slate-800">
-            Faturat e Papaguara ({invoices.length}) — sipas alfabetit
+            Faturat e Papaguara ({invoices.length})
           </h3>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-600 font-medium">Rendit:</label>
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              className="input-field text-xs py-1.5 pr-7"
+            >
+              <option value="date-asc">📅 Data — më e vjetra e para</option>
+              <option value="date-desc">📅 Data — më e reja e para</option>
+              <option value="name">🔤 Emri i klientit (A → Z)</option>
+            </select>
             <button
               onClick={() => exportDebtsExcel(invoices, groupArr, totals, client)}
               disabled={invoices.length === 0}
@@ -888,8 +935,8 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums font-bold text-red-600">
-                          {fmt(inv._due)}
+                        <td className={`px-4 py-2 text-right tabular-nums font-bold ${inv._due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {inv._due > 0.005 ? fmt(inv._due) : '✓'}
                           {isForeign && n(inv._due) > 0.005 && (
                             <div className="text-[10px] font-normal text-red-500/80 italic">
                               = {fmt(n(inv._due) * rate)} LEK
@@ -910,15 +957,22 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
               ))}
             </tbody>
             <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-              <tr className="bg-blue-50">
-                <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
-                  💱 Totale të Përgjithshme NË LEK <span className="text-[10px] font-normal text-blue-600">(të konvertuara me kursin e çdo fature)</span>
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.totLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(totals.paidLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-red-600">{fmt(totals.dueLek)}</td>
-                <td></td>
-              </tr>
+              {currenciesInList.map((cur, idx) => {
+                const t = totalsByCur[cur]
+                return (
+                  <tr key={cur} className={`bg-blue-50 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
+                    <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
+                      💱 TOTAL ({cur})
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.tot)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(t.paid)}</td>
+                    <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {t.due > 0.005 ? fmt(t.due) : '✓'}
+                    </td>
+                    <td></td>
+                  </tr>
+                )
+              })}
             </tfoot>
           </table>
         )}
@@ -927,51 +981,6 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
   )
 }
 
-function DateRangeFilter({ from, to, onChange }) {
-  const setRange = (preset) => {
-    const t = new Date()
-    const iso = (d) => d.toISOString().slice(0, 10)
-    if (preset === 'today')      onChange({ from: iso(t), to: iso(t) })
-    else if (preset === 'month') {
-      const first = new Date(t.getFullYear(), t.getMonth(), 1)
-      onChange({ from: iso(first), to: iso(t) })
-    }
-    else if (preset === 'year')  {
-      const first = new Date(t.getFullYear(), 0, 1)
-      onChange({ from: iso(first), to: iso(t) })
-    }
-    else if (preset === 'all')   onChange({ from: '', to: '' })
-  }
-  return (
-    <div className="card flex flex-wrap items-end gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">📅</span>
-        <span className="text-sm font-semibold text-slate-700">Filtër Date</span>
-      </div>
-      <div>
-        <label className="form-label">Nga</label>
-        <input type="date" value={from} onChange={e => onChange({ from: e.target.value, to })}
-          className="input-field" />
-      </div>
-      <div>
-        <label className="form-label">Deri</label>
-        <input type="date" value={to} onChange={e => onChange({ from, to: e.target.value })}
-          className="input-field" />
-      </div>
-      <div className="flex gap-1.5">
-        <button type="button" onClick={() => setRange('today')} className="btn-secondary text-xs">Sot</button>
-        <button type="button" onClick={() => setRange('month')} className="btn-secondary text-xs">Ky muaj</button>
-        <button type="button" onClick={() => setRange('year')} className="btn-secondary text-xs">Ky vit</button>
-        <button type="button" onClick={() => setRange('all')} className="btn-secondary text-xs">Të gjitha</button>
-      </div>
-      {(from || to) && (
-        <div className="text-[11px] text-blue-700 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200">
-          Filtruar: {from || '...'} → {to || '...'}
-        </div>
-      )}
-    </div>
-  )
-}
 
 export default function DetyrimetKlienti({ onNavigate }) {
   const [selected, setSelected] = useState(null)
@@ -983,7 +992,7 @@ export default function DetyrimetKlienti({ onNavigate }) {
 
   return (
     <div className="space-y-4">
-      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
+      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} emptyForAll hint="Boshi = i gjithë historiku" />
       <ClientSearchBox
         value={selected}
         onPick={setSelected}

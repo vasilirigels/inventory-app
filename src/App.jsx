@@ -9,6 +9,8 @@ import CashRegister from './components/CashRegister.jsx'
 import ArkaDitore from './components/ArkaDitore.jsx'
 import Kasaforta from './components/Kasaforta.jsx'
 import TerheqjaKasaforta from './components/TerheqjaKasaforta.jsx'
+import KonvertimHurda from './components/KonvertimHurda.jsx'
+import BlerjeHas from './components/BlerjeHas.jsx'
 import SalesSection from './components/SalesSection.jsx'
 import FaturaShitje from './components/FaturaShitje.jsx'
 import FaturaBlerje from './components/FaturaBlerje.jsx'
@@ -29,10 +31,10 @@ import RaportShpenzime from './components/RaportShpenzime.jsx'
 import RaportXhiroDitore from './components/RaportXhiroDitore.jsx'
 import DailyFieldsForm from './components/sections/DailyFieldsForm.jsx'
 import { SECTION_CONFIGS } from './components/sections/sectionConfigs.js'
-import InventoryFlow from './components/sections/InventoryFlow.jsx'
 import YearlyReport from './components/sections/YearlyReport.jsx'
 import MonthlyReport from './components/sections/MonthlyReport.jsx'
 import UnifiedReport from './components/sections/UnifiedReport.jsx'
+import { initRealtime } from './utils/realtime.js'
 
 const PARENT_TITLES = {
   shitje:   'Shitje',
@@ -68,6 +70,10 @@ function App() {
   const [page, setPage] = useState(() => getPageFromHash() || 'dashboard')
   const [currentDate, setCurrentDate] = useState(getToday())
   const [openInvoiceId, setOpenInvoiceId] = useState(null)
+
+  // Kick off the shared realtime WebSocket once — subscribers wire up via
+  // useRealtimeSync in individual screens.
+  useEffect(() => { initRealtime() }, [])
 
   const navigateTo = (pg, opts = {}) => {
     setPage(pg)
@@ -129,22 +135,18 @@ function App() {
       case 'magazinat':      return <Magazinat />
       case 'inventar-permbledhese': return <InventarPermbledhese />
 
-      // Shitje / Kthime — reuse SalesSection
-      case 'shitje-flori':
-      case 'kthime-flori':   return <SalesSection date={currentDate} type="flori" />
-      case 'shitje-diamant':
-      case 'kthime-diamant': return <SalesSection date={currentDate} type="diamant" />
+      // Kthime — vetëm Online mbetet (Kthime Flori/Diamant u hoqën nga menyja)
       case 'shitje-online':
       case 'kthime-online':  return <SalesSection date={currentDate} type="online" />
 
-      // Blerje
-      case 'blerje-flori':   return <InventoryFlow date={currentDate} type="flori"   kind="hyrje" />
-      case 'blerje-diamant': return <InventoryFlow date={currentDate} type="diamant" kind="hyrje" />
+      // Blerje (Hyrje Flori/Diamant u hoqën nga menyja)
+      case 'blerje-has':     return <BlerjeHas date={currentDate} />
 
       // Arka special
       case 'arka-ditore':    return <ArkaDitore date={currentDate} onNavigate={navigateTo} />
       case 'arka-kasaforta': return <Kasaforta />
       case 'arka-terheqje':  return <TerheqjaKasaforta date={currentDate} />
+      case 'arka-konv-hurda': return <KonvertimHurda date={currentDate} />
 
       case 'permbledhese':   return <UnifiedReport initialDate={currentDate} onNavigate={navigateTo} />
 
