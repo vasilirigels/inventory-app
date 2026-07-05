@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -55,6 +56,11 @@ export default function RaportShpenzime() {
   }, [from, to, catId, cur])
 
   useEffect(() => { load() }, []) // eslint-disable-line
+  // Auto-load kur ndryshojnë filtrat (data, zëri, monedha).
+  useEffect(() => {
+    if (searched) load()
+    // eslint-disable-next-line
+  }, [from, to, catId, cur])
 
   const exportXlsx = () => {
     const out = data.rows.map(r => ({
@@ -96,18 +102,16 @@ export default function RaportShpenzime() {
         </button>
       </div>
 
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onChange={({ from: f, to: t }) => { setFrom(f); setTo(t) }}
+        loading={loading}
+        hint="Ndikon: rreshtat, totalet dhe eksporti"
+      />
+
       <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-          <div>
-            <label className="form-label">Nga data</label>
-            <input type="date" value={from} max={to}
-              onChange={e => setFrom(e.target.value)} className="input-field" />
-          </div>
-          <div>
-            <label className="form-label">Deri më datë</label>
-            <input type="date" value={to} min={from}
-              onChange={e => setTo(e.target.value)} className="input-field" />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <div>
             <label className="form-label">Lloji i Shpenzimit</label>
             <select value={catId} onChange={e => setCatId(e.target.value)} className="input-field">
@@ -125,7 +129,9 @@ export default function RaportShpenzime() {
             </select>
           </div>
           <div className="flex gap-2">
-            <button onClick={load} className="btn-primary flex-1">🔎 Kërko</button>
+            <button onClick={load} className="btn-secondary flex-1" title="Rifresko manualisht — filtrat aplikohen automatikisht">
+              🔄 Rifresko
+            </button>
             <button
               onClick={() => { setCatId(''); setCur(''); setFrom(getMonthStart()); setTo(getToday()) }}
               className="btn-secondary"

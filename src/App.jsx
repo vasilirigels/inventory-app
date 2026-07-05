@@ -130,9 +130,7 @@ function App() {
       case 'magazinat':      return <Magazinat />
       case 'inventar-permbledhese': return <InventarPermbledhese />
 
-      // Kthime — reuse SalesSection (Shitje Flori/Diamant u hoqën nga menyja)
-      case 'kthime-flori':   return <SalesSection date={currentDate} type="flori" />
-      case 'kthime-diamant': return <SalesSection date={currentDate} type="diamant" />
+      // Kthime — vetëm Online mbetet (Kthime Flori/Diamant u hoqën nga menyja)
       case 'shitje-online':
       case 'kthime-online':  return <SalesSection date={currentDate} type="online" />
 

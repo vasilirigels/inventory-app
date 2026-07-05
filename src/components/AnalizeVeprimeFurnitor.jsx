@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { exportToExcel, exportToPdf, formatNum } from '../utils/export.js'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -105,51 +106,6 @@ function exportActivityPdf(enriched, totals, supplier, dateRange, currencyByInvo
   ])
 }
 
-function DateRangeFilter({ from, to, onChange }) {
-  const setRange = (preset) => {
-    const t = new Date()
-    const iso = (d) => d.toISOString().slice(0, 10)
-    if (preset === 'today')      onChange({ from: iso(t), to: iso(t) })
-    else if (preset === 'month') {
-      const first = new Date(t.getFullYear(), t.getMonth(), 1)
-      onChange({ from: iso(first), to: iso(t) })
-    }
-    else if (preset === 'year')  {
-      const first = new Date(t.getFullYear(), 0, 1)
-      onChange({ from: iso(first), to: iso(t) })
-    }
-    else if (preset === 'all')   onChange({ from: '', to: '' })
-  }
-  return (
-    <div className="card flex flex-wrap items-end gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">📅</span>
-        <span className="text-sm font-semibold text-slate-700">Filtër Date</span>
-      </div>
-      <div>
-        <label className="form-label">Nga</label>
-        <input type="date" value={from} onChange={e => onChange({ from: e.target.value, to })}
-          className="input-field" />
-      </div>
-      <div>
-        <label className="form-label">Deri</label>
-        <input type="date" value={to} onChange={e => onChange({ from, to: e.target.value })}
-          className="input-field" />
-      </div>
-      <div className="flex gap-1.5">
-        <button type="button" onClick={() => setRange('today')} className="btn-secondary text-xs">Sot</button>
-        <button type="button" onClick={() => setRange('month')} className="btn-secondary text-xs">Ky muaj</button>
-        <button type="button" onClick={() => setRange('year')} className="btn-secondary text-xs">Ky vit</button>
-        <button type="button" onClick={() => setRange('all')} className="btn-secondary text-xs">Të gjitha</button>
-      </div>
-      {(from || to) && (
-        <div className="text-[11px] text-blue-700 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200">
-          Filtruar: {from || '...'} → {to || '...'}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function SupplierSearch({ value, onPick, onClear }) {
   const [query, setQuery] = useState(value?.name || '')
@@ -541,7 +497,7 @@ export default function AnalizeVeprimeFurnitor({ onNavigate }) {
 
   return (
     <div className="space-y-4">
-      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
+      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} emptyForAll hint="Boshi = i gjithë historiku" />
       <SupplierSearch
         value={selected}
         onPick={setSelected}

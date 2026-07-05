@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v, digits = 2) {
@@ -10,7 +11,7 @@ function fmtQty(v) {
 }
 
 export default function InventarPermbledhese() {
-  const [data, setData] = useState({ rows: [], totals: null })
+  const [data, setData] = useState({ rows: [], totals: null, profitByCurrency: {} })
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showAll, setShowAll] = useState(false)
@@ -29,7 +30,7 @@ export default function InventarPermbledhese() {
     fetch(`/api/inventory-summary${qs ? `?${qs}` : ''}`)
       .then(r => r.json())
       .then(d => { if (!cancel) { setData(d); setLoading(false) } })
-      .catch(() => { if (!cancel) { setData({ rows: [], totals: null }); setLoading(false) } })
+      .catch(() => { if (!cancel) { setData({ rows: [], totals: null, profitByCurrency: {} }); setLoading(false) } })
     return () => { cancel = true }
   }, [refreshKey, from, to])
 
@@ -88,27 +89,20 @@ export default function InventarPermbledhese() {
         <button onClick={() => setRefreshKey(k => k + 1)} className="btn-secondary text-xs">↻ Rifresko</button>
       </div>
 
-      {/* Filters */}
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onChange={({ from: f, to: t }) => { setFrom(f); setTo(t) }}
+        loading={loading}
+        emptyForAll
+        hint="Boshi = i gjithë historiku"
+      />
+
+      {/* Filters shtesë */}
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">🔎</span>
-          <span className="text-sm font-semibold text-slate-700">Filtra</span>
-        </div>
-        <div>
-          <label className="form-label">Nga data</label>
-          <input
-            type="date" value={from} max={to || undefined}
-            onChange={e => setFrom(e.target.value)}
-            className="input-field"
-          />
-        </div>
-        <div>
-          <label className="form-label">Deri më datë</label>
-          <input
-            type="date" value={to} min={from || undefined}
-            onChange={e => setTo(e.target.value)}
-            className="input-field"
-          />
+          <span className="text-sm font-semibold text-slate-700">Filtra shtesë</span>
         </div>
         <div className="flex-1 min-w-[220px]">
           <label className="form-label">Produkti (emër / barkod / SKU / kategori)</label>
@@ -275,7 +269,7 @@ export default function InventarPermbledhese() {
               <tfoot className="bg-slate-100 border-t-2 border-slate-300">
                 <tr className="font-bold text-xs">
                   <td colSpan={11} className="px-3 py-3 text-right uppercase tracking-wide text-slate-700 whitespace-nowrap">
-                    TOTAL ({filtered.length} produkte)
+                    TOTAL në LEK (të konvertuara) — {filtered.length} produkte
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums text-slate-800 border-l-2 border-slate-300 whitespace-nowrap">{fmt(shownTotals.total_value_no_vat_lek)}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-slate-700 whitespace-nowrap">{fmt(shownTotals.total_value_vat_lek)}</td>
@@ -289,6 +283,28 @@ export default function InventarPermbledhese() {
                     {shownTotals.sales_no_vat_lek > 0 ? `${fmt(shownTotals.profit_margin_pct, 1)}%` : '—'}
                   </td>
                 </tr>
+                {/* Rreshta për fitimin sipas monedhës origjinale */}
+                {Object.keys(data.profitByCurrency || {}).sort().map(cur => {
+                  const t = data.profitByCurrency[cur]
+                  return (
+                    <tr key={cur} className="font-bold text-xs bg-emerald-50 border-t border-emerald-200">
+                      <td colSpan={11} className="px-3 py-2.5 text-right uppercase tracking-wide text-emerald-700 whitespace-nowrap">
+                        💵 TOTAL ({cur}) — pa konvertim
+                      </td>
+                      <td colSpan={3} className="px-3 py-2.5 text-center text-[10px] text-slate-400 italic border-l-2 border-emerald-200 whitespace-nowrap">
+                        (vlera e stokut mbetet vetëm në LEK)
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-800 border-l-2 border-emerald-200 whitespace-nowrap">{fmt(t.sales_no_vat)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600 whitespace-nowrap">{fmt(t.cogs)}</td>
+                      <td className={`px-3 py-2.5 text-right tabular-nums text-base whitespace-nowrap ${t.profit < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                        {fmt(t.profit)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${t.margin_pct < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                        {t.sales_no_vat > 0 ? `${fmt(t.margin_pct, 2)}%` : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tfoot>
             </table>
           </div>
@@ -296,11 +312,12 @@ export default function InventarPermbledhese() {
       </div>
 
       <p className="text-[11px] text-slate-400 italic px-1">
-        Çmimi mesatar është mesatare e ponderuar e <strong>të gjitha blerjeve deri në fund të periudhës</strong> (jo vetëm brenda saj) —
-        kështu artikujt e shitur nga stoku i vjetër marrin koston reale, jo 0 kur në periudhë nuk ka pasur blerje.
+        Kosto për Fitim: <strong>Çmimi Kosto</strong> nga karta e produktit × kursi i shitjes (kur cost_price &gt; 0);
+        përndryshe përdoret mesatarja e ponderuar historike e blerjeve deri në fund të periudhës.
+        Çmimi mesatar në kolonë llogaritet si mesatare e ponderuar (vlera totale e hyrjes / sasia totale) e të gjitha blerjeve deri në `to`.
         Faturat e anuluara nuk merren parasysh; faturat kreditore (stornime) zbresin sasinë e dalë automatikisht.
-        Konvertimi në LEK bëhet me kursin e secilës faturë / fletë magazinash.
-        Fitimi = Shitje pa TVSH (LEK) − (Sasi e shitur × Çmim mesatar kostoje pa TVSH). Nuk përfshin dalje magazine (transferime).
+        Konvertimi në LEK bëhet me kursin e secilës faturë.
+        Fitimi = Shitje pa TVSH (LEK) − COGS. Nuk përfshin dalje magazine (transferime).
       </p>
     </div>
   )

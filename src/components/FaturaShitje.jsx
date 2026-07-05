@@ -355,22 +355,42 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
   const [fClient, setFClient]   = useState('')
   const [fCurrency, setFCurrency] = useState('all')
   const [fPayment, setFPayment]   = useState('all')
+  // 'all' | 'sale' | 'return' | 'cancelled'
+  const [fType, setFType]         = useState('all')
+  // Filtër material: '' | 'flori' | 'diamant' — dërgohet në backend (EXISTS invoice_items)
+  const [fMaterial, setFMaterial] = useState('')
+  // Filtër kategorie: '' | një nga kategoritë e produkteve
+  const [fCategory, setFCategory] = useState('')
+  const [categories, setCategories] = useState([])
   const [fromDate, setFromDate] = useState(date)
   const [toDate, setToDate]     = useState(date)
 
   useEffect(() => { setFromDate(date); setToDate(date) }, [date])
 
+  // Kategoritë e produkteve (fetch një herë).
+  useEffect(() => {
+    fetch('/api/products/categories')
+      .then(r => r.json())
+      .then(d => setCategories(Array.isArray(d) ? d : []))
+      .catch(() => setCategories([]))
+  }, [])
+
   useEffect(() => {
     if (!fromDate || !toDate) return
     setLoading(true)
-    const url = fromDate === toDate
+    const params = new URLSearchParams()
+    if (fMaterial) params.set('material', fMaterial)
+    if (fCategory) params.set('category', fCategory)
+    const qs = params.toString()
+    const base = fromDate === toDate
       ? `/api/invoices/by-date/${fromDate}`
       : `/api/invoices/by-range?from=${fromDate}&to=${toDate}`
+    const url = qs ? `${base}${base.includes('?') ? '&' : '?'}${qs}` : base
     fetch(url)
       .then(r => r.json())
       .then(data => { setRawList(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => { setRawList([]); setLoading(false) })
-  }, [fromDate, toDate, refreshKey])
+  }, [fromDate, toDate, refreshKey, fMaterial, fCategory])
 
   const rangeActive = fromDate !== date || toDate !== date
 
@@ -378,12 +398,27 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
   const list = rawList.filter(inv => {
     if (fCurrency !== 'all' && (inv.currency || 'LEK') !== fCurrency) return false
     if (fPayment !== 'all' && (inv.payment_method || 'cash') !== fPayment) return false
+    if (fType === 'sale'      && (inv.cancelled || inv.is_credit_note)) return false
+    if (fType === 'return'    && (inv.cancelled || !inv.is_credit_note)) return false
+    if (fType === 'cancelled' && !inv.cancelled) return false
     if (fc) {
       const hay = `${inv.customer_name || ''} ${inv.customer_nipt || ''}`.toLowerCase()
       if (!hay.includes(fc)) return false
     }
     return true
   })
+
+  // Numërime të shpejta për të shfaqur në header (nga rawList, para filtrave të mësipërm).
+  const counts = rawList.reduce((a, inv) => {
+    if (inv.cancelled) a.cancelled += 1
+    else if (inv.is_credit_note) {
+      a.return += 1
+      // Vetëm produktet — jo çdo rresht (p.sh. shërbime). Përdor sasi absolute.
+      // Rreshtat individualë nuk vijnë me by-date, kështu që numërojmë vetëm faturat.
+    }
+    else a.sale += 1
+    return a
+  }, { sale: 0, return: 0, cancelled: 0 })
 
   // Daily snapshot: use the amount paid AT INVOICE CREATION TIME (not the current state).
   // Later payments registered via the Detyrime Klienti modal show up in Detyrime + Analize
@@ -411,11 +446,11 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
   }, {})
   const currenciesInList = Object.keys(totalsByCur).sort()
 
-  const filtersActive = fc || fCurrency !== 'all' || fPayment !== 'all'
+  const filtersActive = fc || fCurrency !== 'all' || fPayment !== 'all' || fType !== 'all' || fMaterial || fCategory
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-800">Fatura të Shitjes</h2>
           <p className="text-xs text-slate-500">
@@ -424,6 +459,32 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
               : `Lista e faturave nga ${fromDate} në ${toDate}`}
             {filtersActive && <span className="ml-2 text-blue-600">· {list.length} të filtruara nga {rawList.length}</span>}
           </p>
+          {(counts.sale + counts.return + counts.cancelled) > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <button
+                onClick={() => setFType('all')}
+                className={`badge cursor-pointer ${fType === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                title="Shfaq të gjitha"
+              >📋 Të gjitha: {rawList.length}</button>
+              <button
+                onClick={() => setFType('sale')}
+                className={`badge cursor-pointer ${fType === 'sale' ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                title="Shfaq vetëm shitjet e rregullta"
+              >🧾 Shitje: {counts.sale}</button>
+              <button
+                onClick={() => setFType('return')}
+                className={`badge cursor-pointer ${fType === 'return' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+                title="Shfaq vetëm kthimet (faturat kreditore)"
+              >↩️ Kthime: {counts.return}</button>
+              {counts.cancelled > 0 && (
+                <button
+                  onClick={() => setFType('cancelled')}
+                  className={`badge cursor-pointer ${fType === 'cancelled' ? 'bg-slate-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
+                  title="Shfaq vetëm faturat e anuluara"
+                >🚫 Anuluar: {counts.cancelled}</button>
+              )}
+            </div>
+          )}
         </div>
         <button onClick={onCreate} className="btn-primary">+ Faturë e Re</button>
       </div>
@@ -480,9 +541,33 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
             <option value="debt">⚠️ Borxh</option>
           </select>
         </div>
+        <div>
+          <label className="form-label">Lloji i Faturës</label>
+          <select value={fType} onChange={e => setFType(e.target.value)} className="input-field w-40">
+            <option value="all">Të gjitha</option>
+            <option value="sale">🧾 Vetëm shitje</option>
+            <option value="return">↩️ Vetëm kthime</option>
+            <option value="cancelled">🚫 Vetëm anuluara</option>
+          </select>
+        </div>
+        <div>
+          <label className="form-label">Materiali</label>
+          <select value={fMaterial} onChange={e => setFMaterial(e.target.value)} className="input-field w-32">
+            <option value="">Të gjitha</option>
+            <option value="flori">🟡 Flori</option>
+            <option value="diamant">💎 Diamant</option>
+          </select>
+        </div>
+        <div>
+          <label className="form-label">Kategoria e Produktit</label>
+          <select value={fCategory} onChange={e => setFCategory(e.target.value)} className="input-field w-40">
+            <option value="">Të gjitha</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
         {(filtersActive || rangeActive) && (
           <button
-            onClick={() => { setFClient(''); setFCurrency('all'); setFPayment('all'); setFromDate(date); setToDate(date) }}
+            onClick={() => { setFClient(''); setFCurrency('all'); setFPayment('all'); setFType('all'); setFMaterial(''); setFCategory(''); setFromDate(date); setToDate(date) }}
             className="btn-secondary text-xs"
           >Pastro filtrat</button>
         )}
@@ -704,12 +789,24 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           })
           setCurrency(inv.currency || 'LEK')
           setExchangeRate(inv.exchange_rate || 1)
-          setPaymentMethod(['cash','debt','pos','mikse'].includes(inv.payment_method) ? inv.payment_method : 'cash')
+          const pm = ['cash','debt','pos','mikse'].includes(inv.payment_method) ? inv.payment_method : 'cash'
+          setPaymentMethod(pm)
           // Show what was recorded at sale registration, not the current paid total —
           // later payments from Detyrime Klienti must not shift the editor either.
           const initPaid = inv.initial_amount_paid != null ? inv.initial_amount_paid : inv.amount_paid
-          setAmountPaid(initPaid != null ? String(initPaid) : '')
-          setPaidTouched(true)
+          // Për cash/POS ku paid përputhet me total-in (rasti normal, dhe kreditore),
+          // e lëmë bosh që "Shuma e Paguar" të sinkronizohet automatikisht kur user
+          // ndryshon çmimet e artikujve. Ndryshe faturat kreditore mbanin paid=old-total
+          // dhe krijonin një "due" të rrejshëm.
+          const totalInv = n(inv.total_with_vat)
+          const paidMatchesTotal = initPaid != null && Math.abs(n(initPaid) - totalInv) < 0.01
+          if ((pm === 'cash' || pm === 'pos') && paidMatchesTotal) {
+            setAmountPaid('')
+            setPaidTouched(false)
+          } else {
+            setAmountPaid(initPaid != null ? String(initPaid) : '')
+            setPaidTouched(true)
+          }
           setPaidCash(inv.paid_cash != null ? String(inv.paid_cash) : '')
           setPaidPos (inv.paid_pos  != null ? String(inv.paid_pos)  : '')
           setNotes(inv.notes || '')

@@ -3,6 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 const CAT_ICONS = {
   'Unazë': '💍', 'Vathë': '✨', 'Byzylyk': '📿',
@@ -182,6 +183,10 @@ export default function Dashboard({ onNavigate }) {
     ? +((profitRangeLek / salesRangeLek) * 100).toFixed(2)
     : 0
 
+  // ── Fitim i ndarë sipas monedhës origjinale (pa konvertim në LEK)
+  const profitByCur = invSummaryRange?.profitByCurrency || {}
+  const profitCurrencies = Object.keys(profitByCur).sort()
+
   // Numri i faturave në periudhë
   const rangeInvoiceCount = invoicesRange.filter(i => !i.cancelled).length
 
@@ -253,7 +258,13 @@ export default function Dashboard({ onNavigate }) {
     <div className="space-y-4 md:space-y-5">
 
       {/* Filtër Periudhe — ndikon te grafi, faturat, dhe fitimi */}
-      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} loading={loading} />
+      <DateRangeFilter
+        from={dateRange.from}
+        to={dateRange.to}
+        onChange={setDateRange}
+        loading={loading}
+        hint="Ndikon: grafiku, faturat, fitim & marzh"
+      />
 
       {/* Rreshti 1 — SOT (Arka + Detyrime) */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
@@ -305,31 +316,72 @@ export default function Dashboard({ onNavigate }) {
           onClick={() => onNavigate('inventar-permbledhese')} />
       </div>
 
-      {/* Rreshti 3 — Fitim & Marzh për periudhën */}
+      {/* Rreshti 3 — Fitim & Marzh për periudhën, sipas monedhës origjinale */}
       <div className="card bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border border-emerald-200">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h3 className="font-semibold text-slate-800">💰 Fitimi &amp; Marzhi për Periudhën</h3>
             <p className="text-[11px] text-slate-500">
-              {dateRange.from} → {dateRange.to} · nga faturat e shitjes minus kosto mesatare e blerjes (pa TVSH)
+              {dateRange.from} → {dateRange.to} · shitje pa TVSH − kosto (nga karta e produktit) · sipas monedhës origjinale
             </p>
           </div>
           <button onClick={() => onNavigate('inventar-permbledhese')} className="btn-secondary text-xs">Përmbledhëse Inventari →</button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MiniStat label="Shitje pa TVSH (LEK)" value={fmt(salesRangeLek)} color="blue" />
-          <MiniStat label="Kosto e Shitur (LEK)" value={fmt(cogsRangeLek)} color="slate" />
-          <MiniStat
-            label="Fitim (LEK)"
-            value={fmt(profitRangeLek)}
-            color={profitRangeLek < 0 ? 'rose' : 'emerald'}
-          />
-          <MiniStat
-            label="Marzh %"
-            value={salesRangeLek > 0 ? `${fmt(profitMarginPct, 2)}%` : '—'}
-            color={profitMarginPct < 0 ? 'rose' : 'emerald'}
-          />
-        </div>
+        {profitCurrencies.length === 0 ? (
+          <div className="text-center py-6 text-slate-400 text-sm">
+            Nuk ka shitje në këtë periudhë.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {profitCurrencies.map(cur => {
+              const t = profitByCur[cur]
+              return (
+                <div key={cur}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="badge bg-blue-200 text-blue-800 font-bold">{cur}</span>
+                    <span className="text-[10px] text-slate-500">Sasi e shitur: {fmt(t.qty, 0)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                    <MiniStat label={`Shitje pa TVSH (${cur})`}  value={fmt(t.sales_no_vat)} color="blue" />
+                    <MiniStat label={`Kosto e Shitur (${cur})`}  value={fmt(t.cogs)}         color="slate" />
+                    <MiniStat
+                      label={`Fitim (${cur})`}
+                      value={fmt(t.profit)}
+                      color={t.profit < 0 ? 'rose' : 'emerald'}
+                    />
+                    <MiniStat
+                      label="Marzh %"
+                      value={t.sales_no_vat > 0 ? `${fmt(t.margin_pct, 2)}%` : '—'}
+                      color={t.margin_pct < 0 ? 'rose' : 'emerald'}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+            {/* Referencë e ekuivalentëve në LEK — kombinuar */}
+            {salesRangeLek > 0 && (
+              <div className="border-t border-emerald-200 pt-2 mt-3">
+                <div className="text-[10px] text-slate-500 uppercase font-semibold mb-1">
+                  Ekuivalent i kombinuar në LEK (të konvertuar me kursin e secilës faturë)
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                  <MiniStat label="Shitje (LEK)"      value={fmt(salesRangeLek)}  color="blue" />
+                  <MiniStat label="Kosto (LEK)"       value={fmt(cogsRangeLek)}   color="slate" />
+                  <MiniStat
+                    label="Fitim (LEK)"
+                    value={fmt(profitRangeLek)}
+                    color={profitRangeLek < 0 ? 'rose' : 'emerald'}
+                  />
+                  <MiniStat
+                    label="Marzh % (LEK)"
+                    value={salesRangeLek > 0 ? `${fmt(profitMarginPct, 2)}%` : '—'}
+                    color={profitMarginPct < 0 ? 'rose' : 'emerald'}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sales chart */}
@@ -634,81 +686,6 @@ function MultiCurrencyCard({ label, items, emptyText, sub, icon, color = 'blue',
         </div>
       </div>
     </Wrapper>
-  )
-}
-
-// Filtër periudhe me presete të shpejta.
-function DateRangeFilter({ from, to, onChange, loading }) {
-  const setRange = (preset) => {
-    const t = new Date()
-    const iso = (d) => {
-      const y = d.getFullYear()
-      const m = String(d.getMonth() + 1).padStart(2, '0')
-      const dd = String(d.getDate()).padStart(2, '0')
-      return `${y}-${m}-${dd}`
-    }
-    if (preset === 'today')      onChange({ from: iso(t), to: iso(t) })
-    else if (preset === '7d')    {
-      const start = new Date(t); start.setDate(t.getDate() - 6)
-      onChange({ from: iso(start), to: iso(t) })
-    }
-    else if (preset === '30d')   {
-      const start = new Date(t); start.setDate(t.getDate() - 29)
-      onChange({ from: iso(start), to: iso(t) })
-    }
-    else if (preset === 'month') {
-      const first = new Date(t.getFullYear(), t.getMonth(), 1)
-      onChange({ from: iso(first), to: iso(t) })
-    }
-    else if (preset === 'prevMonth') {
-      const first = new Date(t.getFullYear(), t.getMonth() - 1, 1)
-      const last  = new Date(t.getFullYear(), t.getMonth(), 0)
-      onChange({ from: iso(first), to: iso(last) })
-    }
-    else if (preset === 'year')  {
-      const first = new Date(t.getFullYear(), 0, 1)
-      onChange({ from: iso(first), to: iso(t) })
-    }
-    else if (preset === 'all') {
-      onChange({ from: '2000-01-01', to: iso(t) })
-    }
-  }
-  return (
-    <div className="card flex flex-wrap items-end gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">📅</span>
-        <div>
-          <p className="text-sm font-semibold text-slate-700 leading-none">Filtër Periudhe</p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Ndikon: grafiku, faturat, fitim &amp; marzh</p>
-        </div>
-      </div>
-      <div>
-        <label className="form-label">Nga</label>
-        <input type="date" value={from} max={to}
-          onChange={e => onChange({ from: e.target.value, to })}
-          className="input-field" />
-      </div>
-      <div>
-        <label className="form-label">Deri</label>
-        <input type="date" value={to} min={from}
-          onChange={e => onChange({ from, to: e.target.value })}
-          className="input-field" />
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" onClick={() => setRange('today')}     className="btn-secondary text-xs">Sot</button>
-        <button type="button" onClick={() => setRange('7d')}        className="btn-secondary text-xs">7 ditë</button>
-        <button type="button" onClick={() => setRange('30d')}       className="btn-secondary text-xs">30 ditë</button>
-        <button type="button" onClick={() => setRange('month')}     className="btn-secondary text-xs">Ky muaj</button>
-        <button type="button" onClick={() => setRange('prevMonth')} className="btn-secondary text-xs">Muaji kaluar</button>
-        <button type="button" onClick={() => setRange('year')}      className="btn-secondary text-xs">Ky vit</button>
-        <button type="button" onClick={() => setRange('all')}       className="btn-secondary text-xs">Të gjitha</button>
-      </div>
-      {loading && (
-        <span className="text-[11px] text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200">
-          ⏳ Duke ngarkuar...
-        </span>
-      )}
-    </div>
   )
 }
 

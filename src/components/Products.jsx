@@ -870,6 +870,10 @@ export default function Products() {
             <option value="2">×2 (kosto × 2)</option>
             <option value="2.5">×2.5 (kosto × 2.5)</option>
             <option value="3">×3 (kosto × 3)</option>
+            <option value="3.5">×3.5 (kosto × 3.5)</option>
+            <option value="4">×4 (kosto × 4)</option>
+            <option value="4.5">×4.5 (kosto × 4.5)</option>
+            <option value="5">×5 (kosto × 5)</option>
           </select>
         </div>
       </div>
@@ -1030,6 +1034,10 @@ export default function Products() {
                         <option value="2">×2</option>
                         <option value="2.5">×2.5</option>
                         <option value="3">×3</option>
+                        <option value="3.5">×3.5</option>
+                        <option value="4">×4</option>
+                        <option value="4.5">×4.5</option>
+                        <option value="5">×5</option>
                       </select>
                     </div>
                   </td>

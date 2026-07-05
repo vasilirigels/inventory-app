@@ -36,8 +36,6 @@ const NAV_GROUPS = [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
           { id: 'shitje-online',         label: 'Shitje Online & Stafi' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },
-          { id: 'kthime-flori',          label: 'Kthime Flori' },
-          { id: 'kthime-diamant',        label: 'Kthime Diamant' },
           { id: 'kthime-online',         label: 'Kthime Online & Stafi' },
           { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
         ],
@@ -47,7 +45,6 @@ const NAV_GROUPS = [
         children: [
           { id: 'fatura-blerje',         label: 'FATURA BLERJE' },
           { id: 'blerje-has',            label: 'BLERJE HAS' },
-          { id: 'shlyerje-borxhi',       label: 'Shlyerje Borxhi te Produkteve' },
           { id: 'raport-blerje-artikuj', label: 'Raport Blerje Artikuj' },
         ],
       },

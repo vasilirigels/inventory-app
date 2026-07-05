@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -217,6 +218,18 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
   }, [from, to, filter, category])
 
   useEffect(() => { load() }, []) // eslint-disable-line
+  // Auto-load kur ndryshojnë filtrat "atomikë" (data, kategoria).
+  useEffect(() => {
+    if (searched) load()
+    // eslint-disable-next-line
+  }, [from, to, category])
+  // Debounce për filtrin tekstual.
+  useEffect(() => {
+    if (!searched) return
+    const t = setTimeout(() => { load() }, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line
+  }, [filter])
 
   const exportXlsx = () => {
     const out = rows.map(r => ({
@@ -265,18 +278,16 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
         </button>
       </div>
 
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onChange={({ from: f, to: t }) => { setFrom(f); setTo(t) }}
+        loading={loading}
+        hint="Ndikon: rreshtat, totalet dhe eksporti"
+      />
+
       <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-          <div>
-            <label className="form-label">Nga data</label>
-            <input type="date" value={from} max={to}
-              onChange={e => setFrom(e.target.value)} className="input-field" />
-          </div>
-          <div>
-            <label className="form-label">Deri më datë</label>
-            <input type="date" value={to} min={from}
-              onChange={e => setTo(e.target.value)} className="input-field" />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <ProductFilterPicker value={filter} onChange={setFilter} />
           <div>
             <label className="form-label">Kategoria</label>
@@ -286,7 +297,9 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
             </select>
           </div>
           <div className="flex gap-2">
-            <button onClick={load} className="btn-primary flex-1">🔎 Kërko</button>
+            <button onClick={load} className="btn-secondary flex-1" title="Rifresko manualisht — filtrat aplikohen automatikisht">
+              🔄 Rifresko
+            </button>
             <button
               onClick={() => { setFilter(''); setCategory(''); setFrom(getMonthStart()); setTo(getToday()) }}
               className="btn-secondary"

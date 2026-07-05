@@ -1108,6 +1108,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               <option value="2">×2 (blerje × 2)</option>
               <option value="2.5">×2.5 (blerje × 2.5)</option>
               <option value="3">×3 (blerje × 3)</option>
+              <option value="3.5">×3.5 (blerje × 3.5)</option>
+              <option value="4">×4 (blerje × 4)</option>
+              <option value="4.5">×4.5 (blerje × 4.5)</option>
+              <option value="5">×5 (blerje × 5)</option>
             </select>
           </div>
           <p className="text-[10px] text-slate-500">

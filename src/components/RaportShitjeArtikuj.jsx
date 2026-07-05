@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -210,12 +211,19 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
   }, [from, to, filter, material, viewMode])
 
   useEffect(() => { load() }, []) // eslint-disable-line
-  // Kur ndryshohet mënyra e shikimit, rikthej të dhënat automatikisht
-  // nëse përdoruesi ka bërë tashmë një kërkim.
+  // Auto-load kur ndryshojnë filtrat "atomikë" (data, materiali, viewMode).
+  // Për filtrin tekstual përdoret debounce më poshtë.
   useEffect(() => {
     if (searched) load()
     // eslint-disable-next-line
-  }, [viewMode])
+  }, [from, to, material, viewMode])
+  // Debounce për filtrin tekstual — 350ms pas ndërprerjes së shkrimit.
+  useEffect(() => {
+    if (!searched) return
+    const t = setTimeout(() => { load() }, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line
+  }, [filter])
 
   const exportXlsx = () => {
     const matLabel = (m) => m === 'flori' ? 'Flori' : m === 'diamant' ? 'Diamant' : ''
@@ -305,18 +313,16 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
         </button>
       </div>
 
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onChange={({ from: f, to: t }) => { setFrom(f); setTo(t) }}
+        loading={loading}
+        hint="Ndikon: rreshtat, totalet dhe eksporti"
+      />
+
       <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-          <div>
-            <label className="form-label">Nga data</label>
-            <input type="date" value={from} max={to}
-              onChange={e => setFrom(e.target.value)} className="input-field" />
-          </div>
-          <div>
-            <label className="form-label">Deri më datë</label>
-            <input type="date" value={to} min={from}
-              onChange={e => setTo(e.target.value)} className="input-field" />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <ProductFilterPicker value={filter} onChange={setFilter} />
           <div>
             <label className="form-label">Materiali</label>
@@ -327,7 +333,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
             </select>
           </div>
           <div className="flex gap-2">
-            <button onClick={load} className="btn-primary flex-1">🔎 Kërko</button>
+            <button onClick={load} className="btn-secondary flex-1" title="Rifresko manualisht — filtrat aplikohen automatikisht">
+              🔄 Rifresko
+            </button>
             <button
               onClick={() => { setFilter(''); setMaterial(''); setFrom(ALL_TIME_FROM); setTo(getToday()) }}
               className="btn-secondary"
