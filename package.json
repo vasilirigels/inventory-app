@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Ari Shop",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -86,7 +86,8 @@
       {
         "provider": "github",
         "owner": "vasilirigels",
-        "repo": "inventory-app"
+        "repo": "inventory-app",
+        "releaseType": "release"
       }
     ]
   }
