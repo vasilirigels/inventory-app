@@ -1,19 +1,26 @@
 {
   "name": "inventory-app",
+  "productName": "Ari Shop",
   "version": "1.0.0",
   "description": "Albanian Jewelry Store Inventory Management",
-  "main": "server/index.js",
+  "main": "electron/main.cjs",
+  "author": "Rigels Vasili",
+  "license": "ISC",
+  "type": "module",
   "scripts": {
     "dev": "concurrently \"node server/index.js\" \"vite\"",
     "build": "vite build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "electron:dev": "concurrently -k \"node server/index.js\" \"vite\" \"wait-on http://localhost:5173 http-get://localhost:3001/api/products && electron .\"",
+    "electron:build": "vite build && electron-builder",
+    "electron:build:win": "vite build && electron-builder --win",
+    "electron:build:mac": "vite build && electron-builder --mac"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "electron-updater": "^6.8.9",
     "express": "^5.2.1",
     "multer": "^2.1.1",
     "recharts": "^3.8.1",
@@ -24,10 +31,63 @@
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.2.1",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.15",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tailwindcss": "^3.4.19",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "wait-on": "^8.0.5"
+  },
+  "build": {
+    "appId": "com.arishop.inventory",
+    "productName": "Ari Shop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "server/**/*",
+      "electron/**/*",
+      ".env",
+      "package.json",
+      "!server/migrate-to-turso.js",
+      "!server/uploads/**/*",
+      "!data/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/@libsql/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "AriShop-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ari Shop"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business",
+      "artifactName": "AriShop-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vasilirigels",
+        "repo": "inventory-app"
+      }
+    ]
   }
 }

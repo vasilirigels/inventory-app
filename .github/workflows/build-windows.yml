@@ -1,0 +1,47 @@
+name: Build Windows Installer
+
+on:
+  # Auto-publish a new release whenever a version tag is pushed (e.g. v1.0.1).
+  push:
+    tags:
+      - 'v*'
+  # Manual trigger — build a draft release for testing without a tag.
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write  # needed to upload assets to GitHub Releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write .env from GitHub secrets
+        # Turso credentials live in repo Secrets (Settings → Secrets → Actions),
+        # not in git. The build injects them so the packaged app can talk to Turso.
+        shell: bash
+        run: |
+          cat > .env <<EOF
+          TURSO_URL=${{ secrets.TURSO_URL }}
+          TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}
+          EOF
+
+      - name: Build React frontend
+        run: npm run build
+
+      - name: Build Windows installer + publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always
