@@ -10,8 +10,13 @@ jobs:
   build:
     runs-on: windows-latest
 
-    permissions:
-      contents: write
+    # This repo is private, so its GitHub Releases would need a token to
+    # download. The install artifacts are published to the *public*
+    # vasilirigels/inventory-app-releases repo instead, so the auto-updater on
+    # installed PCs can fetch them anonymously. RELEASES_TOKEN is a token with
+    # `contents:write` on that public repo (secret set in this repo's settings).
+    env:
+      RELEASES_REPO: vasilirigels/inventory-app-releases
 
     steps:
       - name: Checkout code
@@ -38,26 +43,28 @@ jobs:
         run: npm run build
 
       - name: Build Windows installer
-        # --publish never: don't let electron-builder create the release itself.
-        # We create it explicitly below (in one API call) and upload assets to
-        # avoid the race that produces duplicate/dangling releases.
+        # --publish never: we handle publishing below with gh, which is more
+        # reliable than letting electron-builder create the release itself.
         run: npx electron-builder --win --publish never
 
-      - name: Create GitHub Release and upload assets
+      - name: Publish installer to public releases repo
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         shell: bash
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          echo "Creating release for tag $TAG"
-          # If a release for this tag already exists (rerun), reuse it.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; uploading assets with --clobber"
+          echo "Publishing $TAG to $RELEASES_REPO"
+          if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; uploading with --clobber"
           else
-            gh release create "$TAG" --title "$TAG" --notes "Automated build from CI."
+            gh release create "$TAG" \
+              --repo "$RELEASES_REPO" \
+              --title "$TAG" \
+              --notes "Automated build from private inventory-app CI."
           fi
           gh release upload "$TAG" \
             release/AriShop-Setup-*.exe \
             release/AriShop-Setup-*.exe.blockmap \
             release/latest.yml \
+            --repo "$RELEASES_REPO" \
             --clobber
