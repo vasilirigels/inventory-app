@@ -1,11 +1,9 @@
 name: Build Windows Installer
 
 on:
-  # Auto-publish a new release whenever a version tag is pushed (e.g. v1.0.1).
   push:
     tags:
       - 'v*'
-  # Manual trigger — build a draft release for testing without a tag.
   workflow_dispatch:
 
 jobs:
@@ -13,7 +11,7 @@ jobs:
     runs-on: windows-latest
 
     permissions:
-      contents: write  # needed to upload assets to GitHub Releases
+      contents: write
 
     steps:
       - name: Checkout code
@@ -29,8 +27,6 @@ jobs:
         run: npm ci
 
       - name: Write .env from GitHub secrets
-        # Turso credentials live in repo Secrets (Settings → Secrets → Actions),
-        # not in git. The build injects them so the packaged app can talk to Turso.
         shell: bash
         run: |
           cat > .env <<EOF
@@ -41,7 +37,27 @@ jobs:
       - name: Build React frontend
         run: npm run build
 
-      - name: Build Windows installer + publish to GitHub Releases
+      - name: Build Windows installer
+        # --publish never: don't let electron-builder create the release itself.
+        # We create it explicitly below (in one API call) and upload assets to
+        # avoid the race that produces duplicate/dangling releases.
+        run: npx electron-builder --win --publish never
+
+      - name: Create GitHub Release and upload assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "Creating release for tag $TAG"
+          # If a release for this tag already exists (rerun), reuse it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; uploading assets with --clobber"
+          else
+            gh release create "$TAG" --title "$TAG" --notes "Automated build from CI."
+          fi
+          gh release upload "$TAG" \
+            release/AriShop-Setup-*.exe \
+            release/AriShop-Setup-*.exe.blockmap \
+            release/latest.yml \
+            --clobber
