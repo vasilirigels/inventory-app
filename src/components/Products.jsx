@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import * as XLSX from 'xlsx'
 
 // ── Image upload helpers ───────────────────────────────────────────────────────
@@ -624,6 +625,9 @@ export default function Products() {
 
   useEffect(() => { load() }, [load])
 
+  // Live-refresh when another PC creates/edits/deletes a product.
+  useRealtimeSync('products', load)
+
   // Return product creation date as local YYYY-MM-DD. SQLite stores created_at
   // in UTC, so we parse it explicitly as UTC before reading the local day —
   // otherwise late-night creations would shift to the wrong calendar day.
@@ -661,11 +665,18 @@ export default function Products() {
   const handleSave = async data => {
     try {
       if (data.id) {
-        await fetch(`/api/products/${data.id}`, {
+        const res = await fetch(`/api/products/${data.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         })
+        // 409 = another PC saved a change while this form was open. Reload the
+        // list and warn — user's edits stay in the form so they can retry.
+        if (res.status === 409) {
+          await load()
+          alert('Ky produkt u ndryshua nga një PC tjetër ndërkohë. Të dhënat u rifreskuan — kontrollo dhe ruaj sërish.')
+          return
+        }
       } else {
         await fetch('/api/products', {
           method: 'POST',

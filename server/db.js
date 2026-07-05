@@ -486,6 +486,21 @@ const MIGRATIONS = [
   "ALTER TABLE expense_entries ADD COLUMN currency TEXT DEFAULT 'LEK'",
   "ALTER TABLE expense_entries ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE expense_entries ADD COLUMN exchange_rate REAL DEFAULT 1",
+
+  // Optimistic locking — products can be edited concurrently on two PCs; the
+  // PUT handler compares the client's updated_at to the row's current value.
+  "ALTER TABLE products ADD COLUMN updated_at TEXT DEFAULT ''",
+
+  // Uniqueness on generated document numbers. Prevents the classic race where
+  // two PCs compute the same "next number" between SELECT and INSERT.
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_invoice_no ON invoices(invoice_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_invoices_invoice_no ON purchase_invoices(invoice_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_hurda_purchases_purchase_no ON hurda_purchases(purchase_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_has_purchases_purchase_no ON has_purchases(purchase_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_flete_hyrje_ref_no ON flete_hyrje(ref_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_flete_dalje_ref_no ON flete_dalje(ref_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_magazina_hyrje_ref_no ON magazina_hyrje(ref_no)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_magazina_dalje_ref_no ON magazina_dalje(ref_no)",
 ];
 
 async function initDB() {
@@ -546,6 +561,37 @@ async function run(sql, params = []) {
   return await client.execute({ sql, args: params });
 }
 
+// Detect UNIQUE constraint violations across libSQL error shapes. libSQL surfaces
+// them as SQLITE_CONSTRAINT with the phrase "UNIQUE constraint failed" in the
+// message; matching on the message keeps this working across driver versions.
+function isUniqueViolation(err) {
+  const msg = String(err?.message || err || '');
+  return /UNIQUE constraint failed/i.test(msg);
+}
+
+// Retry helper for "generate a unique document number, then insert it" flows.
+// getNo() computes the next candidate (from a COUNT+increment or similar);
+// doInsert(no) performs the INSERT that may collide. On UNIQUE failure we ask
+// getNo() for a fresh number and try again, up to `maxRetries`.
+async function retryOnUniqueNo(getNo, doInsert, maxRetries = 5) {
+  let lastErr;
+  let no = await getNo();
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await doInsert(no);
+      return no;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries - 1 && isUniqueViolation(err)) {
+        no = await getNo();
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 // Turso has its own backup mechanism; the on-demand /api/backup export used to
 // dump the local sqlite file. Now we dump table rows as JSON instead.
 async function exportDB() {
@@ -559,4 +605,7 @@ async function exportDB() {
   return Buffer.from(JSON.stringify(dump, null, 2));
 }
 
-export { initDB, getDB, queryAll, queryOne, run, exportDB };
+export {
+  initDB, getDB, queryAll, queryOne, run, exportDB,
+  isUniqueViolation, retryOnUniqueNo,
+};

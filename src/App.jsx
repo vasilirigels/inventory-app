@@ -34,6 +34,7 @@ import { SECTION_CONFIGS } from './components/sections/sectionConfigs.js'
 import YearlyReport from './components/sections/YearlyReport.jsx'
 import MonthlyReport from './components/sections/MonthlyReport.jsx'
 import UnifiedReport from './components/sections/UnifiedReport.jsx'
+import { initRealtime } from './utils/realtime.js'
 
 const PARENT_TITLES = {
   shitje:   'Shitje',
@@ -69,6 +70,10 @@ function App() {
   const [page, setPage] = useState(() => getPageFromHash() || 'dashboard')
   const [currentDate, setCurrentDate] = useState(getToday())
   const [openInvoiceId, setOpenInvoiceId] = useState(null)
+
+  // Kick off the shared realtime WebSocket once — subscribers wire up via
+  // useRealtimeSync in individual screens.
+  useEffect(() => { initRealtime() }, [])
 
   const navigateTo = (pg, opts = {}) => {
     setPage(pg)

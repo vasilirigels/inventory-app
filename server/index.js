@@ -3,8 +3,13 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
+import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
-import { initDB, queryAll, queryOne, run, exportDB } from './db.js';
+import {
+  initDB, queryAll, queryOne, run, exportDB,
+  isUniqueViolation, retryOnUniqueNo,
+} from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +37,62 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ─── Realtime change broadcast ────────────────────────────────────────────────
+// When any mutation route succeeds, we broadcast { table, action } to every
+// connected client so open windows (on other PCs) can re-fetch. A single
+// middleware wraps res.json so we don't have to touch each route.
+const wsClients = new Set();
+function broadcast(payload) {
+  const data = JSON.stringify(payload);
+  for (const ws of wsClients) {
+    try { if (ws.readyState === 1) ws.send(data); } catch (_) {}
+  }
+}
+// Map URL path → logical table name. Missing entry = no broadcast.
+function tableFromPath(p) {
+  if (!p.startsWith('/api/')) return null;
+  const seg = p.slice(5).split('?')[0].split('/')[0];
+  const map = {
+    'products': 'products',
+    'invoices': 'invoices',
+    'purchase-invoices': 'purchase_invoices',
+    'hurda-purchases': 'hurda_purchases',
+    'has-purchases': 'has_purchases',
+    'sales': 'sales',
+    'client-debts': 'customer_debts',
+    'customer-debts': 'customer_debts',
+    'clients': 'clients',
+    'suppliers': 'suppliers',
+    'daily': 'daily_records',
+    'marketing-expenses': 'marketing_expenses',
+    'expense-categories': 'expense_categories',
+    'expense-entries': 'expense_entries',
+    'safe-withdrawals': 'safe_withdrawals',
+    'safe-conversions': 'safe_conversions',
+    'kasaforta': 'daily_records',
+    'flete-hyrje': 'flete_hyrje',
+    'flete-dalje': 'flete_dalje',
+    'magazina-hyrje': 'magazina_hyrje',
+    'magazina-dalje': 'magazina_dalje',
+    'invoice-payments': 'invoice_payments',
+    'purchase-payments': 'purchase_payments',
+  };
+  return map[seg] || null;
+}
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origJson = res.json.bind(res);
+  res.json = (data) => {
+    const ret = origJson(data);
+    if (res.statusCode < 300) {
+      const table = tableFromPath(req.path);
+      if (table) broadcast({ type: 'change', table, action: req.method, at: Date.now() });
+    }
+    return ret;
+  };
+  next();
+});
 
 // Initialize DB before starting server
 await initDB();
@@ -797,12 +858,17 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// updated_at is a millisecond timestamp used for optimistic locking on
+// concurrent product edits. INSERT and UPDATE both stamp `now`, so a client
+// that PUTs with a stale value gets a 409 and can re-fetch.
+const NOW_TS_SQL = "strftime('%Y-%m-%d %H:%M:%f','now')";
+
 app.post('/api/products', async (req, res) => {
   try {
     const d = req.body;
     await run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
@@ -822,10 +888,24 @@ app.put('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const d = req.body;
+    // Optimistic lock: if client sends `updated_at`, require it to still match
+    // what's in the DB. Missing/empty means the client opts out (legacy calls).
+    const clientTs = (d.updated_at ?? '').toString();
+    const current = await queryOne('SELECT updated_at FROM products WHERE id = ?', [id]);
+    if (!current) return res.status(404).json({ error: 'not found' });
+    if (clientTs && (current.updated_at || '') && clientTs !== current.updated_at) {
+      const fresh = await queryOne('SELECT * FROM products WHERE id = ?', [id]);
+      return res.status(409).json({
+        error: 'conflict',
+        message: 'Ky produkt u ndryshua nga një PC tjetër. Rifresko dhe provo përsëri.',
+        current: fresh,
+      });
+    }
     await run(
       `UPDATE products
        SET name=?, sku=?, barcode=?, category=?, brand=?, description=?,
-           cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?
+           cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?,
+           updated_at=${NOW_TS_SQL}
        WHERE id=?`,
       [
         d.name, d.sku || '', d.barcode || '',
@@ -1170,7 +1250,7 @@ app.post('/api/invoices', async (req, res) => {
     const d = req.body || {};
     const date = d.date;
     if (!date) return res.status(400).json({ error: 'date required' });
-    const invoice_no = (d.invoice_no || '').trim() || await nextInvoiceNo(date);
+    const userProvidedNo = (d.invoice_no || '').trim();
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
     const totals = recomputeInvoiceTotals(items);
@@ -1196,13 +1276,13 @@ app.post('/api/invoices', async (req, res) => {
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
     await ensureClientExists(d.customer_name, d.customer_nipt);
-    await run(
+    const doInsertInvoice = (invNo) => run(
       `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
         subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
         paid_cash, paid_pos, paid_bank, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        date, invoice_no, d.customer_name || '', d.customer_nipt || '',
+        date, invNo, d.customer_name || '', d.customer_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
         totals.subtotal_no_vat, totalDiscount,
         totals.total_vat, totals.total_with_vat,
@@ -1211,6 +1291,12 @@ app.post('/api/invoices', async (req, res) => {
         d.notes || '',
       ]
     );
+    // If two PCs race, the UNIQUE index on invoice_no makes one INSERT fail;
+    // retryOnUniqueNo asks for a fresh number and tries again. User-provided
+    // numbers are inserted as-is so a collision surfaces to the caller.
+    const invoice_no = userProvidedNo
+      ? (await doInsertInvoice(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextInvoiceNo(date), doInsertInvoice);
     const invoice = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const invoiceId = invoice?.id;
     for (const it of items) {
@@ -1865,7 +1951,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
   try {
     const d = req.body || {};
     if (!d.date) return res.status(400).json({ error: 'date required' });
-    const invoice_no = (d.invoice_no || '').trim() || await nextPurchaseNo(d.date);
+    const userProvidedNo = (d.invoice_no || '').trim();
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
     const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
@@ -1884,18 +1970,21 @@ app.post('/api/purchase-invoices', async (req, res) => {
     }
     const amountDueI = Math.max(0, +(tot - amountPaidI).toFixed(2));
 
-    await run(
+    const doInsertPurchase = (invNo) => run(
       `INSERT INTO purchase_invoices (date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
         subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        d.date, invoice_no, d.supplier_name || '', d.supplier_nipt || '',
+        d.date, invNo, d.supplier_name || '', d.supplier_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
         sub, totalDiscount, vat, tot,
         pmI, amountPaidI, amountDueI,
         d.notes || '',
       ]
     );
+    const invoice_no = userProvidedNo
+      ? (await doInsertPurchase(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextPurchaseNo(d.date), doInsertPurchase);
     const created = await queryOne('SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?', [d.date, invoice_no]);
     const newId = created?.id;
     for (const it of items) {
@@ -2106,20 +2195,23 @@ app.post('/api/hurda-purchases', async (req, res) => {
   try {
     const d = req.body || {};
     if (!d.date) return res.status(400).json({ error: 'date required' });
-    const purchase_no = (d.purchase_no || '').trim() || await nextHurdaNo(d.date);
+    const userProvidedNo = (d.purchase_no || '').trim();
     const total_amount = computeHurdaTotal(d);
-    await run(
+    const doInsertHurda = (no) => run(
       `INSERT INTO hurda_purchases (date, purchase_no, supplier_name, supplier_nipt,
         gram, price_per_gram, currency, exchange_rate, total_amount, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        d.date, purchase_no,
+        d.date, no,
         d.supplier_name || '', d.supplier_nipt || '',
         parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
         total_amount, d.notes || '',
       ]
     );
+    const purchase_no = userProvidedNo
+      ? (await doInsertHurda(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextHurdaNo(d.date), doInsertHurda);
     const created = await queryOne('SELECT id FROM hurda_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
     res.json({ success: true, id: created?.id, purchase_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2216,20 +2308,23 @@ app.post('/api/has-purchases', async (req, res) => {
   try {
     const d = req.body || {};
     if (!d.date) return res.status(400).json({ error: 'date required' });
-    const purchase_no = (d.purchase_no || '').trim() || await nextHasNo(d.date);
+    const userProvidedNo = (d.purchase_no || '').trim();
     const total_amount = computeHasTotal(d);
-    await run(
+    const doInsertHas = (no) => run(
       `INSERT INTO has_purchases (date, purchase_no, supplier_name, supplier_nipt,
         gram, price_per_gram, currency, exchange_rate, total_amount, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        d.date, purchase_no,
+        d.date, no,
         d.supplier_name || '', d.supplier_nipt || '',
         parseFloat(d.gram) || 0, parseFloat(d.price_per_gram) || 0,
         d.currency || 'EUR', parseFloat(d.exchange_rate) || 1,
         total_amount, d.notes || '',
       ]
     );
+    const purchase_no = userProvidedNo
+      ? (await doInsertHas(userProvidedNo), userProvidedNo)
+      : await retryOnUniqueNo(() => nextHasNo(d.date), doInsertHas);
     const created = await queryOne('SELECT id FROM has_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
     res.json({ success: true, id: created?.id, purchase_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2340,9 +2435,14 @@ function makeFleteEndpoints(kind, sign) {
     try {
       const d = req.body || {};
       if (!d.date) return res.status(400).json({ error: 'date required' });
-      const ref_no = (d.ref_no || '').trim() || await nextRefNo(d.date);
-      await run(`INSERT INTO ${table} (date, ref_no, notes) VALUES (?, ?, ?)`,
-        [d.date, ref_no, d.notes || '']);
+      const userProvidedNo = (d.ref_no || '').trim();
+      const doInsertHead = (no) => run(
+        `INSERT INTO ${table} (date, ref_no, notes) VALUES (?, ?, ?)`,
+        [d.date, no, d.notes || ''],
+      );
+      const ref_no = userProvidedNo
+        ? (await doInsertHead(userProvidedNo), userProvidedNo)
+        : await retryOnUniqueNo(() => nextRefNo(d.date), doInsertHead);
       const created = await queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
       const newId = created?.id;
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
@@ -2493,14 +2593,17 @@ function makeMagazinaEndpoints(kind, sign) {
     try {
       const d = req.body || {};
       if (!d.date) return res.status(400).json({ error: 'date required' });
-      const ref_no = (d.ref_no || '').trim() || await nextRefNo(d.date);
+      const userProvidedNo = (d.ref_no || '').trim();
       const currency = d.currency || 'LEK';
       const exchange_rate = parseFloat(d.exchange_rate) || 1;
-      await run(
+      const doInsertMagHead = (no) => run(
         `INSERT INTO ${table} (date, warehouse_code, ref_no, currency, exchange_rate, subtotal, total_discount, total, notes)
          VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?)`,
-        [d.date, d.warehouse_code || '', ref_no, currency, exchange_rate, d.notes || '']
+        [d.date, d.warehouse_code || '', no, currency, exchange_rate, d.notes || ''],
       );
+      const ref_no = userProvidedNo
+        ? (await doInsertMagHead(userProvidedNo), userProvidedNo)
+        : await retryOnUniqueNo(() => nextRefNo(d.date), doInsertMagHead);
       const created = await queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
       const newId = created?.id;
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
@@ -4469,9 +4572,21 @@ if (fs.existsSync(distDir)) {
 }
 
 // ============================================================
-// START SERVER
+// START SERVER (HTTP + WebSocket on the same port)
 // ============================================================
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+const httpServer = http.createServer(app);
+
+// WebSocket endpoint. Vite dev proxy needs to forward /ws with ws: true — see
+// vite.config.js. In production the Electron window loads over the same origin.
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+wss.on('connection', (ws) => {
+  wsClients.add(ws);
+  ws.on('close', () => wsClients.delete(ws));
+  ws.on('error', () => wsClients.delete(ws));
+  try { ws.send(JSON.stringify({ type: 'hello', at: Date.now() })); } catch (_) {}
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT} (ws on /ws)`);
 });
