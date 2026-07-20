@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
 
 // ── Image upload helpers ───────────────────────────────────────────────────────
 function ProductImage({ product, onUploaded }) {
@@ -91,13 +91,203 @@ const CAT_COLORS = {
 const EMPTY = {
   name: '', sku: '', barcode: '', category: 'Unazë',
   brand: '', description: '', cost_price: '', sell_price: '',
-  stock: '', min_stock: '5', vat_rate: '20',
+  stock: '', min_stock: '5', vat_rate: '20', gram: '',
+  serial_no: '', purchase_price_no_vat: '',
 }
 
 const VAT_OPTIONS = [0, 6, 10, 20]
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const productNo = id => `GS-${String(id).padStart(4, '0')}`
+
+// ── Code 39 barcode encoder ───────────────────────────────────────────────────
+// Each character = 9 elements (5 bars + 4 spaces), 'n' = narrow, 'w' = wide.
+// Alphabet: 0-9 A-Z - . space $ / + %  (plus '*' as start/stop sentinel).
+const CODE39 = {
+  '0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw',
+  '5':'wnnwwnnnn','6':'nnwwwnnnn','7':'nnnwnnwnw','8':'wnnwnnwnn','9':'nnwwnnwnn',
+  'A':'wnnnnwnnw','B':'nnwnnwnnw','C':'wnwnnwnnn','D':'nnnnwwnnw','E':'wnnnwwnnn',
+  'F':'nnwnwwnnn','G':'nnnnnwwnw','H':'wnnnnwwnn','I':'nnwnnwwnn','J':'nnnnwwwnn',
+  'K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn',
+  'P':'nnwnwnnwn','Q':'nnnnnnwww','R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn',
+  'U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnnw','Y':'wwnnwnnnn',
+  'Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','$':'nwnwnwnnn',
+  '/':'nwnwnnnwn','+':'nwnnnwnwn','%':'nnnwnwnwn','*':'nwnnwnwnn',
+}
+function code39Clean(v) {
+  return String(v || '').toUpperCase().replace(/[^0-9A-Z\- .$/+%]/g, '')
+}
+function code39SVG(value, { height = 60, narrow = 2, wide = 5, showText = true } = {}) {
+  const clean = code39Clean(value)
+  if (!clean) return ''
+  const encoded = '*' + clean + '*'
+  const bars = []
+  let x = 0
+  for (let ci = 0; ci < encoded.length; ci++) {
+    const pattern = CODE39[encoded[ci]]
+    if (!pattern) continue
+    for (let i = 0; i < 9; i++) {
+      const w = pattern[i] === 'w' ? wide : narrow
+      if (i % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${w}" height="${height}" fill="#000"/>`)
+      x += w
+    }
+    if (ci < encoded.length - 1) x += narrow
+  }
+  const totalW = x
+  const textArea = showText ? 22 : 0
+  const totalH = height + textArea
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">${bars.join('')}${showText ? `<text x="${totalW / 2}" y="${height + 16}" text-anchor="middle" font-family="monospace" font-size="14" fill="#000">${clean}</text>` : ''}</svg>`
+}
+
+// ── Barcode modal: generate / edit / preview / save / print ───────────────────
+function BarcodeModal({ product, onClose, onSaved }) {
+  const suggestion = `GS${String(product.id).padStart(6, '0')}`
+  const [value, setValue] = useState(product.barcode ? code39Clean(product.barcode) : suggestion)
+  const [saving, setSaving] = useState(false)
+  const [copies, setCopies] = useState(1)
+
+  const clean = code39Clean(value)
+  const svg = code39SVG(clean, { height: 60, narrow: 2, wide: 5 })
+
+  const save = async () => {
+    if (!clean || clean === (product.barcode || '')) return true
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...product, barcode: clean }),
+      })
+      if (!res.ok) throw new Error('save failed')
+      onSaved?.()
+      return true
+    } catch (e) {
+      console.error(e)
+      alert('Gabim gjatë ruajtjes së barkodit.')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const printBarcode = async () => {
+    if (!clean) return
+    const ok = await save()
+    if (!ok) return
+    const svgHtml = code39SVG(clean, { height: 60, narrow: 2, wide: 5 })
+    const n = Math.max(1, Math.min(50, parseInt(copies) || 1))
+    const priceLine = product.sell_price
+      ? `<div class="price">€${Number(product.sell_price).toFixed(2)}</div>`
+      : ''
+    const nameSafe = String(product.name || '').replace(/</g, '&lt;').slice(0, 40)
+    const oneLabel = `
+      <div class="label">
+        <div class="name">${nameSafe}</div>
+        <div class="bc">${svgHtml}</div>
+        ${priceLine}
+      </div>
+    `
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Barkod</title>
+<style>
+  @page { margin: 3mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+  .grid { display: flex; flex-wrap: wrap; gap: 3mm; padding: 3mm; }
+  .label { width: 50mm; padding: 2mm; text-align: center; border: 1px dashed #ccc; page-break-inside: avoid; }
+  .name { font-size: 8pt; font-weight: 600; margin-bottom: 1mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bc svg { width: 100%; height: 16mm; }
+  .price { font-size: 10pt; font-weight: 700; margin-top: 1mm; }
+  @media print { .label { border: none; } }
+</style></head>
+<body><div class="grid">${oneLabel.repeat(n)}</div></body></html>`
+    const frame = document.createElement('iframe')
+    Object.assign(frame.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+    document.body.appendChild(frame)
+    const doc = frame.contentDocument || frame.contentWindow.document
+    doc.open(); doc.write(html); doc.close()
+    setTimeout(() => {
+      try {
+        frame.contentWindow.focus()
+        frame.contentWindow.print()
+      } catch (e) { console.error(e) }
+      setTimeout(() => { try { document.body.removeChild(frame) } catch {} }, 1000)
+    }, 250)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="modal-header">
+          <div className="min-w-0">
+            <h3 className="font-bold text-slate-800 text-lg">🏷️ Barkod — {productNo(product.id)}</h3>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">{product.name}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+        </div>
+        <div className="modal-body space-y-4">
+          <div>
+            <label className="form-label">Vlera e barkodit</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                className="input-field font-mono uppercase tracking-wider"
+                placeholder="p.sh. GS000042"
+              />
+              <button
+                type="button"
+                onClick={() => setValue(suggestion)}
+                className="btn-secondary text-xs whitespace-nowrap"
+                title="Gjenero nga numri i produktit"
+              >
+                🎲 Gjenero
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Vetëm: 0-9, A-Z, dhe - . $ / + % (Code-39). Skanuesi e lexon si tekst.
+            </p>
+          </div>
+
+          <div className="bg-white border-2 border-slate-200 rounded-xl p-4">
+            <div className="text-center text-xs font-semibold text-slate-700 mb-2 truncate">{product.name}</div>
+            {clean ? (
+              <div dangerouslySetInnerHTML={{ __html: svg }} />
+            ) : (
+              <div className="text-center text-xs text-red-500 py-6">Vendos një vlerë të vlefshme.</div>
+            )}
+            {product.sell_price > 0 && (
+              <div className="text-center text-sm font-bold text-slate-800 mt-2">
+                €{Number(product.sell_price).toFixed(2)}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-slate-600 font-medium">Kopje për print</label>
+            <input
+              type="number" min="1" max="50" value={copies}
+              onChange={e => setCopies(e.target.value)}
+              className="input-field w-24"
+            />
+            <span className="text-[11px] text-slate-500">etiketa 50×25 mm</span>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button onClick={onClose} className="btn-secondary">Mbyll</button>
+          <button
+            onClick={printBarcode}
+            disabled={!clean || saving}
+            className="btn-primary"
+          >
+            {saving ? '⏳ Duke ruajtur...' : '🖨️ Ruaj & Printo'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function StockBadge({ stock, minStock }) {
   if (stock === 0)
@@ -107,27 +297,66 @@ function StockBadge({ stock, minStock }) {
   return <span className="badge badge-green">{stock} cope</span>
 }
 
-// ── Excel column auto-detector ─────────────────────────────────────────────────
+// ── Excel column auto-detector ─────────────────────────────────────────────
+// Detektim priority-based me exclusion: kolonat specifike mapohen para atyre
+// gjenerike, dhe një kolonë e mapuar një herë nuk ripërdoret (p.sh. "SHITJET"
+// me flag 1 nuk keqinterpretohet si sell_price).
 function detectMapping(headers) {
-  const find = (...keys) => {
-    for (const k of keys) {
-      const i = headers.findIndex(h =>
-        String(h).toLowerCase().replace(/\s+/g, '_').includes(k.toLowerCase())
-      )
-      if (i !== -1) return i
+  const norm = h => String(h ?? '')
+    .toLowerCase()
+    .replace(/[çÇ]/g, 'c')
+    .replace(/[ëË]/g, 'e')
+    .replace(/\s+/g, '_')
+  const normalized = headers.map(norm)
+  const used = new Set()
+
+  const findFirst = patterns => {
+    for (const p of patterns) {
+      for (let i = 0; i < normalized.length; i++) {
+        if (used.has(i)) continue
+        if (normalized[i].includes(p)) { used.add(i); return i }
+      }
     }
     return -1
   }
+
+  const barcode    = findFirst(['barkod', 'barcode'])
+  // Nr Serie = fushë e re, e ndarë nga SKU. Priority mbi SKU kur ka të dyja
+  // kolona; nëse Excel-i ka vetëm një, ajo mund të shkojë te SKU sipas
+  // pattern-it (p.sh. "kodi" → sku).
+  const serial_no  = findFirst([
+    'nr_serie', 'nr._serie', 'numer_serie', 'seri', 'nr_serial', 'numer_serial',
+    'serial_no', 'serial',
+  ])
+  const sku        = findFirst([
+    'sku', 'kodi_art', 'kodi', 'code', 'ref_no', 'ref',
+  ])
+  // Çmimi PA TVSH (blerje nga furnitori) — fushë e ndarë nga Cmimi Kosto.
+  const purchase_price_no_vat = findFirst([
+    'cmimi_pa_tvsh', 'cmimi_pa', 'cm_pa', 'cmimi_bler', 'cm_bler',
+    'pa_tvsh', 'blerje_pa', 'purchase_pa', 'purchase',
+  ])
+  // Çmimi Kosto (me TVSH + tarifa) — pas se u zunë "pa_tvsh" më sipër.
+  const cost_price = findFirst([
+    'cmim_kosto', 'cmimi_kosto', 'cm_kosto', 'kosto', 'cost', 'cmimi_k',
+  ])
+  const sell_price = findFirst([
+    'cmim_shitje', 'cmimi_shitj', 'cm_shitj', 'shitje_pa', 'shit_pa_tvsh',
+    'sell_price', 'sell', 'cmimi_sh', 'price',
+  ])
+  const vat_rate   = findFirst(['tvsh', 'vat', 'tva', 'iva'])
+  const unit       = findFirst(['njesi', 'njësi', 'unit', 'unite'])
+  const gram       = findFirst(['gramatur', 'gram', 'peshe', 'peshë', 'weight'])
+  const stock      = findFirst(['sasia', 'sasi', 'stoku', 'stock', 'qty', 'quantity', 'gjendje', 'cope', 'copë'])
+  const min_stock  = findFirst(['stok_min', 'min_stock', 'minim', 'alarm'])
+  const category   = findFirst(['kategori', 'category', 'tip', 'lloj'])
+  const brand      = findFirst(['brendi', 'brand', 'prodhu', 'furnitor'])
+  const name       = findFirst(['pershkrim', 'përshkrim', 'emri', 'name', 'produkt', 'article', 'description', 'artikull'])
+
   return {
-    name:       find('emri', 'name', 'produkt', 'article', 'pershkrim', 'description', 'artikull'),
-    category:   find('kategori', 'category', 'tip', 'lloj'),
-    brand:      find('brendi', 'brand', 'prodhu', 'furnitor'),
-    sku:        find('sku', 'kodi', 'code', 'ref', 'nr.', 'nr '),
-    barcode:    find('barkod', 'barcode'),
-    cost_price: find('kosto', 'cost', 'blerje', 'cmimi_k', 'çmimi_k'),
-    sell_price: find('shitje', 'sell', 'price', 'çmimi_sh', 'cmimi_sh', 'çmimi', 'cmimi'),
-    stock:      find('stoku', 'stock', 'sasia', 'qty', 'quantity', 'gjendje', 'cope'),
-    min_stock:  find('minim', 'min_stock', 'alarm'),
+    name, category, brand, sku, serial_no, barcode,
+    purchase_price_no_vat, cost_price, sell_price,
+    vat_rate, unit, gram, stock, min_stock,
   }
 }
 
@@ -138,29 +367,41 @@ function rowToProduct(row, m) {
     category:   String(get(m.category, 'Tjeter')).trim() || 'Tjeter',
     brand:      String(get(m.brand, '')).trim(),
     sku:        String(get(m.sku, '')).trim(),
+    serial_no:  String(get(m.serial_no, '')).trim(),
     barcode:    String(get(m.barcode, '')).trim(),
+    purchase_price_no_vat: parseFloat(get(m.purchase_price_no_vat, 0)) || 0,
     cost_price: parseFloat(get(m.cost_price, 0)) || 0,
     sell_price: parseFloat(get(m.sell_price, 0)) || 0,
+    vat_rate:   get(m.vat_rate, '') === '' ? 20 : (parseFloat(get(m.vat_rate, 20)) || 0),
+    unit:       String(get(m.unit, 'copë')).trim() || 'copë',
+    gram:       parseFloat(get(m.gram, 0)) || 0,
     stock:      parseInt(get(m.stock, 0)) || 0,
     min_stock:  parseInt(get(m.min_stock, 5)) || 5,
   }
 }
 
 // ── Template download ──────────────────────────────────────────────────────────
-function downloadTemplate() {
+async function downloadTemplate() {
+  const XLSX = await loadXLSX()
   const wb = XLSX.utils.book_new()
   const ws = XLSX.utils.aoa_to_sheet([
-    ['Emri', 'Kategoria', 'Brendi', 'Kodi_SKU', 'Barkodi',
-     'Cmimi_Kosto_EUR', 'Cmimi_Shitje_EUR', 'Stoku', 'Stoku_Minimal'],
-    ['Unazë Ari 18K Brillant', 'Unazë', 'Italia Gold', 'UNA-18K-001', '1234567890', 150, 280, 5, 2],
-    ['Vathë Diamant 0.5ct', 'Vathë', '', 'VAT-DIA-001', '', 320, 550, 3, 1],
-    ['Byzylyk Ari 14K', 'Byzylyk', 'Turkey Gold', 'BYZ-14K-003', '', 200, 380, 8, 3],
-    ['Gjerdan Flori 18K', 'Gjerdan / Varëse', '', 'GJE-18K-001', '', 400, 750, 4, 2],
+    ['Barkodi', 'Nr_Serie', 'Pershkrimi', 'Kategoria', 'Brendi',
+     'Njesi', 'Sasi', 'Gramatura', 'Cmimi_PA', 'TVSH',
+     'Cmim_Kosto', 'Cmim_Shitje', 'Stoku_Minimal'],
+    ['1234567890', 'PR0000001', 'Unazë Ari 18K Brillant', 'Unazë', 'Italia Gold',
+     'copë', 5, 5.52, 120, 20, 150, 280, 2],
+    ['', 'PR0000002', 'Vathë Diamant 0.5ct', 'Vathë', '',
+     'copë', 3, 2.34, 260, 20, 320, 550, 1],
+    ['', 'PR0000003', 'Byzylyk Ari 14K', 'Byzylyk', 'Turkey Gold',
+     'copë', 8, 7.22, 160, 20, 200, 380, 3],
+    ['', 'PR0000004', 'Gjerdan Flori 18K', 'Gjerdan / Varëse', '',
+     'copë', 4, 12.5, 330, 20, 400, 750, 2],
   ])
   // Column widths
   ws['!cols'] = [
-    { wch: 30 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 14 },
-    { wch: 16 }, { wch: 16 }, { wch: 8 }, { wch: 14 },
+    { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 16 },
+    { wch: 8 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 6 },
+    { wch: 12 }, { wch: 12 }, { wch: 12 },
   ]
   XLSX.utils.book_append_sheet(wb, ws, 'Produktet')
   XLSX.writeFile(wb, 'gold_shop_template.xlsx')
@@ -185,8 +426,9 @@ function ImportModal({ onClose, onDone }) {
     setError('')
 
     const reader = new FileReader()
-    reader.onload = evt => {
+    reader.onload = async evt => {
       try {
+        const XLSX = await loadXLSX()
         const wb = XLSX.read(evt.target.result, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
@@ -235,15 +477,19 @@ function ImportModal({ onClose, onDone }) {
   const setMap = (key, val) => setMapping(m => ({ ...m, [key]: parseInt(val) }))
 
   const COL_FIELDS = [
-    { key: 'name',       label: 'Emri *'           },
-    { key: 'category',   label: 'Kategoria'        },
-    { key: 'brand',      label: 'Brendi'           },
-    { key: 'sku',        label: 'Kodi SKU'         },
-    { key: 'barcode',    label: 'Barcode'          },
-    { key: 'cost_price', label: 'Çmimi Kosto (€)'  },
-    { key: 'sell_price', label: 'Çmimi Shitje (€)' },
-    { key: 'stock',      label: 'Stoku'            },
-    { key: 'min_stock',  label: 'Stok Minimal'     },
+    { key: 'barcode',              label: 'Barkodi'          },
+    { key: 'serial_no',            label: 'Nr Serie'         },
+    { key: 'name',                 label: 'Pershkrimi *'     },
+    { key: 'category',             label: 'Kategoria'        },
+    { key: 'brand',                label: 'Brendi'           },
+    { key: 'unit',                 label: 'Njesi'            },
+    { key: 'stock',                label: 'Sasi'             },
+    { key: 'gram',                 label: 'Gramatura'        },
+    { key: 'purchase_price_no_vat',label: 'Cmimi PA (€)'     },
+    { key: 'vat_rate',             label: 'TVSH %'           },
+    { key: 'cost_price',           label: 'Cmim Kosto (€)'   },
+    { key: 'sell_price',           label: 'Cmim Shitje (€)'  },
+    { key: 'min_stock',            label: 'Stok Minimal'     },
   ]
 
   return (
@@ -348,27 +594,35 @@ function ImportModal({ onClose, onDone }) {
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50">
                       <tr>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">Nr.</th>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">Emri</th>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">Kategoria</th>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">SKU</th>
-                        <th className="px-3 py-2 text-right font-semibold text-slate-500">Kosto €</th>
-                        <th className="px-3 py-2 text-right font-semibold text-slate-500">Shitje €</th>
-                        <th className="px-3 py-2 text-center font-semibold text-slate-500">Stoku</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Nr.</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Barkodi</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Nr Serie</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Pershkrimi</th>
+                        <th className="px-2 py-2 text-center font-semibold text-slate-500">Njesi</th>
+                        <th className="px-2 py-2 text-center font-semibold text-slate-500">Sasi</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Gram</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Cm PA</th>
+                        <th className="px-2 py-2 text-center font-semibold text-slate-500">TVSH</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Kosto</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Shitje</th>
                       </tr>
                     </thead>
                     <tbody>
                       {products.slice(0, 5).map((p, i) => (
                         <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
-                          <td className="px-3 py-2 font-mono text-slate-400">{i + 1}</td>
-                          <td className="px-3 py-2 font-medium text-slate-800 max-w-[160px] truncate">{p.name || <span className="text-red-400 italic">bosh</span>}</td>
-                          <td className="px-3 py-2 text-slate-600">{p.category}</td>
-                          <td className="px-3 py-2 font-mono text-slate-500">{p.sku || '—'}</td>
-                          <td className="px-3 py-2 text-right text-slate-700">{p.cost_price || '—'}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-slate-900">{p.sell_price || '—'}</td>
-                          <td className="px-3 py-2 text-center">
+                          <td className="px-2 py-2 font-mono text-slate-400">{i + 1}</td>
+                          <td className="px-2 py-2 font-mono text-slate-500">{p.barcode || '—'}</td>
+                          <td className="px-2 py-2 font-mono text-slate-500">{p.serial_no || '—'}</td>
+                          <td className="px-2 py-2 font-medium text-slate-800 max-w-[180px] truncate">{p.name || <span className="text-red-400 italic">bosh</span>}</td>
+                          <td className="px-2 py-2 text-center text-slate-600">{p.unit || '—'}</td>
+                          <td className="px-2 py-2 text-center">
                             <span className={`badge ${p.stock === 0 ? 'badge-red' : 'badge-green'}`}>{p.stock}</span>
                           </td>
+                          <td className="px-2 py-2 text-right text-slate-600 tabular-nums">{p.gram || '—'}</td>
+                          <td className="px-2 py-2 text-right text-slate-700 tabular-nums">{p.purchase_price_no_vat || '—'}</td>
+                          <td className="px-2 py-2 text-center text-slate-600">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
+                          <td className="px-2 py-2 text-right text-slate-700 tabular-nums">{p.cost_price || '—'}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-slate-900 tabular-nums">{p.sell_price || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -437,8 +691,15 @@ function ProductModal({ product, onClose, onSave }) {
           stock:       product.stock !== undefined ? String(product.stock) : '',
           min_stock:   product.min_stock !== undefined ? String(product.min_stock) : '5',
           vat_rate:    product.vat_rate !== undefined && product.vat_rate !== null ? String(product.vat_rate) : '20',
+          gram:        product.gram !== undefined && product.gram !== null ? String(product.gram) : '',
+          serial_no:   product.serial_no || '',
+          purchase_price_no_vat: product.purchase_price_no_vat != null ? String(product.purchase_price_no_vat) : '',
+          is_promotion: !!product.is_promotion,
+          promo_discount_pct: product.promo_discount_pct != null
+            ? String(product.promo_discount_pct)
+            : '',
         }
-      : { ...EMPTY }
+      : { ...EMPTY, is_promotion: false, promo_discount_pct: '' }
   )
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
@@ -458,6 +719,13 @@ function ProductModal({ product, onClose, onSave }) {
       stock:      parseInt(form.stock)         || 0,
       min_stock:  parseInt(form.min_stock)     || 5,
       vat_rate:   form.vat_rate === '' || form.vat_rate == null ? 20 : parseFloat(form.vat_rate),
+      gram:       parseFloat(form.gram) || 0,
+      serial_no:  form.serial_no || '',
+      purchase_price_no_vat: parseFloat(form.purchase_price_no_vat) || 0,
+      is_promotion: form.is_promotion ? 1 : 0,
+      promo_discount_pct: form.is_promotion
+        ? Math.max(0, Math.min(100, parseFloat(form.promo_discount_pct) || 0))
+        : 0,
     })
   }
 
@@ -502,15 +770,28 @@ function ProductModal({ product, onClose, onSave }) {
                 <input type="text" value={form.sku} onChange={e => set('sku', e.target.value)}
                   className="input-field" placeholder="p.sh. UNA-18K-001" />
               </div>
-              <div className="col-span-2">
+              <div>
                 <label className="form-label">Barcode</label>
                 <input type="text" value={form.barcode} onChange={e => set('barcode', e.target.value)}
                   className="input-field" placeholder="Barcode (opsional)" />
               </div>
               <div>
+                <label className="form-label">Nr Serie</label>
+                <input type="text" value={form.serial_no} onChange={e => set('serial_no', e.target.value)}
+                  className="input-field font-mono" placeholder="p.sh. PR0002955" />
+              </div>
+              <div>
+                <label className="form-label">Çmimi PA TVSH — Blerje (€)</label>
+                <input type="number" step="0.01" min="0" value={form.purchase_price_no_vat}
+                  onChange={e => set('purchase_price_no_vat', e.target.value)}
+                  className="input-field" placeholder="0.00" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Çmimi bazë nga furnitori (pa TVSH).</p>
+              </div>
+              <div>
                 <label className="form-label">Çmimi Kosto (€)</label>
                 <input type="number" step="0.01" min="0" value={form.cost_price} onChange={e => set('cost_price', e.target.value)}
                   className="input-field" placeholder="0.00" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Kosto totale (me TVSH + tarifat).</p>
               </div>
               <div>
                 <label className="form-label">Çmimi Shitje (€)</label>
@@ -547,6 +828,12 @@ function ProductModal({ product, onClose, onSave }) {
                   className="input-field" placeholder="5" />
               </div>
               <div className="col-span-2">
+                <label className="form-label">Gramatura (gr)</label>
+                <input type="number" step="0.001" min="0" value={form.gram} onChange={e => set('gram', e.target.value)}
+                  className="input-field" placeholder="0.000" />
+                <p className="text-[10px] text-slate-400 mt-1">Do të plotësohet automatikisht në faturat e shitjes.</p>
+              </div>
+              <div className="col-span-2">
                 <label className="form-label">TVSH %</label>
                 <div className="flex gap-2 items-center">
                   <select
@@ -574,6 +861,45 @@ function ProductModal({ product, onClose, onSave }) {
                 <label className="form-label">Përshkrimi (opsional)</label>
                 <textarea value={form.description} onChange={e => set('description', e.target.value)}
                   className="input-field resize-none" rows={2} placeholder="Detaje shtesë..." />
+              </div>
+              <div className="col-span-2">
+                <div className={`p-3 rounded-xl border transition ${form.is_promotion ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200'}`}>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!form.is_promotion}
+                      onChange={e => set('is_promotion', e.target.checked)}
+                      className="w-4 h-4 accent-rose-600"
+                    />
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-800">🏷️ Në Promocion</p>
+                      <p className="text-[11px] text-slate-500">
+                        Produkti do të shfaqet edhe tek faqja "Produkte Promocion".
+                      </p>
+                    </div>
+                  </label>
+                  {form.is_promotion && (
+                    <div className="mt-3 pt-3 border-t border-rose-200 flex items-center gap-3">
+                      <label className="text-xs font-semibold text-rose-700 whitespace-nowrap">Zbritja %</label>
+                      <input
+                        type="number" step="0.01" min="0" max="100"
+                        value={form.promo_discount_pct}
+                        onChange={e => set('promo_discount_pct', e.target.value)}
+                        className="input-field-sm w-24 text-right"
+                        placeholder="0"
+                        autoFocus
+                      />
+                      {parseFloat(form.sell_price) > 0 && parseFloat(form.promo_discount_pct) > 0 && (
+                        <div className="text-[11px] text-slate-600 flex-1 text-right">
+                          <span className="text-slate-400 line-through mr-1.5">€{parseFloat(form.sell_price).toFixed(2)}</span>
+                          <span className="font-bold text-emerald-700">
+                            €{(parseFloat(form.sell_price) * (1 - parseFloat(form.promo_discount_pct) / 100)).toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -609,6 +935,7 @@ export default function Products() {
   const [filterCat, setFilterCat]   = useState('Të gjitha')
   const [modal, setModal]           = useState(null)    // null | 'add' | product
   const [confirmDel, setConfirmDel] = useState(null)
+  const [barcodeFor, setBarcodeFor] = useState(null)    // product | null
   const [showImport, setShowImport] = useState(false)
   const [view, setView]             = useState('list')  // grid | list
   const [fromDate, setFromDate]     = useState('')
@@ -746,7 +1073,8 @@ export default function Products() {
     }
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await loadXLSX()
     const rows = products.map(p => ({
       Nr: productNo(p.id),
       Emri: p.name,
@@ -945,6 +1273,8 @@ export default function Products() {
                 <div className="flex items-start justify-between mb-3">
                   <ProductImage product={p} onUploaded={load} />
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setBarcodeFor(p)} title="Barkod"
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm">🏷️</button>
                     <button onClick={() => setModal(p)} title="Ndrysho"
                       className="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-sm">✏️</button>
                     <button onClick={() => setConfirmDel(p)} title="Fshi"
@@ -989,42 +1319,54 @@ export default function Products() {
       {/* ── LIST view ── */}
       {filtered.length > 0 && view === 'list' && (
         <div className="card p-0 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr.</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Produkti</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Kategoria</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">SKU</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Barkodi</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Kosto €</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Shitje €</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Stoku</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr.</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Barkodi</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr Serie</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Pershkrimi</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Kategoria</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Njesi</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Sasi</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Gram</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Cmimi PA</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">TVSH %</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Cmim Kosto €</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Cmim Shitje €</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(p => (
                 <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{productNo(p.id)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">{CAT_ICONS[p.category] || '📦'}</span>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{productNo(p.id)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-600">{p.barcode || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-600">{p.serial_no || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{CAT_ICONS[p.category] || '📦'}</span>
                       <div>
                         <p className="font-medium text-slate-800">{p.name}</p>
-                        {p.brand && <p className="text-xs text-slate-500">{p.brand}</p>}
+                        {p.brand && <p className="text-[11px] text-slate-500">{p.brand}</p>}
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2">
                     <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 text-slate-700'}`}>{p.category}</span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{p.sku || '—'}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{p.barcode || '—'}</td>
-                  <td className="px-4 py-3 text-right text-slate-700">{p.cost_price ? `€${Number(p.cost_price).toLocaleString()}` : '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="font-bold text-slate-900">
+                  <td className="px-3 py-2 text-center text-xs text-slate-600">{p.unit || 'copë'}</td>
+                  <td className="px-3 py-2 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                    {p.gram > 0 ? `${Number(p.gram).toLocaleString('sq-AL', { maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{p.purchase_price_no_vat ? `€${Number(p.purchase_price_no_vat).toLocaleString()}` : '—'}</td>
+                  <td className="px-3 py-2 text-center text-xs text-slate-600">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{p.cost_price ? `€${Number(p.cost_price).toLocaleString()}` : '—'}</td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span className="font-bold text-slate-900 tabular-nums">
                         {p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}
                       </span>
                       <select
@@ -1052,17 +1394,19 @@ export default function Products() {
                       </select>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button onClick={() => setModal(p)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Ndrysho</button>
-                      <button onClick={() => setConfirmDel(p)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => setBarcodeFor(p)} title="Gjenero & Printo Barkod"
+                        className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium">🏷️</button>
+                      <button onClick={() => setModal(p)} className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Ndrysho</button>
+                      <button onClick={() => setConfirmDel(p)} className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -1080,6 +1424,15 @@ export default function Products() {
           product={modal === 'add' ? null : modal}
           onClose={() => setModal(null)}
           onSave={handleSave}
+        />
+      )}
+
+      {/* ── Barcode Modal ── */}
+      {barcodeFor && (
+        <BarcodeModal
+          product={barcodeFor}
+          onClose={() => setBarcodeFor(null)}
+          onSaved={load}
         />
       )}
 

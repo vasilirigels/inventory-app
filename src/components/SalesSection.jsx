@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -332,9 +332,10 @@ export default function SalesSection({ date, type, onSaleChange }) {
     setImportPreview([]); setImportAllRows([]); setImportDoing(false); setImportDone(null)
   }
 
-  const processInvSheet = (wb, sheetName) => {
+  const processInvSheet = async (wb, sheetName) => {
     const ws = wb.Sheets[sheetName]
     if (!ws) return
+    const XLSX = await loadXLSX()
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
     const config = INV_COLS[type]
     if (!config) return
@@ -344,8 +345,9 @@ export default function SalesSection({ date, type, onSaleChange }) {
     setImportAllRows(all); setImportPreview(all.slice(0, 10))
   }
 
-  const processFlatSheet = (wb, sheetName) => {
+  const processFlatSheet = async (wb, sheetName) => {
     const ws = wb.Sheets[sheetName]
+    const XLSX = await loadXLSX()
     const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
     let headerIdx = 0
     for (let i = 0; i < Math.min(rawRows.length, 5); i++) {
@@ -374,7 +376,8 @@ export default function SalesSection({ date, type, onSaleChange }) {
     const file = e.target.files[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
+      const XLSX = await loadXLSX()
       const wb = XLSX.read(ev.target.result, { type: 'array' })
       const isInv = isInvFormat(wb)
       setImportWb(wb); setImportIsInv(isInv)
@@ -395,7 +398,8 @@ export default function SalesSection({ date, type, onSaleChange }) {
     if (importWb) processInvSheet(importWb, sheetName)
   }
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
+    const XLSX = await loadXLSX()
     const wb = XLSX.utils.book_new()
     let headers
     if (type === 'online') {

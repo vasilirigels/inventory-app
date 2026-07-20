@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
@@ -62,7 +62,8 @@ export default function RaportShpenzime() {
     // eslint-disable-next-line
   }, [from, to, catId, cur])
 
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
+    const XLSX = await loadXLSX()
     const out = data.rows.map(r => ({
       Data: r.date,
       Zëri: r.category_name || '(pa zër)',

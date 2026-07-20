@@ -156,9 +156,6 @@ export default function MonthlyReport({ month: initialMonth, onNavigate }) {
             <AggSection title="Depozitim në Bankë" rows={[
               { label: 'Depozitim', lek: aggD('bank_deposit_lek'), eur: aggD('bank_deposit_eur'), usd: aggD('bank_deposit_usd') },
             ]} cols={['lek','eur','usd']} />
-            <AggSection title="Konvertim Valute" rows={[
-              { label: 'Konvertim', lek: aggD('conv_lek'), eur: aggD('conv_eur'), usd: aggD('conv_usd'), gbp: aggD('conv_gbp'), chf: aggD('conv_chf') },
-            ]} cols={['lek','eur','usd','gbp','chf']} />
             <AggSection title="Konvertim Hurda" rows={[
               { label: 'Hurda', lek: aggD('hurda_lek'), eur: aggD('hurda_eur'), usd: aggD('hurda_usd'), gbp: aggD('hurda_gbp'), chf: aggD('hurda_chf'), gram: aggD('hurda_gram') },
             ]} cols={['lek','eur','usd','gbp','chf','gram']} />

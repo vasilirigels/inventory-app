@@ -222,7 +222,6 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
             <Sector title="Tërheqje DIANA" cols={['lek','eur','usd','gbp','chf','hurda']} row={{ lek: t.diana_lek, eur: t.diana_eur, usd: t.diana_usd, gbp: t.diana_gbp, chf: t.diana_chf, hurda: t.diana_hurda }} />
             <Sector title="Banka — Tërheqje"   cols={['lek','eur','usd']} row={{ lek: t.bank_withdraw_lek, eur: t.bank_withdraw_eur, usd: t.bank_withdraw_usd }} />
             <Sector title="Banka — Depozitim"  cols={['lek','eur','usd']} row={{ lek: t.bank_deposit_lek,  eur: t.bank_deposit_eur,  usd: t.bank_deposit_usd }} />
-            <Sector title="Konvertim Valute" cols={['lek','eur','usd','gbp','chf']}        row={{ lek: t.conv_lek, eur: t.conv_eur, usd: t.conv_usd, gbp: t.conv_gbp, chf: t.conv_chf }} />
             <Sector title="Konvertim Hurda"  cols={['lek','eur','usd','gbp','chf','gram']} row={{ lek: t.hurda_lek, eur: t.hurda_eur, usd: t.hurda_usd, gbp: t.hurda_gbp, chf: t.hurda_chf, gram: t.hurda_gram }} />
             <Sector title="Shlyerje Borxhi te Produkteve" cols={['eur','usd','gbp','chf','has']} row={{ eur: t.shlyerje_eur, usd: t.shlyerje_usd, gbp: t.shlyerje_gbp, chf: t.shlyerje_chf, has: t.shlyerje_has }} />
             <Sector title="Borxhe / Kthim Borxhi"

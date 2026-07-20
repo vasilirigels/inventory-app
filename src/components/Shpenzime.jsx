@@ -1,6 +1,78 @@
 import { useState, useEffect, useCallback } from 'react'
+import DateRangeFilter from './DateRangeFilter.jsx'
+
+// Zgjedhës i zërit të shpenzimit me krijim inline: kur user zgjedh "+ Krijo zër
+// të ri..." nga dropdown-i, kontrolli kthehet në një input të vogël që POST-on
+// direkt te /api/expense-categories dhe pastaj zgjedh të riun automatikisht.
+function ExpenseCategoryPicker({ value, onChange, categories, onCreated, disabled, className = 'input-field' }) {
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const onSelectChange = (e) => {
+    const v = e.target.value
+    if (v === '__new__') { setCreating(true); setName('') }
+    else onChange(v)
+  }
+
+  const save = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/expense-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, description: '', active: 1 }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      const created = await res.json()
+      if (created?.id) await onCreated?.(created.id)
+      setCreating(false)
+      setName('')
+    } finally { setSaving(false) }
+  }
+
+  if (creating) {
+    return (
+      <div className="flex gap-1">
+        <input
+          type="text" autoFocus value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); save() }
+            else if (e.key === 'Escape') { e.preventDefault(); setCreating(false); setName('') }
+          }}
+          className={`${className} flex-1`}
+          placeholder="Emri i zërit të ri (p.sh. Qera)..."
+        />
+        <button type="button" onClick={save} disabled={saving || !name.trim()}
+          className="px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-semibold disabled:opacity-50"
+          title="Ruaj zërin">✓</button>
+        <button type="button" onClick={() => { setCreating(false); setName('') }}
+          className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm"
+          title="Anulo">✕</button>
+      </div>
+    )
+  }
+
+  return (
+    <select value={value || ''} onChange={onSelectChange} disabled={disabled} className={className}>
+      <option value="">— zgjidh —</option>
+      {categories.map(c => (
+        <option key={c.id} value={c.id}>{c.name}</option>
+      ))}
+      <option value="__new__">➕ Krijo zër të ri...</option>
+    </select>
+  )
+}
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
+
+function fmtDate(d) {
+  if (!d) return ''
+  return d.split('-').reverse().join('.')
+}
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -24,13 +96,20 @@ export default function Shpenzime({ date, onNavigate }) {
   const [rateSource, setRateSource] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(null)
+  const [dateRange, setDateRange] = useState({ from: '', to: '' })
+
+  const rangeActive = !!(dateRange.from || dateRange.to)
+  const showDateCol = rangeActive && dateRange.from !== dateRange.to
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      const entriesUrl = rangeActive
+        ? `/api/reports/expenses?from=${dateRange.from || '2000-01-01'}&to=${dateRange.to || date}`
+        : `/api/expense-entries/${date}`
       const [cats, entries, ratesRes] = await Promise.all([
         fetch('/api/expense-categories').then(r => r.json()),
-        fetch(`/api/expense-entries/${date}`).then(r => r.json()),
+        fetch(entriesUrl).then(r => r.json()),
         fetch(`/api/exchange-rates/${date}`).then(r => r.json()).catch(() => ({})),
       ])
       setCategories(Array.isArray(cats) ? cats : [])
@@ -52,7 +131,7 @@ export default function Shpenzime({ date, onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }, [date])
+  }, [date, rangeActive, dateRange.from, dateRange.to])
 
   useEffect(() => { load() }, [load])
 
@@ -85,6 +164,7 @@ export default function Shpenzime({ date, onNavigate }) {
   const startEdit = (row) => {
     setEditingId(row.id)
     setEditDraft({
+      date: row.date || date,
       category_id: row.category_id || '',
       description: row.description || '',
       currency: row.currency || 'LEK',
@@ -108,7 +188,7 @@ export default function Shpenzime({ date, onNavigate }) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        date,
+        date: editDraft.date || date,
         category_id: parseInt(editDraft.category_id) || null,
         description: editDraft.description || '',
         currency: cur,
@@ -143,7 +223,8 @@ export default function Shpenzime({ date, onNavigate }) {
 
   const totalsList = Object.entries(totals.by_currency).filter(([, v]) => Math.abs(v) > 0.005)
 
-  if (loading) return <div className="card p-8 text-center text-slate-400">Duke ngarkuar...</div>
+  // ── Raport periodik
+  if (loading && rows.length === 0) return <div className="card p-8 text-center text-slate-400">Duke ngarkuar...</div>
 
   return (
     <div className="space-y-4">
@@ -168,28 +249,8 @@ export default function Shpenzime({ date, onNavigate }) {
               {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <button onClick={() => onNavigate?.('zerat-shpenzimeve')} className="btn-secondary text-xs">
-            ⚙️ Menaxho Zërat
-          </button>
         </div>
       </div>
-
-      {categories.length === 0 && (
-        <div className="card bg-amber-50 border-amber-200">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl">⚠️</span>
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-800">Nuk ka zëra shpenzimi të regjistruar</p>
-              <p className="text-xs text-amber-700 mt-1">
-                Krijo së pari zërat (Energji, Qera, Internet, etj.) që të mund t'i përdorësh këtu.
-              </p>
-            </div>
-            <button onClick={() => onNavigate?.('zerat-shpenzimeve')} className="btn-primary text-xs">
-              Krijo Zëra
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* New entry row */}
       <div className="card">
@@ -197,17 +258,15 @@ export default function Shpenzime({ date, onNavigate }) {
         <div className="grid grid-cols-2 md:grid-cols-7 gap-2 items-end">
           <div className="md:col-span-2">
             <label className="form-label">Zëri</label>
-            <select
+            <ExpenseCategoryPicker
               value={draft.category_id}
-              onChange={e => setDraft(d => ({ ...d, category_id: e.target.value }))}
-              className="input-field"
-              disabled={categories.length === 0}
-            >
-              <option value="">— zgjidh —</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              onChange={v => setDraft(d => ({ ...d, category_id: v }))}
+              categories={categories}
+              onCreated={async (newId) => {
+                await load()
+                setDraft(d => ({ ...d, category_id: String(newId) }))
+              }}
+            />
           </div>
           <div className="md:col-span-2">
             <label className="form-label">Përshkrimi</label>
@@ -276,13 +335,28 @@ export default function Shpenzime({ date, onNavigate }) {
         </div>
       </div>
 
+      {/* Filtër Periudhe */}
+      <DateRangeFilter
+        from={dateRange.from}
+        to={dateRange.to}
+        onChange={setDateRange}
+        loading={loading}
+        emptyForAll
+        compact
+        hint={rangeActive
+          ? 'Shpenzimet për periudhën e zgjedhur'
+          : `Vetëm data ${date} · zgjidh periudhë për historik më të gjerë`}
+      />
+
       {/* Existing entries */}
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-slate-800">Shpenzimet e Regjistruara</h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.
+              {rangeActive
+                ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
+                : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
             </p>
           </div>
           <span className="text-xs text-slate-500">
@@ -293,6 +367,9 @@ export default function Shpenzime({ date, onNavigate }) {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
+                {showDateCol && (
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase w-24">Data</th>
+                )}
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase w-48">Zëri</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Përshkrimi</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-24">Monedha</th>
@@ -305,9 +382,11 @@ export default function Shpenzime({ date, onNavigate }) {
             <tbody>
               {visibleRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-6 text-center text-slate-400 text-sm italic">
+                  <td colSpan={showDateCol ? 8 : 7} className="p-6 text-center text-slate-400 text-sm italic">
                     {rows.length === 0
-                      ? 'Asnjë shpenzim për këtë datë. Shto rreshtin e parë më lart.'
+                      ? (rangeActive
+                        ? 'Asnjë shpenzim në periudhën e zgjedhur.'
+                        : 'Asnjë shpenzim për këtë datë. Shto rreshtin e parë më lart.')
                       : `Asnjë shpenzim në ${filterCur}. Ndrysho filtrin për të parë të tjerët.`}
                   </td>
                 </tr>
@@ -319,20 +398,26 @@ export default function Shpenzime({ date, onNavigate }) {
                   const eTotalLek = n(editDraft.amount) * (eIsLek ? 1 : n(editDraft.exchange_rate))
                   return (
                     <tr key={r.id} className="border-b border-slate-100 bg-amber-50/40">
+                      {showDateCol && (
+                        <td className="px-3 py-2 text-slate-600 text-xs font-mono">
+                          {fmtDate(editDraft.date || r.date)}
+                        </td>
+                      )}
                       <td className="px-2 py-1">
-                        <select
-                          value={editDraft.category_id || ''}
-                          onChange={e => setEditDraft(d => ({ ...d, category_id: e.target.value }))}
+                        <ExpenseCategoryPicker
+                          value={editDraft.category_id}
+                          onChange={v => setEditDraft(d => ({ ...d, category_id: v }))}
+                          categories={
+                            editDraft.category_id && !categories.some(c => c.id === parseInt(editDraft.category_id))
+                              ? [...categories, { id: parseInt(editDraft.category_id), name: r.category_name || '(zër i fshirë)' }]
+                              : categories
+                          }
+                          onCreated={async (newId) => {
+                            await load()
+                            setEditDraft(d => ({ ...d, category_id: String(newId) }))
+                          }}
                           className="input-field-sm"
-                        >
-                          <option value="">— pa zër —</option>
-                          {categories.map(c => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                          {editDraft.category_id && !categories.some(c => c.id === parseInt(editDraft.category_id)) && (
-                            <option value={editDraft.category_id}>{r.category_name || '(zër i fshirë)'}</option>
-                          )}
-                        </select>
+                        />
                       </td>
                       <td className="px-2 py-1">
                         <input
@@ -393,6 +478,9 @@ export default function Shpenzime({ date, onNavigate }) {
                 const totalLek = n(r.amount) * n(r.exchange_rate || 1)
                 return (
                   <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    {showDateCol && (
+                      <td className="px-3 py-2 text-slate-600 text-xs font-mono">{fmtDate(r.date)}</td>
+                    )}
                     <td className="px-3 py-2 text-slate-800">
                       {categoryName(r.category_id) || r.category_name || <span className="italic text-slate-400">— pa zër —</span>}
                     </td>
@@ -429,7 +517,7 @@ export default function Shpenzime({ date, onNavigate }) {
             </tbody>
             <tfoot className="bg-blue-50 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={3} className="px-3 py-2 text-right text-slate-700 uppercase">TOTALI:</td>
+                <td colSpan={showDateCol ? 4 : 3} className="px-3 py-2 text-right text-slate-700 uppercase">TOTALI:</td>
                 <td colSpan={2} className="px-3 py-2 text-right text-slate-600 text-[11px]">
                   {totalsList.length === 0
                     ? '—'

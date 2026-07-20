@@ -444,6 +444,23 @@ const SCHEMA = [
     subtotal REAL DEFAULT 0,
     FOREIGN KEY (magazina_id) REFERENCES magazina_dalje(id) ON DELETE CASCADE
   )`,
+
+  // Lëvizje Banke — regjistër i transfertave: kesh → bankë, ose bankë → kasafortë.
+  // direction 'to_bank'  = depozito kesh në bankë (+ bank balance)
+  // direction 'to_safe'  = tërheqje nga bankë për në kasafortë (− bank balance, + safe balance)
+  `CREATE TABLE IF NOT EXISTS bank_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('to_bank', 'to_safe')),
+    amount_lek REAL DEFAULT 0,
+    amount_eur REAL DEFAULT 0,
+    amount_usd REAL DEFAULT 0,
+    amount_gbp REAL DEFAULT 0,
+    amount_chf REAL DEFAULT 0,
+    person TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
 ];
 
 // Additive ALTERs — each may fail if column already exists, that's fine.
@@ -491,6 +508,52 @@ const MIGRATIONS = [
   // PUT handler compares the client's updated_at to the row's current value.
   "ALTER TABLE products ADD COLUMN updated_at TEXT DEFAULT ''",
 
+  // Promocion — flag i thjeshtë që produkti është aktual në promocion.
+  "ALTER TABLE products ADD COLUMN is_promotion INTEGER DEFAULT 0",
+  // % ulje e promocionit; mban çmimin origjinal (sell_price) të paprekur.
+  // 0 kur produkti nuk është në promocion.
+  "ALTER TABLE products ADD COLUMN promo_discount_pct REAL DEFAULT 0",
+
+  // Gramatura — për artikuj bizhuterie; prefill-ohet në faturat e shitjes.
+  "ALTER TABLE products ADD COLUMN gram REAL DEFAULT 0",
+  "ALTER TABLE invoice_items ADD COLUMN gram REAL DEFAULT 0",
+
+  // Nr Serie + Çmim Blerje pa TVSH — sipas kolonave të Excel-it të inventarit.
+  "ALTER TABLE products ADD COLUMN serial_no TEXT DEFAULT ''",
+  "ALTER TABLE products ADD COLUMN purchase_price_no_vat REAL DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_products_serial_no ON products(serial_no)",
+
+  // Snapshot promocioni te rreshti i faturës — kur produkti pikas si "në promocion",
+  // ruajmë flag + % që kur t'i shohim faturat e vjetra të dallohen menjëherë.
+  "ALTER TABLE invoice_items ADD COLUMN on_promotion INTEGER DEFAULT 0",
+  "ALTER TABLE invoice_items ADD COLUMN promo_discount_pct REAL DEFAULT 0",
+
+  // Pagesa mikse me monedha të ndryshme — çdo split ka metodën (cash|bank),
+  // monedhën dhe kursin drejt LEK. Totali i paguar në monedhën e faturës
+  // rillogaritet duke konvertuar çdo split → LEK → monedhën e faturës.
+  `CREATE TABLE IF NOT EXISTS invoice_payment_splits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL,
+    method TEXT NOT NULL CHECK(method IN ('cash', 'bank')),
+    currency TEXT NOT NULL DEFAULT 'LEK',
+    amount REAL NOT NULL DEFAULT 0,
+    exchange_rate REAL NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_invoice_payment_splits_invoice ON invoice_payment_splits(invoice_id)",
+
+  // Shitje online — fatura që vijnë nga IG/WhatsApp/Website etj., me flow të
+  // ndarë statusi (E re → Në përgatitje → Dërguar → Dorëzuar / Anuluar).
+  // Fushat janë additive te tabela invoices — një faturë e zakonshme thjesht
+  // ka is_online=0 dhe order_status=''.
+  "ALTER TABLE invoices ADD COLUMN is_online INTEGER DEFAULT 0",
+  "ALTER TABLE invoices ADD COLUMN channel TEXT DEFAULT ''",
+  "ALTER TABLE invoices ADD COLUMN shipping_address TEXT DEFAULT ''",
+  "ALTER TABLE invoices ADD COLUMN order_status TEXT DEFAULT ''",
+  "ALTER TABLE invoices ADD COLUMN tracking_no TEXT DEFAULT ''",
+  "CREATE INDEX IF NOT EXISTS idx_invoices_online_status ON invoices(is_online, order_status)",
+
   // Uniqueness on generated document numbers. Prevents the classic race where
   // two PCs compute the same "next number" between SELECT and INSERT.
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_invoice_no ON invoices(invoice_no)",
@@ -501,6 +564,66 @@ const MIGRATIONS = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_flete_dalje_ref_no ON flete_dalje(ref_no)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_magazina_hyrje_ref_no ON magazina_hyrje(ref_no)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_magazina_dalje_ref_no ON magazina_dalje(ref_no)",
+
+  // Lëvizje Banke — tabelë e re, migrim additive për DB-të ekzistuese.
+  `CREATE TABLE IF NOT EXISTS bank_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('to_bank', 'to_safe')),
+    amount_lek REAL DEFAULT 0,
+    amount_eur REAL DEFAULT 0,
+    amount_usd REAL DEFAULT 0,
+    amount_gbp REAL DEFAULT 0,
+    amount_chf REAL DEFAULT 0,
+    person TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_bank_movements_date ON bank_movements(date)",
+
+  // Users për autentifikim + kontrollin e rolit.
+  `CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'sales')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  // Komentet / chat i brendshëm midis përdoruesve. `user_id` mund të bëhet NULL
+  // nëse fshihet përdoruesi, por username/role ruhen si snapshot që historiku
+  // të mos humbet identitetin.
+  `CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at)",
+
+  // Riparimet — regjistër i punimeve që klientët sjellin për riparim.
+  // `status` ecën: 'pranuar' → 'ne_pune' → 'gati' → 'dorezuar'.
+  `CREATE TABLE IF NOT EXISTS repairs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_received TEXT NOT NULL,
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT DEFAULT '',
+    item_description TEXT NOT NULL,
+    issue_description TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    price REAL DEFAULT 0,
+    currency TEXT DEFAULT 'LEK',
+    status TEXT DEFAULT 'pranuar' CHECK(status IN ('pranuar','ne_pune','gati','dorezuar')),
+    date_delivered TEXT DEFAULT '',
+    paid INTEGER DEFAULT 0,
+    created_by TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_repairs_status ON repairs(status)",
+  "CREATE INDEX IF NOT EXISTS idx_repairs_date ON repairs(date_received)",
 ];
 
 async function initDB() {

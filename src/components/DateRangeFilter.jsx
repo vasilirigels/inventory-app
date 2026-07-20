@@ -8,6 +8,9 @@
 //   emptyForAll     — nëse true, "Të gjitha" dërgon strings bosh (default: false → '2000-01-01' → sot)
 //   compact         — variant më i vogël pa hapësirë vizuale
 //   hint            — tekst i vogël nën titullin, p.sh. "Ndikon: grafiku, faturat"
+//   minFrom         — kufizim minimal i "Nga" (YYYY-MM-DD); përdoret p.sh. për shitësit
+
+import { getUser } from '../lib/auth.js'
 
 // Data lokale (jo UTC) — që preseti "Sot" të mos anashkalojë ditën në Shqipëri (UTC+1/+2).
 function toISOLocal(d) {
@@ -17,7 +20,11 @@ function toISOLocal(d) {
   return `${y}-${m}-${dd}`
 }
 
-export default function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, compact = false, hint }) {
+export default function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, compact = false, hint, minFrom }) {
+  // Shitësit s'kanë akses te periudha më e gjatë se 30 ditë.
+  const isSales = getUser()?.role === 'sales'
+  const longPresetsDisabled = isSales
+  const disabledTitle = isSales ? 'I çaktivizuar për shitësin (kufi 30 ditë)' : undefined
   const setRange = (preset) => {
     const t = new Date()
     if (preset === 'today')      return onChange({ from: toISOLocal(t), to: toISOLocal(t) })
@@ -58,13 +65,13 @@ export default function DateRangeFilter({ from, to, onChange, loading, emptyForA
       </div>
       <div>
         <label className="form-label">Nga</label>
-        <input type="date" value={from || ''} max={to || undefined}
+        <input type="date" value={from || ''} max={to || undefined} min={minFrom || undefined}
           onChange={e => onChange({ from: e.target.value, to })}
           className="input-field" />
       </div>
       <div>
         <label className="form-label">Deri</label>
-        <input type="date" value={to || ''} min={from || undefined}
+        <input type="date" value={to || ''} min={from || minFrom || undefined}
           onChange={e => onChange({ from, to: e.target.value })}
           className="input-field" />
       </div>
@@ -72,10 +79,10 @@ export default function DateRangeFilter({ from, to, onChange, loading, emptyForA
         <button type="button" onClick={() => setRange('today')}     className="btn-secondary text-xs">Sot</button>
         <button type="button" onClick={() => setRange('7d')}        className="btn-secondary text-xs">7 ditë</button>
         <button type="button" onClick={() => setRange('30d')}       className="btn-secondary text-xs">30 ditë</button>
-        <button type="button" onClick={() => setRange('month')}     className="btn-secondary text-xs">Ky muaj</button>
-        <button type="button" onClick={() => setRange('prevMonth')} className="btn-secondary text-xs">Muaji kaluar</button>
-        <button type="button" onClick={() => setRange('year')}      className="btn-secondary text-xs">Ky vit</button>
-        <button type="button" onClick={() => setRange('all')}       className="btn-secondary text-xs">Të gjitha</button>
+        <button type="button" onClick={() => setRange('month')}     disabled={longPresetsDisabled} title={disabledTitle} className="btn-secondary text-xs disabled:opacity-40 disabled:cursor-not-allowed">Ky muaj</button>
+        <button type="button" onClick={() => setRange('prevMonth')} disabled={longPresetsDisabled} title={disabledTitle} className="btn-secondary text-xs disabled:opacity-40 disabled:cursor-not-allowed">Muaji kaluar</button>
+        <button type="button" onClick={() => setRange('year')}      disabled={longPresetsDisabled} title={disabledTitle} className="btn-secondary text-xs disabled:opacity-40 disabled:cursor-not-allowed">Ky vit</button>
+        <button type="button" onClick={() => setRange('all')}       disabled={longPresetsDisabled} title={disabledTitle} className="btn-secondary text-xs disabled:opacity-40 disabled:cursor-not-allowed">Të gjitha</button>
       </div>
       {loading && (
         <span className="text-[11px] text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200">

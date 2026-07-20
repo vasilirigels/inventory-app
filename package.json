@@ -18,10 +18,13 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "electron-updater": "^6.8.9",
     "express": "^5.2.1",
+    "jsbarcode": "^3.12.3",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "recharts": "^3.8.1",
     "sql.js": "^1.14.1",

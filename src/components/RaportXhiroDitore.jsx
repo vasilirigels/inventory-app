@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
+import { getUser } from '../lib/auth.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
@@ -27,9 +28,20 @@ function getMonthStart() {
   const d = new Date(); d.setDate(1)
   return d.toISOString().split('T')[0]
 }
+function getMinusDays(n) {
+  const d = new Date(); d.setDate(d.getDate() - n)
+  return d.toISOString().split('T')[0]
+}
+
+const SALES_MAX_DAYS = 30
+const isSalesUser = () => getUser()?.role === 'sales'
 
 export default function RaportXhiroDitore({ onNavigate }) {
-  const [from, setFrom]   = useState(getMonthStart())
+  const isSales = isSalesUser()
+  const minFrom = isSales ? getMinusDays(SALES_MAX_DAYS - 1) : null
+  const clampFrom = (v) => (minFrom && v && v < minFrom ? minFrom : v)
+
+  const [from, setFrom]   = useState(clampFrom(getMonthStart()))
   const [to, setTo]       = useState(getToday())
   const [pm, setPm]       = useState('')
   const [cur, setCur]     = useState('')
@@ -63,7 +75,8 @@ export default function RaportXhiroDitore({ onNavigate }) {
     // eslint-disable-next-line
   }, [from, to, pm, cur])
 
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
+    const XLSX = await loadXLSX()
     const out = rows.map(r => ({
       Data: r.date,
       'Nr. Faturash': r.count,
@@ -124,9 +137,12 @@ export default function RaportXhiroDitore({ onNavigate }) {
       <DateRangeFilter
         from={from}
         to={to}
-        onChange={({ from: f, to: t }) => { setFrom(f); setTo(t) }}
+        minFrom={minFrom || undefined}
+        onChange={({ from: f, to: t }) => { setFrom(clampFrom(f)); setTo(t) }}
         loading={loading}
-        hint="Ndikon: rreshtat, totalet dhe eksporti"
+        hint={isSales
+          ? `Shitësit mund të shohin vetëm 30 ditët e fundit (nga ${fmtDate(minFrom)}).`
+          : 'Ndikon: rreshtat, totalet dhe eksporti'}
       />
 
       <div className="card">
@@ -150,7 +166,7 @@ export default function RaportXhiroDitore({ onNavigate }) {
               🔄 Rifresko
             </button>
             <button
-              onClick={() => { setPm(''); setCur(''); setFrom(getMonthStart()); setTo(getToday()) }}
+              onClick={() => { setPm(''); setCur(''); setFrom(clampFrom(getMonthStart())); setTo(getToday()) }}
               className="btn-secondary"
               title="Pastro filtrat"
             >✕</button>

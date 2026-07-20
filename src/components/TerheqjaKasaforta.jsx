@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -27,15 +28,14 @@ export default function TerheqjaKasaforta({ date }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [dateRange, setDateRange] = useState({ from: '', to: '' })
 
   const loadHistory = async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (fromDate) params.set('from', fromDate)
-      if (toDate)   params.set('to', toDate)
+      if (dateRange.from) params.set('from', dateRange.from)
+      if (dateRange.to)   params.set('to', dateRange.to)
       const qs = params.toString()
       const rows = await fetch(`/api/safe-withdrawals${qs ? '?' + qs : ''}`).then(r => r.json())
       setHistory(Array.isArray(rows) ? rows : [])
@@ -43,7 +43,7 @@ export default function TerheqjaKasaforta({ date }) {
     setLoading(false)
   }
 
-  useEffect(() => { loadHistory() /* eslint-disable-next-line */ }, [fromDate, toDate])
+  useEffect(() => { loadHistory() /* eslint-disable-next-line */ }, [dateRange.from, dateRange.to])
 
   const submit = async e => {
     e.preventDefault()
@@ -151,49 +151,26 @@ export default function TerheqjaKasaforta({ date }) {
         </form>
       </div>
 
+      <DateRangeFilter
+        from={dateRange.from}
+        to={dateRange.to}
+        onChange={setDateRange}
+        loading={loading}
+        emptyForAll
+        compact
+        hint="Filtron historikun e tërheqjeve"
+      />
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-0 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h4 className="text-sm font-bold text-slate-800">Historik i Tërheqjeve</h4>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {history.length} regjistrime · Totale:
-              {CURS.filter(c => totals[c] > 0).map(c => (
-                <span key={c}> · <strong className="text-slate-700">{fmt(totals[c])} {c}</strong></span>
-              ))}
-              {CURS.every(c => totals[c] === 0) && <span> —</span>}
-            </p>
-          </div>
-          <div className="flex items-end gap-2 flex-wrap">
-            <div>
-              <label className="form-label text-[10px]">Nga data</label>
-              <input
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={e => setFromDate(e.target.value)}
-                className="input-field text-xs py-1.5"
-              />
-            </div>
-            <div>
-              <label className="form-label text-[10px]">Deri më datë</label>
-              <input
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={e => setToDate(e.target.value)}
-                className="input-field text-xs py-1.5"
-              />
-            </div>
-            {(fromDate || toDate) && (
-              <button
-                type="button"
-                onClick={() => { setFromDate(''); setToDate('') }}
-                className="btn-secondary text-xs py-1.5"
-              >
-                Pastro
-              </button>
-            )}
-          </div>
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h4 className="text-sm font-bold text-slate-800">Historik i Tërheqjeve</h4>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {history.length} regjistrime · Totale:
+            {CURS.filter(c => totals[c] > 0).map(c => (
+              <span key={c}> · <strong className="text-slate-700">{fmt(totals[c])} {c}</strong></span>
+            ))}
+            {CURS.every(c => totals[c] === 0) && <span> —</span>}
+          </p>
         </div>
 
         {loading ? (

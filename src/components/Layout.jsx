@@ -1,4 +1,33 @@
 import { useState } from 'react'
+import { clearSession } from '../lib/auth.js'
+import { useUnreadCommentsCount } from '../lib/unreadComments.js'
+
+// Faqet që role='sales' mund të shohë (veprimet ditore + raportet ditore).
+const SALES_ALLOWED_PAGES = new Set([
+  'dashboard',
+  // Shitje
+  'fatura-shitje',        // krijim fature shitjeje
+  'shitje-online',        // shitje brenda stafit
+  'kthime-online',        // kthime (diamante/flori)
+  // Produkte
+  'produkte-promocion',   // Promocionet (view only)
+  // Arka
+  'arka-ditore',          // Arka
+  'arka-kasaforta',       // Kasaforta
+  'arka-shpenzime',       // Shpenzime ditore (input)
+  'arka-konv-hurda',      // Konvertim Hurda
+  'arka-terheqje',        // Tërheqje nga Kasaforta
+  'arka-levizje-banke',   // Lëvizje Banke (depozitim/tërheqje)
+  // Raporte ditore
+  'raport-xhiro-ditore',  // Xhiro ditore
+  'raport-shpenzime',     // Shpenzime ditore (raport)
+  // Borxhet
+  'detyrime',             // Borxhi i klientit
+  // Komunikimi mes userave
+  'komentet',
+  // Riparimet — regjistrimi i punimeve që sjellin klientët
+  'riparimet',
+])
 
 function prevDay(date) {
   const d = new Date(date + 'T12:00:00')
@@ -19,12 +48,14 @@ const NAV_GROUPS = [
   {
     label: 'KRYESORE',
     items: [
-      { id: 'dashboard', label: 'Dashboard',    icon: '🏠' },
+      { id: 'dashboard', label: 'Shitjet',    icon: '🏠' },
       { id: 'products',  label: 'Produktet (Inventar)', icon: '📦' },
+      { id: 'produkte-promocion', label: 'Produkte Promocion', icon: '🏷️' },
       { id: 'klienti',   label: 'Klienti',      icon: '👤' },
       { id: 'furnitor',  label: 'Furnitor',     icon: '🏭' },
-      { id: 'zerat-shpenzimeve', label: 'Zërat e Shpenzimeve', icon: '🧾' },
       { id: 'customers', label: 'Klientët (Borxhe)', icon: '👥' },
+      { id: 'komentet',  label: 'Komentet',          icon: '💬' },
+      { id: 'riparimet', label: 'Riparimet',         icon: '🛠️' },
     ],
   },
   {
@@ -34,7 +65,7 @@ const NAV_GROUPS = [
         id: 'shitje', label: 'Shitje', icon: '⬆️',
         children: [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
-          { id: 'shitje-online',         label: 'Shitje Online & Stafi' },
+          { id: 'shitje-online',         label: '🛒 Shitje Online' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },
           { id: 'kthime-online',         label: 'Kthime Online & Stafi' },
           { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
@@ -63,9 +94,9 @@ const NAV_GROUPS = [
           { id: 'arka-ditore',       label: 'Arka Ditore' },
           { id: 'arka-kasaforta',    label: 'Kasaforta' },
           { id: 'arka-shpenzime',    label: 'Shpenzime' },
-          { id: 'arka-konv-valute',  label: 'Konvertim Valute' },
           { id: 'arka-konv-hurda',   label: 'Konvertim Hurda' },
           { id: 'arka-terheqje',     label: 'Tërheqje nga Kasaforta' },
+          { id: 'arka-levizje-banke', label: 'Lëvizje Banke' },
         ],
       },
     ],
@@ -85,12 +116,18 @@ const NAV_GROUPS = [
   },
 ]
 
+// Faqet që kanë filter të datës brenda tyre — heqim date nav-in nga header-i
+// që të mos ketë dy filtra.
+const PAGES_WITH_OWN_DATE_FILTER = new Set([
+  'arka-kasaforta',
+])
+
 const PAGE_TITLES = {
   dashboard:    'Dashboard',
   products:     'Produktet (Inventar)',
+  'produkte-promocion': 'Produkte Promocion',
   klienti:      'Klienti (Regjistri)',
   furnitor:     'Furnitor (Regjistri)',
-  'zerat-shpenzimeve': 'Zërat e Shpenzimeve (Regjistri)',
   customers:    'Klientët (Borxhe)',
   detyrime:     'Detyrime Klienti',
   'analize-veprime': 'ANALIZE VEPRIME KLIENT',
@@ -102,6 +139,8 @@ const PAGE_TITLES = {
   'raport-shpenzime':      'Raport Shpenzime Ditore',
   permbledhese: 'Përmbledhëse',
   marketing:    'Shpenzime Marketingu',
+  komentet:     'Komentet',
+  riparimet:    'Riparimet',
   shitje:       'Shitje',
   blerje:       'Blerje',
   magazina:     'Magazina',
@@ -131,8 +170,23 @@ function findParentId(childId) {
 
 export default function Layout({
   children, page, currentDate,
-  onNavigate, onDateChange,
+  onNavigate, onDateChange, user,
 }) {
+  const isSales = user?.role === 'sales'
+  const NAV = isSales
+    ? NAV_GROUPS
+        .map(g => ({
+          ...g,
+          items: g.items
+            .map(it => it.children
+              ? { ...it, children: it.children.filter(c => SALES_ALLOWED_PAGES.has(c.id)) }
+              : it)
+            .filter(it => it.children
+              ? it.children.length > 0
+              : SALES_ALLOWED_PAGES.has(it.id)),
+        }))
+        .filter(g => g.items.length > 0)
+    : NAV_GROUPS
   const now = new Date()
   const [y, m, d] = currentDate.split('-').map(Number)
   const dateLabel = `${d} ${ALBANIAN_MONTHS[m]} ${y}`
@@ -143,6 +197,7 @@ export default function Layout({
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const headerTitle = PAGE_TITLES[page] ?? getChildTitle(page) ?? 'Faqe'
+  const unreadComments = useUnreadCommentsCount()
 
   // Në mobile, kliku në një zë navigacioni mbyll sidebar-in.
   const handleNavigate = (id) => {
@@ -189,7 +244,7 @@ export default function Layout({
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
-          {NAV_GROUPS.map(group => (
+          {NAV.map(group => (
             <div key={group.label}>
               <p className="section-title px-3 pb-1 text-slate-600 text-[10px]">{group.label}</p>
               <div className="space-y-0.5">
@@ -224,7 +279,12 @@ export default function Layout({
                         >
                           <span className="text-base w-5 text-center">{item.icon}</span>
                           <span className="flex-1 text-left">{item.label}</span>
-                          {page === item.id && (
+                          {item.id === 'komentet' && unreadComments > 0 && (
+                            <span className="ml-auto min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold shadow-sm animate-pulse">
+                              {unreadComments > 99 ? '99+' : unreadComments}
+                            </span>
+                          )}
+                          {item.id !== 'komentet' && page === item.id && (
                             <span className="ml-auto w-1.5 h-1.5 bg-white/70 rounded-full" />
                           )}
                         </a>
@@ -255,8 +315,26 @@ export default function Layout({
         </nav>
 
         {/* Sidebar footer */}
-        <div className="px-5 py-4 border-t border-slate-700/60">
-          <div className="flex items-center gap-2 mb-1">
+        <div className="px-5 py-4 border-t border-slate-700/60 space-y-2">
+          {user && (
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-300 font-semibold truncate">
+                  {user.role === 'admin' ? '🔐' : '🧾'} {user.username}
+                </p>
+                <p className="text-[10px] text-slate-500 uppercase">
+                  {user.role === 'admin' ? 'Admin' : 'Shitës'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { clearSession(); window.location.reload() }}
+                className="text-[10px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded-md font-medium"
+                title="Dil"
+              >Dil</button>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0" />
             <span className="text-xs text-slate-500">Online</span>
           </div>
@@ -286,7 +364,7 @@ export default function Layout({
             <h2 className="text-sm md:text-base font-bold text-slate-800 truncate">{headerTitle}</h2>
 
             {/* Daily date nav — show on any date-driven page */}
-            {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && (
+            {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && !PAGES_WITH_OWN_DATE_FILTER.has(page) && (
               <div className="hidden lg:flex items-center gap-1.5">
                 <button
                   onClick={() => onDateChange(prevDay(currentDate))}
@@ -314,6 +392,24 @@ export default function Layout({
 
           {/* Right side */}
           <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => handleNavigate('komentet')}
+              className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
+                unreadComments > 0
+                  ? 'bg-red-50 hover:bg-red-100 text-red-600'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+              title={unreadComments > 0 ? `${unreadComments} komente të palexuara` : 'Komentet'}
+              aria-label="Komentet"
+            >
+              <span className="text-lg leading-none">💬</span>
+              {unreadComments > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold shadow-md animate-pulse ring-2 ring-white">
+                  {unreadComments > 99 ? '99+' : unreadComments}
+                </span>
+              )}
+            </button>
             <a
               href="/api/backup"
               download
@@ -332,7 +428,7 @@ export default function Layout({
         </header>
 
         {/* Date nav për mobile / tablet — nën header */}
-        {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && (
+        {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && !PAGES_WITH_OWN_DATE_FILTER.has(page) && (
           <div className="lg:hidden bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1.5 flex-wrap flex-shrink-0">
             <button
               onClick={() => onDateChange(prevDay(currentDate))}

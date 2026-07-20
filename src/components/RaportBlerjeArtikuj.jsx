@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
@@ -231,7 +231,8 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     // eslint-disable-next-line
   }, [filter])
 
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
+    const XLSX = await loadXLSX()
     const out = rows.map(r => ({
       Barkodi: r.barcode || '',
       SKU: r.sku || '',

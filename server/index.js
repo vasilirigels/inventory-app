@@ -4,12 +4,48 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import {
   initDB, queryAll, queryOne, run, exportDB,
   isUniqueViolation, retryOnUniqueNo,
 } from './db.js';
+
+// ── Auth: JWT + helper middleware ─────────────────────────────────────────
+const JWT_SECRET = process.env.JWT_SECRET
+  || 'gold-shop-dev-secret-change-in-prod-2026';
+const TOKEN_TTL = '30d';
+
+function signToken(user) {
+  return jwt.sign(
+    { id: user.id, username: user.username, role: user.role },
+    JWT_SECRET, { expiresIn: TOKEN_TTL },
+  );
+}
+
+// Middleware: verifikon JWT nga headeri Authorization: Bearer <token>
+function requireAuth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  if (!m) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const payload = jwt.verify(m[1], JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch (_) {
+    return res.status(401).json({ error: 'invalid_token' });
+  }
+}
+
+// Middleware: kërkon rol admin
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  next();
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,6 +106,7 @@ function tableFromPath(p) {
     'expense-entries': 'expense_entries',
     'safe-withdrawals': 'safe_withdrawals',
     'safe-conversions': 'safe_conversions',
+    'bank-movements': 'bank_movements',
     'kasaforta': 'daily_records',
     'flete-hyrje': 'flete_hyrje',
     'flete-dalje': 'flete_dalje',
@@ -77,6 +114,8 @@ function tableFromPath(p) {
     'magazina-dalje': 'magazina_dalje',
     'invoice-payments': 'invoice_payments',
     'purchase-payments': 'purchase_payments',
+    'comments': 'comments',
+    'repairs': 'repairs',
   };
   return map[seg] || null;
 }
@@ -96,6 +135,310 @@ app.use((req, res, next) => {
 
 // Initialize DB before starting server
 await initDB();
+
+// ============================================================
+// AUTH ENDPOINTS
+// ============================================================
+
+// Statusi i auth: nëse tabela users është bosh, klienti duhet të shfaqë setup-in.
+app.get('/api/auth/status', async (req, res) => {
+  try {
+    const row = await queryOne('SELECT COUNT(*) AS cnt FROM users');
+    res.json({ needsSetup: (row?.cnt || 0) === 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Setup i parë — pranon vetëm nëse s'ka asnjë user të regjistruar.
+// Krijon dy përdorues: admin + sales.
+app.post('/api/auth/setup', async (req, res) => {
+  try {
+    const existing = await queryOne('SELECT COUNT(*) AS cnt FROM users');
+    if ((existing?.cnt || 0) > 0) {
+      return res.status(409).json({ error: 'setup_already_done' });
+    }
+    const d = req.body || {};
+    const adminU = String(d.admin_username || '').trim();
+    const adminP = String(d.admin_password || '');
+    const salesU = String(d.sales_username || '').trim();
+    const salesP = String(d.sales_password || '');
+    if (!adminU || !adminP || !salesU || !salesP) {
+      return res.status(400).json({ error: 'missing_fields' });
+    }
+    if (adminP.length < 4 || salesP.length < 4) {
+      return res.status(400).json({ error: 'password_too_short' });
+    }
+    if (adminU === salesU) {
+      return res.status(400).json({ error: 'usernames_must_differ' });
+    }
+    const adminHash = await bcrypt.hash(adminP, 10);
+    const salesHash = await bcrypt.hash(salesP, 10);
+    await run(
+      `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`,
+      [adminU, adminHash, 'admin'],
+    );
+    await run(
+      `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`,
+      [salesU, salesHash, 'sales'],
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Login: verifikon username + password, kthen JWT.
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'missing_credentials' });
+    const user = await queryOne(
+      'SELECT id, username, password_hash, role FROM users WHERE username = ?',
+      [String(username).trim()],
+    );
+    if (!user) return res.status(401).json({ error: 'invalid_credentials' });
+    const ok = await bcrypt.compare(String(password), user.password_hash);
+    if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+    const token = signToken(user);
+    res.json({
+      token,
+      user: { id: user.id, username: user.username, role: user.role },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kthen detajet e user-it aktual (validon token-in).
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ user: { id: req.user.id, username: req.user.username, role: req.user.role } });
+});
+
+// ── Nga këtu e tutje: çdo endpoint /api/... kërkon auth.
+// Endpoint-et e mësipërme (/api/auth/*) mbeten publike.
+app.use('/api', requireAuth);
+
+// Rregullat për rolin 'sales':
+// - GET lejohet për shumicën e endpoint-eve, përveç atyre admin-only më poshtë.
+// - POST lejohet vetëm për fatura shitje dhe shpenzime (të cilat janë pjesë e
+//   punës ditore).
+// - PUT/DELETE nuk lejohen për 'sales'.
+// - Endpoint-et admin-only (raporte financiare, kasaforta, bankë, blerje, etj.)
+//   bllokohen tërësisht për 'sales'.
+const ADMIN_ONLY_PATH_REGEX = [
+  // Blerje / Furnitor / Magazina — pjesë e administrimit
+  /^\/api\/purchase-invoices/,
+  /^\/api\/purchase-payments/,
+  /^\/api\/has-purchases/,
+  /^\/api\/flete-/,
+  /^\/api\/magazina-/,
+  /^\/api\/warehouses/,
+  /^\/api\/suppliers/,
+  /^\/api\/supplier-debts/,
+  // Përmbledhëse inventari (përfshin fitim/marzh)
+  /^\/api\/inventory-summary/,
+  // Raporte të blerjes
+  /^\/api\/reports\/purchase-items/,
+  // Backup / export / import
+  /^\/api\/export/,
+  /^\/api\/import/,
+  /^\/api\/backup/,
+  // Pagesa mbi faturat ekzistuese (rregullim borxhi) — vetëm admin
+  /^\/api\/invoice-payments/,
+  // Marketing — admin
+  /^\/api\/marketing-expenses/,
+];
+
+const SALES_WRITE_ALLOW = [
+  // Fatura shitje (edhe porosi online — të dyja shkojnë te /api/invoices)
+  { method: 'POST', pattern: /^\/api\/invoices$/ },
+  // Kthim / kreditore (i plotë ose i pjesshëm) — shitësi ka të drejtë ta bëjë
+  // pa duhur admin, sepse është veprim ditor i klientit në dyqan.
+  { method: 'POST', pattern: /^\/api\/invoices\/\d+\/credit-note$/ },
+  // Update i statusit të porosisë online — quick-action nga lista
+  { method: 'PATCH', pattern: /^\/api\/invoices\/\d+\/order-status$/ },
+  // Shpenzime ditore
+  { method: 'POST', pattern: /^\/api\/expense-entries$/ },
+  // Zër i ri shpenzimi — krijohet inline gjatë shtimit të shpenzimit
+  { method: 'POST', pattern: /^\/api\/expense-categories$/ },
+  // Klientë të rinj gjatë faturës
+  { method: 'POST', pattern: /^\/api\/clients$/ },
+  // Lëvizje bankë (depozitim/tërheqje) + tërheqje kasafortë + konvertime
+  { method: 'POST', pattern: /^\/api\/bank-movements$/ },
+  { method: 'POST', pattern: /^\/api\/safe-withdrawals$/ },
+  { method: 'POST', pattern: /^\/api\/safe-conversions$/ },
+  // Hurda (konvertim / blerje hurda)
+  { method: 'POST', pattern: /^\/api\/hurda-purchases$/ },
+];
+
+// Komentet / chat — të gjithë userat (admin & sales) mund të shkruajnë,
+// lexojnë, dhe të fshijnë komentin e vet (admin fshin çdo koment). Regjistrohen
+// KETU, para gate-it të mëposhtëm të shitësit, kështu që përgjigja del pa u
+// futur në atë gate (i cili pret POST/DELETE vetëm nga një allowlist strikt).
+
+app.get('/api/comments', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const rows = await queryAll(
+      `SELECT id, user_id, username, role, body, created_at
+       FROM comments ORDER BY id ASC LIMIT ?`,
+      [limit],
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/comments', async (req, res) => {
+  try {
+    const body = String(req.body?.body || '').trim();
+    if (!body) return res.status(400).json({ error: 'empty_body' });
+    if (body.length > 2000) return res.status(400).json({ error: 'body_too_long' });
+    const result = await run(
+      `INSERT INTO comments (user_id, username, role, body) VALUES (?, ?, ?, ?)`,
+      [req.user.id, req.user.username, req.user.role, body],
+    );
+    const id = Number(result.lastInsertRowid);
+    const row = await queryOne(
+      `SELECT id, user_id, username, role, body, created_at FROM comments WHERE id = ?`,
+      [id],
+    );
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/comments/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await queryOne('SELECT user_id FROM comments WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    if (req.user.role !== 'admin' && row.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    await run('DELETE FROM comments WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// RIPARIMET — regjistër i punimeve për klientët
+// ============================================================
+// I regjistruar këtu (para gate-it të shitësit) që të dy rolet të mund të
+// krijojnë dhe editojnë. Fshirja lejohet vetëm për admin.
+
+app.get('/api/repairs', async (req, res) => {
+  try {
+    const { status, q } = req.query;
+    const args = []; const where = [];
+    if (status && status !== 'all') { where.push('status = ?'); args.push(status); }
+    if (q) {
+      where.push(`(customer_name LIKE ? OR customer_phone LIKE ? OR item_description LIKE ?)`);
+      const like = `%${q}%`;
+      args.push(like, like, like);
+    }
+    const sql = `SELECT * FROM repairs
+                 ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+                 ORDER BY id DESC LIMIT 500`;
+    const rows = await queryAll(sql, args);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/repairs', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date_received = String(d.date_received || '').trim();
+    const customer_name = String(d.customer_name || '').trim();
+    const item_description = String(d.item_description || '').trim();
+    if (!date_received || !customer_name || !item_description) {
+      return res.status(400).json({ error: 'missing_fields' });
+    }
+    const result = await run(
+      `INSERT INTO repairs
+       (date_received, customer_name, customer_phone, item_description,
+        issue_description, notes, price, currency, status, paid, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        date_received,
+        customer_name,
+        String(d.customer_phone || ''),
+        item_description,
+        String(d.issue_description || ''),
+        String(d.notes || ''),
+        Number(d.price) || 0,
+        String(d.currency || 'LEK'),
+        d.status && ['pranuar','ne_pune','gati','dorezuar'].includes(d.status) ? d.status : 'pranuar',
+        d.paid ? 1 : 0,
+        req.user.username,
+      ],
+    );
+    const row = await queryOne('SELECT * FROM repairs WHERE id = ?', [Number(result.lastInsertRowid)]);
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/repairs/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await queryOne('SELECT id FROM repairs WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    const d = req.body || {};
+    const status = d.status && ['pranuar','ne_pune','gati','dorezuar'].includes(d.status) ? d.status : 'pranuar';
+    await run(
+      `UPDATE repairs SET
+         date_received = ?, customer_name = ?, customer_phone = ?,
+         item_description = ?, issue_description = ?, notes = ?,
+         price = ?, currency = ?, status = ?, date_delivered = ?, paid = ?,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        String(d.date_received || ''),
+        String(d.customer_name || ''),
+        String(d.customer_phone || ''),
+        String(d.item_description || ''),
+        String(d.issue_description || ''),
+        String(d.notes || ''),
+        Number(d.price) || 0,
+        String(d.currency || 'LEK'),
+        status,
+        String(d.date_delivered || ''),
+        d.paid ? 1 : 0,
+        id,
+      ],
+    );
+    const row = await queryOne('SELECT * FROM repairs WHERE id = ?', [id]);
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/repairs/:id', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const id = Number(req.params.id);
+    await run('DELETE FROM repairs WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.use('/api', (req, res, next) => {
+  const role = req.user?.role;
+  if (role === 'admin') return next();
+  if (role !== 'sales') return res.status(403).json({ error: 'forbidden' });
+
+  // Skip preflight and auth status/login/me (këto s'kalojnë kurrë nga këtu)
+  if (req.method === 'OPTIONS') return next();
+
+  // app.use('/api', …) e heq prefiksin nga req.path (bëhet '/expense-entries'),
+  // ndërsa regex-et janë shkruar për path-in e plotë '/api/...'. Rikonstruktojmë
+  // atë me baseUrl + path që matching-u të bëhet siç pritet.
+  const fullPath = (req.baseUrl || '') + req.path;
+
+  // Admin-only paths për sales
+  if (ADMIN_ONLY_PATH_REGEX.some(re => re.test(fullPath))) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  // Vetëm GET + shkrime specifikisht të lejuara për sales
+  if (req.method !== 'GET') {
+    const allowed = SALES_WRITE_ALLOW.some(a => a.method === req.method && a.pattern.test(fullPath));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+  }
+  next();
+});
 
 // ============================================================
 // DAILY RECORDS
@@ -785,13 +1128,14 @@ app.get('/api/products/search', async (req, res) => {
     if (!q) return res.json([]);
     const like = `%${q}%`;
     const rows = await queryAll(
-      `SELECT id, name, sku, barcode, category, sell_price, vat_rate, stock, image_path
+      `SELECT id, name, sku, barcode, category, sell_price, vat_rate, stock, image_path, gram,
+              is_promotion, promo_discount_pct, serial_no, purchase_price_no_vat
          FROM products
         WHERE active = 1
-          AND (barcode LIKE ? OR sku LIKE ? OR name LIKE ?)
-        ORDER BY (CASE WHEN barcode = ? THEN 0 WHEN sku = ? THEN 1 ELSE 2 END), name
+          AND (barcode LIKE ? OR sku LIKE ? OR name LIKE ? OR serial_no LIKE ?)
+        ORDER BY (CASE WHEN barcode = ? THEN 0 WHEN sku = ? THEN 1 WHEN serial_no = ? THEN 2 ELSE 3 END), name
         LIMIT 12`,
-      [like, like, like, q, q]
+      [like, like, like, like, q, q, q]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -866,9 +1210,12 @@ const NOW_TS_SQL = "strftime('%Y-%m-%d %H:%M:%f','now')";
 app.post('/api/products', async (req, res) => {
   try {
     const d = req.body;
+    const promoPct = d.is_promotion
+      ? Math.max(0, Math.min(100, parseFloat(d.promo_discount_pct) || 0))
+      : 0;
     await run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
+      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, is_promotion, promo_discount_pct, gram, serial_no, purchase_price_no_vat, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
@@ -876,6 +1223,11 @@ app.post('/api/products', async (req, res) => {
         d.stock || 0, d.min_stock !== undefined ? d.min_stock : 5,
         d.vat_rate !== undefined && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
         d.unit || 'copë',
+        d.is_promotion ? 1 : 0,
+        promoPct,
+        parseFloat(d.gram) || 0,
+        d.serial_no || '',
+        parseFloat(d.purchase_price_no_vat) || 0,
       ]
     );
     res.json({ success: true });
@@ -901,10 +1253,15 @@ app.put('/api/products/:id', async (req, res) => {
         current: fresh,
       });
     }
+    const promoPct = d.is_promotion
+      ? Math.max(0, Math.min(100, parseFloat(d.promo_discount_pct) || 0))
+      : 0;
     await run(
       `UPDATE products
        SET name=?, sku=?, barcode=?, category=?, brand=?, description=?,
            cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?,
+           is_promotion=?, promo_discount_pct=?, gram=?,
+           serial_no=?, purchase_price_no_vat=?,
            updated_at=${NOW_TS_SQL}
        WHERE id=?`,
       [
@@ -914,10 +1271,56 @@ app.put('/api/products/:id', async (req, res) => {
         d.stock || 0, d.min_stock !== undefined ? d.min_stock : 5,
         d.vat_rate !== undefined && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
         d.unit || 'copë',
+        d.is_promotion ? 1 : 0,
+        promoPct,
+        parseFloat(d.gram) || 0,
+        d.serial_no || '',
+        parseFloat(d.purchase_price_no_vat) || 0,
         id,
       ]
     );
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Toggle vetëm flag-un e promocionit, pa cenuar fushat e tjera. Përdoret nga
+// Fatura Blerje kur admin-i shënon një produkt si "në promocion" direkt nga
+// rreshti i faturës, dhe nga faqja Produkte Promocion për ta hequr.
+// Update i shpejtë vetëm i barkodit — përdoret nga FaturaBlerje kur admin
+// gjeneron një barkod të ri direkt në rresht dhe do ta ruajë menjëherë
+// (që skaneri të funksionojë para se të ruhet fatura).
+app.put('/api/products/:id/barcode', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const barcode = String(req.body?.barcode ?? '').trim();
+    const exists = await queryOne('SELECT id FROM products WHERE id = ?', [id]);
+    if (!exists) return res.status(404).json({ error: 'not found' });
+    await run(
+      `UPDATE products SET barcode=?, updated_at=${NOW_TS_SQL} WHERE id=?`,
+      [barcode, id],
+    );
+    res.json({ success: true, barcode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/products/:id/promotion', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const on = !!(req.body && req.body.on);
+    const pct = on
+      ? Math.max(0, Math.min(100, parseFloat(req.body?.discount_pct) || 0))
+      : 0;
+    const exists = await queryOne('SELECT id FROM products WHERE id = ?', [id]);
+    if (!exists) return res.status(404).json({ error: 'not found' });
+    await run(
+      `UPDATE products SET is_promotion=?, promo_discount_pct=?, updated_at=${NOW_TS_SQL} WHERE id=?`,
+      [on ? 1 : 0, pct, id],
+    );
+    res.json({ success: true, is_promotion: on ? 1 : 0, promo_discount_pct: pct });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -937,14 +1340,16 @@ app.post('/api/products/import', async (req, res) => {
     let matched = 0;
     for (const d of products) {
       if (!d.name || !String(d.name).trim()) { ids.push(null); continue; }
-      const barcode = String(d.barcode || '').trim();
-      const sku     = String(d.sku || '').trim();
-      // Reuse existing product if barcode or SKU matches — otherwise repeat
-      // imports of the same item create duplicate rows in the Products page.
-      // Stock/cost are not overwritten; the invoice save handles that.
+      const barcode   = String(d.barcode || '').trim();
+      const sku       = String(d.sku || '').trim();
+      const serial_no = String(d.serial_no || '').trim();
+      // Reuse existing product if barcode / serial / SKU matches — otherwise
+      // repeat imports create duplicate rows. Stock/cost nuk mbishkruhen këtu;
+      // për invoice-based updates ekziston flow-i i faturës që i menaxhon.
       let existing = null;
-      if (barcode) existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
-      if (!existing && sku) existing = await queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]);
+      if (barcode)              existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
+      if (!existing && serial_no) existing = await queryOne('SELECT id FROM products WHERE serial_no = ? LIMIT 1', [serial_no]);
+      if (!existing && sku)     existing = await queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]);
       if (existing) {
         await run('UPDATE products SET active = 1 WHERE id = ?', [existing.id]);
         ids.push(existing.id);
@@ -952,14 +1357,21 @@ app.post('/api/products/import', async (req, res) => {
         continue;
       }
       await run(
-        `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO products (name, sku, barcode, category, brand, description,
+           cost_price, sell_price, stock, min_stock,
+           serial_no, purchase_price_no_vat, vat_rate, unit, gram)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           String(d.name).trim(),
           sku, barcode,
           d.category || 'Tjeter', d.brand || '', d.description || '',
           parseFloat(d.cost_price) || 0, parseFloat(d.sell_price) || 0,
           parseInt(d.stock) || 0, parseInt(d.min_stock) || 5,
+          serial_no,
+          parseFloat(d.purchase_price_no_vat) || 0,
+          d.vat_rate != null && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
+          d.unit || 'copë',
+          parseFloat(d.gram) || 0,
         ]
       );
       const row = await queryOne('SELECT last_insert_rowid() AS id');
@@ -1145,16 +1557,36 @@ function buildItemFilterSQL(material, category) {
   return { sql: clause, params };
 }
 
+// Filtër opsional për online: pa parametër → të gjitha; online=0 → vetëm në dyqan;
+// online=1 → vetëm porosi online. status= filtron sipas order_status.
+function buildOnlineFilter(online, status) {
+  const conds = [];
+  const params = [];
+  if (online === '0' || online === '1') {
+    conds.push('COALESCE(i.is_online, 0) = ?');
+    params.push(parseInt(online));
+  }
+  if (status && String(status).trim()) {
+    conds.push('COALESCE(i.order_status, \'\') = ?');
+    params.push(String(status).trim());
+  }
+  return {
+    sql: conds.length ? ' AND ' + conds.join(' AND ') : '',
+    params,
+  };
+}
+
 app.get('/api/invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const { material, category } = req.query;
+    const { material, category, online, status } = req.query;
     const filter = buildItemFilterSQL(material, category);
+    const onl = buildOnlineFilter(online, status);
     const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
-       FROM invoices i WHERE i.date = ? ${filter.sql} ORDER BY i.id ASC`,
-      [date, ...filter.params]
+       FROM invoices i WHERE i.date = ? ${filter.sql} ${onl.sql} ORDER BY i.id ASC`,
+      [date, ...filter.params, ...onl.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1162,14 +1594,15 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
 
 app.get('/api/invoices/by-range', async (req, res) => {
   try {
-    const { from, to, material, category } = req.query;
+    const { from, to, material, category, online, status } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const filter = buildItemFilterSQL(material, category);
+    const onl = buildOnlineFilter(online, status);
     const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
-       FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ORDER BY i.date ASC, i.id ASC`,
-      [from, to, ...filter.params]
+       FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ${onl.sql} ORDER BY i.date ASC, i.id ASC`,
+      [from, to, ...filter.params, ...onl.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1181,10 +1614,14 @@ app.get('/api/invoices/:id', async (req, res) => {
     const invoice = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!invoice) return res.status(404).json({ error: 'not found' });
     const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id ASC', [id]);
+    const payment_splits = await queryAll(
+      'SELECT id, method, currency, amount, exchange_rate FROM invoice_payment_splits WHERE invoice_id = ? ORDER BY id ASC',
+      [id]
+    );
     const paySum = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [id])?.s || 0;
     const raw = (invoice.amount_paid || 0) - paySum;
     const initial_amount_paid = +(invoice.is_credit_note ? raw : Math.max(0, raw)).toFixed(2);
-    res.json({ ...invoice, items, initial_amount_paid });
+    res.json({ ...invoice, items, payment_splits, initial_amount_paid });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1199,6 +1636,37 @@ function recomputeInvoiceTotals(items) {
     subtotal_no_vat: +sub.toFixed(2),
     total_vat: +vat.toFixed(2),
     total_with_vat: +tot.toFixed(2),
+  };
+}
+
+// Normalizon splits nga klienti — heq rreshtat bosh, siguron numra të vlefshëm.
+function normalizeSplits(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(s => ({
+      method: s?.method === 'bank' ? 'bank' : 'cash',
+      currency: (s?.currency || 'LEK').toUpperCase(),
+      amount: parseFloat(s?.amount) || 0,
+      exchange_rate: parseFloat(s?.exchange_rate) || 1,
+    }))
+    .filter(s => s.amount !== 0);
+}
+
+// Konverton çdo split → LEK me kursin e vet, pastaj → monedhën e faturës me
+// kursin e faturës. Kthen paid_cash / paid_bank / amount_paid në monedhën e
+// faturës që raportet ekzistuese të funksionojnë pa u prishur.
+function aggregateSplits(splits, invoiceRate) {
+  const invR = parseFloat(invoiceRate) || 1;
+  let lekCash = 0, lekBank = 0;
+  for (const s of splits) {
+    const lek = s.amount * s.exchange_rate;
+    if (s.method === 'cash') lekCash += lek;
+    else lekBank += lek;
+  }
+  return {
+    paidCash: +(lekCash / invR).toFixed(2),
+    paidBank: +(lekBank / invR).toFixed(2),
+    amountPaid: +((lekCash + lekBank) / invR).toFixed(2),
   };
 }
 
@@ -1256,19 +1724,29 @@ app.post('/api/invoices', async (req, res) => {
     const totals = recomputeInvoiceTotals(items);
 
     const pm = ['cash', 'bank', 'debt', 'pos', 'mikse'].includes(d.payment_method) ? d.payment_method : 'cash';
-    // Mixed mode lets the cashier split the invoice across cash + POS + bank;
-    // anything not covered automatically becomes amount_due (borxh).
-    const paidCash = pm === 'mikse' ? (parseFloat(d.paid_cash) || 0) : 0;
-    const paidPos  = pm === 'mikse' ? (parseFloat(d.paid_pos)  || 0) : 0;
-    const paidBank = pm === 'mikse' ? (parseFloat(d.paid_bank) || 0) : 0;
-    let amountPaid;
-    if (pm === 'mikse') {
+    // Splits janë burimi i së vërtetës kur jepen — cilado qoftë payment_method.
+    // Kjo lejon frontend-in të infererrë 'cash'/'bank'/'mikse' nga një split i
+    // vetëm ndërsa backend-i llogarit gjithnjë të njëjtat aggregate.
+    const splits = normalizeSplits(d.payment_splits);
+    let paidCash, paidPos, paidBank, amountPaid;
+    if (splits.length > 0) {
+      const agg = aggregateSplits(splits, d.exchange_rate);
+      paidCash = agg.paidCash;
+      paidBank = agg.paidBank;
+      paidPos = 0;
+      amountPaid = agg.amountPaid;
+    } else if (pm === 'mikse') {
+      paidCash = parseFloat(d.paid_cash) || 0;
+      paidPos  = parseFloat(d.paid_pos)  || 0;
+      paidBank = parseFloat(d.paid_bank) || 0;
       amountPaid = +(paidCash + paidPos + paidBank).toFixed(2);
-    } else if (d.amount_paid != null && d.amount_paid !== '') {
-      amountPaid = parseFloat(d.amount_paid) || 0;
     } else {
-      // Defaults per method when client doesn't send an explicit value
-      amountPaid = (pm === 'cash' || pm === 'pos') ? totals.total_with_vat : 0;
+      paidCash = 0; paidPos = 0; paidBank = 0;
+      if (d.amount_paid != null && d.amount_paid !== '') {
+        amountPaid = parseFloat(d.amount_paid) || 0;
+      } else {
+        amountPaid = (pm === 'cash' || pm === 'pos') ? totals.total_with_vat : 0;
+      }
     }
     const amountDue = Math.max(0, +(totals.total_with_vat - amountPaid).toFixed(2));
     const totalDiscount = +items.reduce((s, it) => {
@@ -1276,11 +1754,17 @@ app.post('/api/invoices', async (req, res) => {
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
     await ensureClientExists(d.customer_name, d.customer_nipt);
+    const isOnline = d.is_online ? 1 : 0;
+    // Për porosi online statusi fillestar është 'e_re' nëse nuk është specifikuar.
+    const orderStatus = isOnline
+      ? (['e_re','ne_pergatitje','derguar','dorezuar','anuluar'].includes(d.order_status) ? d.order_status : 'e_re')
+      : '';
     const doInsertInvoice = (invNo) => run(
       `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
         subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
-        paid_cash, paid_pos, paid_bank, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        paid_cash, paid_pos, paid_bank, notes,
+        is_online, channel, shipping_address, order_status, tracking_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date, invNo, d.customer_name || '', d.customer_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
@@ -1289,6 +1773,7 @@ app.post('/api/invoices', async (req, res) => {
         pm, amountPaid, amountDue,
         paidCash, paidPos, paidBank,
         d.notes || '',
+        isOnline, d.channel || '', d.shipping_address || '', orderStatus, d.tracking_no || '',
       ]
     );
     // If two PCs race, the UNIQUE index on invoice_no makes one INSERT fail;
@@ -1301,14 +1786,23 @@ app.post('/api/invoices', async (req, res) => {
     const invoiceId = invoice?.id;
     for (const it of items) {
       await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
-          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, gram, unit_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
+          on_promotion, promo_discount_pct)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invoiceId, it.product_id || null, it.barcode || '', it.name || '',
-          it.qty, it.unit_price_no_vat, it.discount_percent,
+          it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+          it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
         ]
+      );
+    }
+    for (const s of splits) {
+      await run(
+        `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
+         VALUES (?, ?, ?, ?, ?)`,
+        [invoiceId, s.method, s.currency, s.amount, s.exchange_rate]
       );
     }
     await adjustStock(items, -1);
@@ -1330,19 +1824,29 @@ app.put('/api/invoices/:id', async (req, res) => {
     const totals = recomputeInvoiceTotals(items);
 
     const pmU = ['cash', 'bank', 'debt', 'pos', 'mikse'].includes(d.payment_method) ? d.payment_method : 'cash';
+    const splitsU = normalizeSplits(d.payment_splits);
     // The form value represents the INITIAL portion paid at sale time. Any subsequent
     // payments registered via the Detyrime Klienti modal live in invoice_payments and
     // must be preserved when the user re-saves the invoice from the editor.
-    const paidCashU = pmU === 'mikse' ? (parseFloat(d.paid_cash) || 0) : 0;
-    const paidPosU  = pmU === 'mikse' ? (parseFloat(d.paid_pos)  || 0) : 0;
-    const paidBankU = pmU === 'mikse' ? (parseFloat(d.paid_bank) || 0) : 0;
-    let formInitialPaid;
-    if (pmU === 'mikse') {
+    let paidCashU, paidPosU, paidBankU, formInitialPaid;
+    if (splitsU.length > 0) {
+      const agg = aggregateSplits(splitsU, d.exchange_rate);
+      paidCashU = agg.paidCash;
+      paidBankU = agg.paidBank;
+      paidPosU  = 0;
+      formInitialPaid = agg.amountPaid;
+    } else if (pmU === 'mikse') {
+      paidCashU = parseFloat(d.paid_cash) || 0;
+      paidPosU  = parseFloat(d.paid_pos)  || 0;
+      paidBankU = parseFloat(d.paid_bank) || 0;
       formInitialPaid = +(paidCashU + paidPosU + paidBankU).toFixed(2);
-    } else if (d.amount_paid != null && d.amount_paid !== '') {
-      formInitialPaid = parseFloat(d.amount_paid) || 0;
     } else {
-      formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? totals.total_with_vat : 0;
+      paidCashU = 0; paidPosU = 0; paidBankU = 0;
+      if (d.amount_paid != null && d.amount_paid !== '') {
+        formInitialPaid = parseFloat(d.amount_paid) || 0;
+      } else {
+        formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? totals.total_with_vat : 0;
+      }
     }
     const existingPaySum = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?',
@@ -1358,10 +1862,22 @@ app.put('/api/invoices/:id', async (req, res) => {
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
     await ensureClientExists(d.customer_name, d.customer_nipt);
+    // Fushat online: ruaji vetëm nëse fatura është online (ose po e shndërrojmë)
+    // — për fatura klasike të dyqanit lëri të pandryshuara.
+    const isOnlineU = existing.is_online ? 1 : (d.is_online ? 1 : 0);
+    const orderStatusU = isOnlineU
+      ? (['e_re','ne_pergatitje','derguar','dorezuar','anuluar'].includes(d.order_status)
+          ? d.order_status
+          : (existing.order_status || 'e_re'))
+      : '';
+    const channelU = isOnlineU ? (d.channel != null ? d.channel : (existing.channel || '')) : '';
+    const shippingAddressU = isOnlineU ? (d.shipping_address != null ? d.shipping_address : (existing.shipping_address || '')) : '';
+    const trackingNoU = isOnlineU ? (d.tracking_no != null ? d.tracking_no : (existing.tracking_no || '')) : '';
     await run(
       `UPDATE invoices SET date=?, customer_name=?, customer_nipt=?, currency=?, exchange_rate=?,
         subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?,
-        paid_cash=?, paid_pos=?, paid_bank=?, notes=?
+        paid_cash=?, paid_pos=?, paid_bank=?, notes=?,
+        is_online=?, channel=?, shipping_address=?, order_status=?, tracking_no=?
        WHERE id=?`,
       [
         d.date || existing.date,
@@ -1371,6 +1887,7 @@ app.put('/api/invoices/:id', async (req, res) => {
         totals.total_vat, totals.total_with_vat,
         pmU, amountPaidU, amountDueU,
         paidCashU, paidPosU, paidBankU, d.notes || '',
+        isOnlineU, channelU, shippingAddressU, orderStatusU, trackingNoU,
         id,
       ]
     );
@@ -1379,14 +1896,24 @@ app.put('/api/invoices/:id', async (req, res) => {
     await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
     for (const it of items) {
       await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
-          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, gram, unit_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
+          on_promotion, promo_discount_pct)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, it.product_id || null, it.barcode || '', it.name || '',
-          it.qty, it.unit_price_no_vat, it.discount_percent,
+          it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+          it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
         ]
+      );
+    }
+    await run('DELETE FROM invoice_payment_splits WHERE invoice_id = ?', [id]);
+    for (const s of splitsU) {
+      await run(
+        `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
+         VALUES (?, ?, ?, ?, ?)`,
+        [id, s.method, s.currency, s.amount, s.exchange_rate]
       );
     }
     await adjustStock(items, -1);
@@ -1396,6 +1923,27 @@ app.put('/api/invoices/:id', async (req, res) => {
   }
 });
 
+// Quick update i statusit të porosisë online — pa ndryshuar asnjë të dhënë
+// tjetër të faturës (items, pagesa, klient etj.).
+app.patch('/api/invoices/:id/order-status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const status = String(req.body?.order_status || '').trim();
+    const allowed = ['e_re', 'ne_pergatitje', 'derguar', 'dorezuar', 'anuluar'];
+    if (!allowed.includes(status)) return res.status(400).json({ error: 'invalid_status' });
+    const tracking = req.body?.tracking_no != null ? String(req.body.tracking_no) : null;
+    const inv = await queryOne('SELECT id, is_online FROM invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not_found' });
+    if (!inv.is_online) return res.status(400).json({ error: 'not_online' });
+    if (tracking != null) {
+      await run('UPDATE invoices SET order_status = ?, tracking_no = ? WHERE id = ?', [status, tracking, id]);
+    } else {
+      await run('UPDATE invoices SET order_status = ? WHERE id = ?', [status, id]);
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1403,6 +1951,7 @@ app.delete('/api/invoices/:id', async (req, res) => {
     await adjustStock(items, +1);
     await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
     await run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
+    await run('DELETE FROM invoice_payment_splits WHERE invoice_id = ?', [id]);
     await run('DELETE FROM invoices WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
@@ -1425,7 +1974,12 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Krijo Faturë Kreditore (me minus) — mirror invoice with negative values
+// Krijo Faturë Kreditore (me minus). Suporton dy modalitete:
+//  - Kthim i plotë (default): mirror i të gjithë artikujve me sasi negative
+//  - Kthim i pjesshëm: në body dërgohet `items: [{ item_id, qty }]` — kreditorja
+//    krijohet vetëm me ato rreshta të zgjedhur (me sasinë e specifikuar).
+//    Refund i pagesave (paid_cash/bank + splits) shkallëzohet proporcionalisht
+//    sipas raportit total_i_kthyer / total_origjinal.
 app.post('/api/invoices/:id/credit-note', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1433,39 +1987,116 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
     if (!inv) return res.status(404).json({ error: 'not found' });
     if (inv.cancelled) return res.status(400).json({ error: 'Nuk lëshohet kreditore për faturë të anuluar' });
     if (inv.is_credit_note) return res.status(400).json({ error: 'Kjo është tashmë një kreditore' });
-    const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+    const allItems = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
     const date = (req.body && req.body.date) || new Date().toISOString().slice(0, 10);
+
+    // Përcakto artikujt që do të mirror-ohen. `partial` = user-i zgjodhi një
+    // nënbashkësi. Skalimi i sasive: qty e re nuk mund të kalojë origjinalen.
+    const requested = Array.isArray(req.body?.items) ? req.body.items : null;
+    let itemsToMirror;
+    let isPartial = false;
+    if (requested && requested.length > 0) {
+      isPartial = true;
+      const byId = new Map(allItems.map(it => [it.id, it]));
+      itemsToMirror = requested
+        .map(r => {
+          const orig = byId.get(parseInt(r.item_id));
+          if (!orig) return null;
+          const origQty = Math.abs(parseFloat(orig.qty) || 0);
+          let retQty = parseFloat(r.qty) || 0;
+          if (retQty <= 0) return null;
+          if (retQty > origQty) retQty = origQty;
+          // Ratio për të shkallëzuar vlerat monetare të rreshtit.
+          const ratio = origQty > 0 ? retQty / origQty : 1;
+          const gramNew = (parseFloat(orig.gram) || 0) * ratio;
+          const subNew = (parseFloat(orig.subtotal_no_vat) || 0) * ratio;
+          const vatNew = (parseFloat(orig.vat_amount) || 0) * ratio;
+          const totNew = (parseFloat(orig.total_with_vat) || 0) * ratio;
+          return {
+            ...orig,
+            qty: retQty,
+            gram: gramNew,
+            subtotal_no_vat: subNew,
+            vat_amount: vatNew,
+            total_with_vat: totNew,
+          };
+        })
+        .filter(Boolean);
+      if (itemsToMirror.length === 0) {
+        return res.status(400).json({ error: 'Asnjë artikull i vlefshëm për kthim' });
+      }
+    } else {
+      itemsToMirror = allItems;
+    }
+
+    // Ratio globale për shkallëzimin e refund-it (paid_cash/bank + splits).
+    // Për kthim të plotë ratio = 1 (mirror i plotë). Për të pjesshëm përdorim
+    // raportin total_i_kthyer / total_origjinal.
+    const origInvTotal = parseFloat(inv.total_with_vat) || 0;
+    const retTotal = itemsToMirror.reduce((s, it) => s + (parseFloat(it.total_with_vat) || 0), 0);
+
+    // Rekalkulo totalet e faturës kreditore nga artikujt që u zgjodhën.
+    const cnSub = itemsToMirror.reduce((s, it) => s + (parseFloat(it.subtotal_no_vat) || 0), 0);
+    const cnVat = itemsToMirror.reduce((s, it) => s + (parseFloat(it.vat_amount) || 0), 0);
+    const cnTot = itemsToMirror.reduce((s, it) => s + (parseFloat(it.total_with_vat) || 0), 0);
+    const negTotal = -cnTot;
+
+    // Rimbursim manual — user mund të japë më pak sesa vlera e artikujve
+    // (p.sh. amortizim / restocking fee). Klamp: [0, retTotal].
+    const rawRefundOverride = req.body?.refund_amount;
+    const hasOverride = rawRefundOverride != null && rawRefundOverride !== '';
+    const refundAmount = hasOverride
+      ? Math.max(0, Math.min(retTotal, parseFloat(rawRefundOverride) || 0))
+      : retTotal;
+
+    // Ratio për shkallëzimin e pagesave — bazohet në ç'ka u rimbursua realisht.
+    const refundRatio = (isPartial || hasOverride) && origInvTotal > 0
+      ? Math.min(1, refundAmount / origInvTotal)
+      : 1;
+
+    // Zbritje totale — mbaj proporcionale me atë çfarë u kthye (jo me refund-in).
+    const itemsRatio = origInvTotal > 0 ? Math.min(1, retTotal / origInvTotal) : 1;
+    const cnDiscount = (parseFloat(inv.total_discount) || 0) * itemsRatio;
+
     const baseNo = await nextInvoiceNo(date);
     const invoice_no = `${baseNo}-K`;
 
     // Stornim: trashëgon metodën e pagesës nga fatura origjinale që arka të mos
-    // shënojë levizje kesh të rrejshme.
-    //  - Cash/POS/Bank origjinali → kreditore me të njëjtën metodë, amount_paid=negTotal, due=0
-    //    (arka merr refund në atë mënyrë)
-    //  - Borxh origjinali → kreditore borxh me amount_paid=0, due=negTotal (redukton borxhin
-    //    e klientit pa lëvizje kesh; asgjë nuk u pagua, asgjë nuk kthehet kesh)
-    //  - Mikse origjinal → kreditore mikse me pjesët e paguara negative (thjesht refund në të
-    //    dyja fushat proporcionalisht)
-    const negTotal = -(inv.total_with_vat || 0);
+    // shënojë levizje kesh të rrejshme. Për kthime të pjesshme dhe refund të
+    // reduktuar, cash/POS shkallëzohen me refundRatio (bazuar në refundAmount).
+    // Diferenca artikuj_totali − refund shfaqet si `amount_due` negativ
+    // (klienti mbetet me kredit të pashfrytëzuar në sh op, nëse admin dëshiron).
     const parentPm = inv.payment_method || 'cash';
     let creditPm, creditPaid, creditDue, creditPaidCash = 0, creditPaidPos = 0, creditPaidBank = 0;
+    const negRefund = -refundAmount; // sasia e vërtetë që doli nga arka
+    // Kur user zvogëlon rimbursimin, diferenca (cnTot - refundAmount) NUK
+    // ruhet si borxh — konsiderohet fee/amortizim që shopi mban. amount_due
+    // mbetet 0 që të mos aktivizojë raportet e detyrimeve. Për fatura që ishin
+    // 'debt' origjinali, kreditorja redukton borxhin e klientit me refundAmount
+    // (jo me totalin e artikujve).
     if (parentPm === 'debt') {
       creditPm = 'debt';
       creditPaid = 0;
-      creditDue = negTotal;
+      creditDue = negRefund;
     } else if (parentPm === 'mikse') {
       creditPm = 'mikse';
-      creditPaid = negTotal;
+      creditPaid = negRefund;
       creditDue = 0;
-      creditPaidCash = -(inv.paid_cash || 0);
-      creditPaidPos  = -(inv.paid_pos  || 0);
-      creditPaidBank = -(inv.paid_bank || 0);
+      creditPaidCash = -(inv.paid_cash || 0) * refundRatio;
+      creditPaidPos  = -(inv.paid_pos  || 0) * refundRatio;
+      creditPaidBank = -(inv.paid_bank || 0) * refundRatio;
     } else {
       // cash / pos / bank
       creditPm = parentPm;
-      creditPaid = negTotal;
+      creditPaid = negRefund;
       creditDue = 0;
     }
+    const feeKept = +(retTotal - refundAmount).toFixed(2);
+    const notesTxt = feeKept > 0.005
+      ? `Kthim me fee ${feeKept.toFixed(2)} ${inv.currency || 'LEK'} nga fatura ${inv.invoice_no}`
+      : (isPartial
+        ? `Kthim i pjesshëm nga fatura ${inv.invoice_no}`
+        : `Stornim për faturën ${inv.invoice_no}`);
     await run(
       `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
         subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method,
@@ -1476,33 +2107,51 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
       [
         date, invoice_no, inv.customer_name || '', inv.customer_nipt || '',
         inv.currency || 'LEK', inv.exchange_rate || 1,
-        -(inv.subtotal_no_vat || 0), -(inv.total_discount || 0),
-        -(inv.total_vat || 0), negTotal,
+        -cnSub, -cnDiscount,
+        -cnVat, negTotal,
         creditPm,
         creditPaidCash, creditPaidPos, creditPaidBank,
         creditPaid, creditDue,
-        `Stornim për faturën ${inv.invoice_no}`,
+        notesTxt,
         1, parseInt(id),
       ]
     );
     const created = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const newId = created?.id;
-    for (const it of items) {
+    for (const it of itemsToMirror) {
       await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, unit_price_no_vat,
-          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, gram, unit_price_no_vat,
+          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
+          on_promotion, promo_discount_pct)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId, it.product_id || null, it.barcode || '', it.name || '',
-          -(it.qty || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
+          -(it.qty || 0), -(parseFloat(it.gram) || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
           -(it.subtotal_no_vat || 0), it.vat_rate || 0,
           -(it.vat_amount || 0), -(it.total_with_vat || 0),
+          it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
         ]
       );
     }
-    // Returning items to stock (qty was negative → stock += positive)
-    await adjustStock(items, +1);
-    res.json({ success: true, id: newId, invoice_no });
+    // Mirror payment splits me shuma negative dhe të shkallëzuara.
+    if (parentPm === 'mikse') {
+      const parentSplits = await queryAll(
+        'SELECT method, currency, amount, exchange_rate FROM invoice_payment_splits WHERE invoice_id = ?',
+        [id]
+      );
+      for (const s of parentSplits) {
+        await run(
+          `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
+           VALUES (?, ?, ?, ?, ?)`,
+          [newId, s.method, s.currency, -s.amount * refundRatio, s.exchange_rate]
+        );
+      }
+    }
+    // Kthe stokun për vetëm ato copë që u kthyen.
+    // `qty` te itemsToMirror është pozitiv (sasia që u kthye); adjustStock
+    // përdor sign (+1) → stoku shtohet me qty pozitiv.
+    await adjustStock(itemsToMirror, +1);
+    res.json({ success: true, id: newId, invoice_no, partial: isPartial });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1593,7 +2242,7 @@ app.delete('/api/invoice-payments/:id', async (req, res) => {
 app.get('/api/client-debts', async (req, res) => {
   try {
     const { q, nipt, name, from, to } = req.query;
-    // Detyrime tracks any invoice with unpaid balance: Bank/Debt/Mikse (Cash + POS paid in full).
+    // Any invoice with unpaid balance counts as debt — pavarësisht payment_method.
     // Tolerance 0.005 to guard against float residuals leaving 0.00... amount_due behind.
     let sql = `
       SELECT i.*,
@@ -1602,7 +2251,6 @@ app.get('/api/client-debts', async (req, res) => {
         (SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = i.id) AS payment_count
       FROM invoices i
       WHERE COALESCE(i.cancelled, 0) = 0
-        AND i.payment_method IN ('bank', 'debt', 'mikse')
         AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005`;
     const params = [];
     if (nipt) {
@@ -1687,10 +2335,10 @@ app.get('/api/client-debts/summary', async (req, res) => {
   try {
     const onlyDebt = req.query.onlyDebt === '1' || req.query.onlyDebt === 'true';
     const { from, to } = req.query;
-    // Any invoice with an unpaid balance counts toward client debts: Bank/Debt/Mikse.
+    // Any invoice with an unpaid balance counts as debt — pavarësisht payment_method.
+    // Filtri i vërtetë është amount_due > 0 (aplikuar në HAVING kur onlyDebt).
     const conds = [
       "COALESCE(cancelled, 0) = 0",
-      "payment_method IN ('bank','debt','mikse')",
     ];
     const params = [];
     if (from) { conds.push('date >= ?'); params.push(from); }
@@ -1880,6 +2528,12 @@ async function applyProductPrices(items) {
       updates.push('sell_price = ?');
       params.push(parseFloat(it.sell_price) || 0);
     }
+    // Barkodi mund të gjenerohet nga FaturaBlerje për një produkt ekzistues;
+    // ruajmë vetëm nëse rreshti ka një vlerë jo-bosh (mos e fshi rastësisht).
+    if (it.barcode != null && String(it.barcode).trim() !== '') {
+      updates.push('barcode = ?');
+      params.push(String(it.barcode).trim());
+    }
     if (it.vat_rate != null && it.vat_rate !== '') {
       updates.push('vat_rate = ?');
       params.push(parseFloat(it.vat_rate) || 0);
@@ -1890,6 +2544,16 @@ async function applyProductPrices(items) {
       const CATEGORY_BY_MATERIAL = { flori: 'Flori', diamant: 'Diamant', ora: 'Ora' };
       updates.push('category = ?');
       params.push(CATEGORY_BY_MATERIAL[it.material]);
+    }
+    // Nga fatura e blerjes, promocioni vetëm shtohet — heqja bëhet nga faqja
+    // Produkte Promocion ose Products (për të mos rrëzuar padashur promocionet
+    // ekzistuese kur admin ripërdor një produkt në një faturë të re).
+    if (it.is_promotion) {
+      updates.push('is_promotion = ?');
+      params.push(1);
+      const pct = Math.max(0, Math.min(100, parseFloat(it.promo_discount_pct) || 0));
+      updates.push('promo_discount_pct = ?');
+      params.push(pct);
     }
     if (updates.length === 0) continue;
     params.push(it.product_id);
@@ -1934,7 +2598,9 @@ app.get('/api/purchase-invoices/:id', async (req, res) => {
     const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
     const items = await queryAll(
-      `SELECT pi.*, COALESCE(p.material, '') AS material
+      `SELECT pi.*, COALESCE(p.material, '') AS material,
+              COALESCE(p.is_promotion, 0) AS is_promotion,
+              COALESCE(p.promo_discount_pct, 0) AS promo_discount_pct
          FROM purchase_items pi
          LEFT JOIN products p ON p.id = pi.product_id
         WHERE pi.purchase_id = ?
@@ -3268,6 +3934,25 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const hurdaGramRow = await queryOne('SELECT COALESCE(SUM(gram),0) AS g FROM hurda_purchases WHERE date = ?', [date]);
     hurda_gram_total = +(hurdaGramRow?.g || 0).toFixed(3);
 
+    // Pagesa borxhi kesh të bëra në këtë datë (por për fatura të datave të mëparshme).
+    // Këto hyjnë në arkën e datës së pagesës — NUK trajtohen si xhiro (xhiro
+    // mbetet pjesë e datës së faturës).
+    const debtPayRows = await queryAll(
+      `SELECT COALESCE(i.currency, 'LEK') AS cur,
+              COALESCE(ip.amount, 0)     AS amt
+         FROM invoice_payments ip
+         JOIN invoices i ON i.id = ip.invoice_id
+        WHERE ip.date = ?
+          AND ip.payment_method = 'cash'
+          AND COALESCE(i.cancelled, 0) = 0`,
+      [date]
+    );
+    const debt_repayments = zeroPerCur();
+    for (const r of debtPayRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in debt_repayments) debt_repayments[c] += r.amt;
+    }
+
     // HAS (bulk gold-jewelry batch) purchases — same treatment as hurda: cash out per currency
     const hasRows = await queryAll(
       `SELECT COALESCE(currency, 'EUR') AS cur,
@@ -3320,7 +4005,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const difference = zeroPerCur();
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
-      cash_balance[c]    = opening_cash[c] + cash_from_sales[c] - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
+      cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c]
+                          - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
       difference[c]      = physical_cash[c] - cash_balance[c];
     }
@@ -3334,6 +4020,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       amount_due:        fx(amount_due),
       opening_cash:      fx(opening_cash),
       cash_from_sales:   fx(cash_from_sales),
+      debt_repayments:   fx(debt_repayments),
       expenses:          fx(expenses),
       purchase_cash:     fx(purchase_cash),
       hurda_cash:        fx(hurda_cash),
@@ -3351,6 +4038,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         purchases_cash: purRows.length,
         hurda_purchases: hurdaRows.length,
         has_purchases: hasRows.length,
+        debt_repayments: debtPayRows.length,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -3448,23 +4136,98 @@ app.get('/api/kasaforta', async (req, res) => {
          ORDER BY date ASC`
     );
 
+    // Përfshi edhe lëvizjet bankë → kasafortë si depozita në kasafortë (pa cenuar
+    // kolonat e safe_deposit që janë të rezervuara për konvertimet e valutës).
+    const bmSelect = CURS.map(c =>
+      `COALESCE(SUM(amount_${c.toLowerCase()}), 0) AS bm_${c}`
+    ).join(', ');
+    const bmRows = await queryAll(
+      `SELECT date, ${bmSelect}
+         FROM bank_movements
+         WHERE direction = 'to_safe'
+         GROUP BY date`
+    );
+    const bmByDate = {};
+    for (const r of bmRows) bmByDate[r.date] = r;
+
+    // Konvertimet e monedhës brenda kasafortës — për çdo (datë, monedhë)
+    // llogarit conv_in / conv_out dhe listën e ngjarjeve për tooltip / detaje.
+    const convRows = await queryAll(
+      `SELECT date, from_currency, from_amount, to_currency, to_amount, exchange_rate, note
+         FROM safe_conversions
+         ORDER BY date ASC, id ASC`
+    );
+    const convByDate = {}; // { date: { CUR: { in, out, events: [] } } }
+    for (const cv of convRows) {
+      const d  = cv.date;
+      const fc = String(cv.from_currency || '').toUpperCase();
+      const tc = String(cv.to_currency   || '').toUpperCase();
+      const fA = parseFloat(cv.from_amount) || 0;
+      const tA = parseFloat(cv.to_amount)   || 0;
+      if (!convByDate[d]) convByDate[d] = {};
+      const ensure = (cur) => {
+        if (!convByDate[d][cur]) convByDate[d][cur] = { in: 0, out: 0, events: [] };
+        return convByDate[d][cur];
+      };
+      if (fc && CURS.includes(fc)) {
+        const bucket = ensure(fc);
+        bucket.out += fA;
+        bucket.events.push({
+          direction: 'out', amount: fA, other_cur: tc, other_amount: tA,
+          rate: parseFloat(cv.exchange_rate) || 0, note: cv.note || '',
+        });
+      }
+      if (tc && CURS.includes(tc)) {
+        const bucket = ensure(tc);
+        bucket.in += tA;
+        bucket.events.push({
+          direction: 'in', amount: tA, other_cur: fc, other_amount: fA,
+          rate: parseFloat(cv.exchange_rate) || 0, note: cv.note || '',
+        });
+      }
+    }
+
+    // Bashkoj datat: nga daily_records, bank_movements dhe konvertimet.
+    const allDates = new Set(rows.map(r => r.date));
+    for (const d of Object.keys(bmByDate))   allDates.add(d);
+    for (const d of Object.keys(convByDate)) allDates.add(d);
+    const sortedDates = [...allDates].sort();
+
+    const rowsByDate = {};
+    for (const r of rows) rowsByDate[r.date] = r;
+
     const running = { LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 };
-    const history = rows.map(r => {
+    const history = sortedDates.map(date => {
+      const r  = rowsByDate[date] || {};
+      const bm = bmByDate[date]   || {};
+      const cv = convByDate[date] || {};
       const perCur = {};
       for (const c of CURS) {
-        const net = (r[`dep_${c}`] + r[`co_${c}`]) - r[`wd_${c}`];
+        const rawDep = r[`dep_${c}`] || 0;   // safe_deposit_{cur} nga daily_records
+        const rawWd  = r[`wd_${c}`]  || 0;   // safe_withdraw_{cur}
+        const co     = r[`co_${c}`]  || 0;
+        const convIn  = cv[c]?.in  || 0;
+        const convOut = cv[c]?.out || 0;
+        // "Derdhje" e pastër = bankë→kasafortë (safe_deposit ekziston vetëm nga
+        // konvertimet, ndaj e heqim conv_in që të mos dyfishohet).
+        const depositPure  = Math.max(0, rawDep - convIn) + (bm[`bm_${c}`] || 0);
+        const withdrawPure = Math.max(0, rawWd  - convOut);
+        const net = (depositPure + co + convIn) - (withdrawPure + convOut);
         const balanceBefore = running[c];
         running[c] += net;
         perCur[c] = {
-          deposit:  +r[`dep_${c}`].toFixed(2),
-          closeout_in: +r[`co_${c}`].toFixed(2),
-          withdraw: +r[`wd_${c}`].toFixed(2),
+          deposit:  +depositPure.toFixed(2),
+          closeout_in: +co.toFixed(2),
+          conv_in:  +convIn.toFixed(2),
+          conv_out: +convOut.toFixed(2),
+          withdraw: +withdrawPure.toFixed(2),
           net:      +net.toFixed(2),
           balance_before: +balanceBefore.toFixed(2),
           balance:  +running[c].toFixed(2),
+          conversions: cv[c]?.events || [],
         };
       }
-      return { date: r.date, ...perCur };
+      return { date, ...perCur };
     });
 
     const balance = {};
@@ -3671,6 +4434,94 @@ app.delete('/api/safe-conversions/:id', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'not found' });
     await run('DELETE FROM safe_conversions WHERE id = ?', [id]);
     await syncSafeConvertTotals(row.date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// BANK MOVEMENTS — Lëvizje Banke (Kesh → Bankë, Bankë → Kasafortë)
+// ============================================================
+// Regjistër i pavarur. Bilanci i bankës = SUM(to_bank) − SUM(to_safe).
+// Për to_safe (bankë → kasafortë), shuma i shtohet edhe kasafortës — kjo bëhet
+// duke agreguar bank_movements(to_safe) brenda /api/kasaforta pa prekur kolonat
+// e safe_deposit që janë të rezervuara për safe_conversions.
+
+const CURS_BM = ['lek', 'eur', 'usd', 'gbp', 'chf'];
+
+app.get('/api/bank-movements', async (req, res) => {
+  try {
+    const { from, to, limit } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND date >= ?'; params.push(from); }
+    if (to)   { where += ' AND date <= ?'; params.push(to); }
+    const lim = Math.min(parseInt(limit) || 200, 500);
+    const rows = await queryAll(
+      `SELECT id, date, direction,
+              amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              person, note, created_at
+         FROM bank_movements
+        WHERE ${where}
+        ORDER BY date DESC, created_at DESC
+        LIMIT ${lim}`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/bank-balance', async (req, res) => {
+  try {
+    // + to_bank (depozito në bankë), − to_safe (tërheqje për në kasafortë)
+    const parts = CURS_BM.map(c =>
+      `COALESCE(SUM(CASE WHEN direction='to_bank' THEN amount_${c} ELSE -amount_${c} END), 0) AS bal_${c}`
+    ).join(', ');
+    const row = await queryOne(`SELECT ${parts} FROM bank_movements`) || {};
+    const balance = {};
+    for (const c of CURS_BM) balance[c.toUpperCase()] = +((row[`bal_${c}`] || 0)).toFixed(2);
+    res.json({ balance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/bank-movements', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date = d.date;
+    const direction = String(d.direction || '').trim();
+    if (!date) return res.status(400).json({ error: 'date required' });
+    if (!['to_bank', 'to_safe'].includes(direction)) {
+      return res.status(400).json({ error: "direction duhet të jetë 'to_bank' ose 'to_safe'" });
+    }
+    const amounts = {};
+    let anyPositive = false;
+    for (const c of CURS_BM) {
+      const v = parseFloat(d[`amount_${c}`]) || 0;
+      if (v < 0) return res.status(400).json({ error: `amount_${c} duhet ≥ 0` });
+      amounts[c] = v;
+      if (v > 0) anyPositive = true;
+    }
+    if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0 në të paktën një monedhë' });
+
+    const person = String(d.person || '').trim();
+    const note   = String(d.note   || '').trim();
+    const cols = CURS_BM.map(c => `amount_${c}`);
+    const vals = CURS_BM.map(c => amounts[c]);
+    const result = await run(
+      `INSERT INTO bank_movements (date, direction, ${cols.join(', ')}, person, note)
+       VALUES (?, ?, ${cols.map(() => '?').join(', ')}, ?, ?)`,
+      [date, direction, ...vals, person, note]
+    );
+    const rawId = result?.lastInsertRowid ?? result?.lastID;
+    res.json({ success: true, id: typeof rawId === 'bigint' ? Number(rawId) : rawId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/bank-movements/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await queryOne('SELECT id FROM bank_movements WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await run('DELETE FROM bank_movements WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4436,8 +5287,15 @@ app.get('/api/reports/expenses', async (req, res) => {
 // ── Raport Xhiro Ditore (nga Faturat e Shitjes) ──────────────
 app.get('/api/reports/daily-turnover', async (req, res) => {
   try {
-    const { from, to, payment_method, currency } = req.query;
+    const { to, payment_method, currency } = req.query;
+    let { from } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    if (req.user?.role === 'sales') {
+      const min = new Date(); min.setDate(min.getDate() - 29);
+      const minStr = min.toISOString().split('T')[0];
+      if (from < minStr) from = minStr;
+    }
 
     const params = [from, to];
     let where = `i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0`;

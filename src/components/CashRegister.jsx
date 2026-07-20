@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
 
 const CURRENCIES = ['lek', 'eur', 'usd', 'gbp', 'chf']
 const CUR_LABELS = { lek: 'LEK', eur: 'EUR', usd: 'USD', gbp: 'GBP', chf: 'CHF' }
@@ -163,7 +163,8 @@ export default function CashRegister({ date }) {
 
   // ── Import functions ──────────────────────────────────────────────────────
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
+    const XLSX = await loadXLSX()
     const wb = XLSX.utils.book_new()
     const rows = Object.keys(ARKA_FIELD_LABELS).map(label => [label, ''])
     const ws = XLSX.utils.aoa_to_sheet([['Fusha', 'Vlera'], ...rows])
@@ -176,7 +177,8 @@ export default function CashRegister({ date }) {
     const file = e.target.files[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
+      const XLSX = await loadXLSX()
       const wb = XLSX.read(ev.target.result, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
@@ -462,23 +464,6 @@ export default function CashRegister({ date }) {
                   onBlur={handleBlur}
                   className="input-field" />
               </div>
-            </div>
-          </div>
-
-          {/* Currency Conversion */}
-          <div className="card">
-            <div className="section-title">Konvertim Valute</div>
-            <div className="space-y-2">
-              {CURRENCIES.map(cur => (
-                <div key={cur} className="grid grid-cols-2 gap-1 items-center">
-                  <label className="text-xs text-gray-600">{CUR_LABELS[cur]}</label>
-                  <input type="number" step="any" placeholder="0"
-                    value={form[`conv_${cur}`]}
-                    onChange={e => handleChange(`conv_${cur}`, e.target.value)}
-                    onBlur={handleBlur}
-                    className="input-field" />
-                </div>
-              ))}
             </div>
           </div>
 

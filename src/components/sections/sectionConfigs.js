@@ -7,11 +7,6 @@ export const SECTION_CONFIGS = {
     description: 'Shpenzime ditore të paguara nga arka.',
     rows: [{ label: 'Shpenzime', fields: { lek: 'expenses_lek', eur: 'expenses_eur', usd: 'expenses_usd' } }],
   },
-  'arka-konv-valute': {
-    title: 'Konvertim Valute',
-    description: 'Konvertim mes monedhave brenda arkës.',
-    rows: [{ label: 'Konvertim', fields: { lek: 'conv_lek', eur: 'conv_eur', usd: 'conv_usd', gbp: 'conv_gbp', chf: 'conv_chf' } }],
-  },
   // 'arka-konv-hurda' rendërohet nga komponenti KonvertimHurda (listë blerjesh me gram).
   'arka-kasaforta': {
     title: 'Gjendje Kasaforta',

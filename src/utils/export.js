@@ -1,7 +1,8 @@
-import * as XLSX from 'xlsx'
+import { loadXLSX } from '../lib/xlsx.js'
 
-export function exportToExcel(filename, rows, opts = {}) {
+export async function exportToExcel(filename, rows, opts = {}) {
   const { sheetName = 'Raporti', columnWidths } = opts
+  const XLSX = await loadXLSX()
   const ws = XLSX.utils.json_to_sheet(rows)
   if (columnWidths) ws['!cols'] = columnWidths.map(w => ({ wch: w }))
   const wb = XLSX.utils.book_new()

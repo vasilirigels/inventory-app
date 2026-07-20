@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getUser } from '../lib/auth.js'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -8,12 +9,12 @@ function fmt(v) {
   return x.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// Pjesa e faturës e paguar realisht me cash/POS në momentin e regjistrimit.
+// Pjesa e faturës e paguar realisht me cash/bankë në momentin e regjistrimit.
 // Snapshot — nuk merr parasysh pagesat e mëvonshme nga Detyrime modal.
 // Për 'debt' merret parapagimi (mund të jetë > 0 nëse klienti la një pjesë kesh).
 function truePaidCashPos(inv) {
   const pm = inv.payment_method || 'cash'
-  if (pm === 'mikse') return n(inv.paid_cash) + n(inv.paid_pos)
+  if (pm === 'mikse') return n(inv.paid_cash) + n(inv.paid_pos) + n(inv.paid_bank)
   const init = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
   return init
 }
@@ -21,9 +22,16 @@ function truePaidCashPos(inv) {
 function emptyItem() {
   return {
     product_id: null, barcode: '', name: '',
-    qty: 1, unit_price_no_vat: 0, discount_percent: 0,
+    qty: 1, gram: 0, unit_price_no_vat: 0, discount_percent: 0,
     vat_rate: 20,
+    on_promotion: 0, promo_discount_pct: 0,
   }
+}
+
+// Zbritje euro derivohet nga zbritje % dhe totali bruto i rreshtit.
+function discountEurFor(it) {
+  const base = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0)
+  return base * ((parseFloat(it.discount_percent) || 0) / 100)
 }
 
 function computeLine(it) {
@@ -249,25 +257,255 @@ function ProductPickerCell({ value, onPick }) {
       {open && (results.length > 0 || loading) && (
         <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
           {loading && <div className="p-2 text-[11px] text-slate-400">Duke kërkuar...</div>}
-          {results.map(p => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => pick(p)}
-              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 last:border-0"
-            >
-              <div className="text-xs font-medium text-slate-800 truncate">{p.name}</div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
-                <span className="font-mono">{p.barcode || p.sku || '—'}</span>
-                <span>
-                  {p.sell_price ? `€${p.sell_price}` : ''} · stok: {p.stock}
-                  {p.vat_rate != null ? ` · TVSH ${p.vat_rate}%` : ''}
-                </span>
-              </div>
-            </button>
-          ))}
+          {results.map(p => {
+            const basePrice = parseFloat(p.sell_price) || 0
+            const onPromo = !!p.is_promotion && (parseFloat(p.promo_discount_pct) || 0) > 0
+            const promoPrice = onPromo ? basePrice * (1 - parseFloat(p.promo_discount_pct) / 100) : basePrice
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => pick(p)}
+                className={`w-full text-left px-3 py-1.5 border-b border-slate-100 last:border-0 ${onPromo ? 'hover:bg-rose-50 bg-rose-50/30' : 'hover:bg-blue-50'}`}
+              >
+                <div className="text-xs font-medium text-slate-800 truncate flex items-center gap-1">
+                  {p.name}
+                  {onPromo && <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-semibold">🏷️ -{p.promo_discount_pct}%</span>}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span className="font-mono">{p.barcode || p.sku || '—'}</span>
+                  <span>
+                    {basePrice > 0 && (
+                      onPromo
+                        ? <><span className="line-through text-slate-400 mr-1">€{basePrice.toFixed(2)}</span><span className="text-rose-700 font-bold">€{promoPrice.toFixed(2)}</span></>
+                        : `€${basePrice}`
+                    )}
+                    {' · '}stok: {p.stock}
+                    {p.vat_rate != null ? ` · TVSH ${p.vat_rate}%` : ''}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Partial return modal ────────────────────────────────────────────────────
+// Ngarkon artikujt e faturës origjinale me sasi editable + checkbox. User
+// zgjedh çfarë kthehet dhe në ç'sasi. Totali i rimbursimit rillogaritet live.
+// Në submit thërret /api/invoices/:id/credit-note me `items: [{item_id, qty}]`.
+function PartialReturnModal({ invoice, onClose, onCreated }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  // Për çdo item id: { selected: bool, qty: string }
+  const [rows, setRows] = useState({})
+  // Rimbursim manual — default '' (automatik nga totali i artikujve).
+  // Kur user e ndryshon, dërgohet si refund_amount te backend-i.
+  const [refundOverride, setRefundOverride] = useState('')
+  const [refundTouched, setRefundTouched] = useState(false)
+
+  useEffect(() => {
+    let cancel = false
+    async function load() {
+      setLoading(true)
+      try {
+        const inv = await fetch(`/api/invoices/${invoice.id}`).then(r => r.json())
+        if (cancel) return
+        const its = Array.isArray(inv.items) ? inv.items : []
+        setItems(its)
+        // Fillo me të gjitha të pazgjedhura + sasia = origjinali (që klienti të
+        // klikojë vetëm ato që kthen dhe të përshtatë sasinë nëse duhet).
+        const initial = {}
+        for (const it of its) {
+          initial[it.id] = { selected: false, qty: String(Math.abs(parseFloat(it.qty) || 0)) }
+        }
+        setRows(initial)
+      } catch (_) {
+        setItems([])
+      } finally { if (!cancel) setLoading(false) }
+    }
+    load()
+    return () => { cancel = true }
+  }, [invoice.id])
+
+  const toggle = (id) => setRows(r => ({ ...r, [id]: { ...r[id], selected: !r[id]?.selected } }))
+  const setQty = (id, q) => setRows(r => ({ ...r, [id]: { ...r[id], qty: q } }))
+  const selectAll = () => {
+    setRows(r => {
+      const next = { ...r }
+      for (const it of items) next[it.id] = { ...next[it.id], selected: true }
+      return next
+    })
+  }
+  const selectNone = () => {
+    setRows(r => {
+      const next = { ...r }
+      for (const it of items) next[it.id] = { ...next[it.id], selected: false }
+      return next
+    })
+  }
+
+  // Rreshtat e zgjedhur me sasi > 0 dhe totali i rimbursimit.
+  const currency = invoice.currency || 'LEK'
+  const selected = items
+    .map(it => {
+      const r = rows[it.id]
+      if (!r?.selected) return null
+      const retQty = parseFloat(r.qty) || 0
+      const origQty = Math.abs(parseFloat(it.qty) || 0)
+      const ratio = origQty > 0 ? Math.min(1, retQty / origQty) : 0
+      const refund = (parseFloat(it.total_with_vat) || 0) * ratio
+      return { it, retQty, refund }
+    })
+    .filter(x => x && x.retQty > 0)
+  const refundTotal = selected.reduce((s, x) => s + x.refund, 0)
+
+  // Sasia që aktualisht do të rimbursohet — default = totali auto, ose vlera
+  // që ka shkruar user-i nëse e ka mbishkruar.
+  const effectiveRefund = refundTouched
+    ? Math.max(0, parseFloat(refundOverride) || 0)
+    : refundTotal
+  const refundDiff = +(refundTotal - effectiveRefund).toFixed(2)
+
+  const submit = async () => {
+    if (saving) return
+    if (selected.length === 0) { alert('Zgjidh të paktën një artikull për kthim.'); return }
+    if (refundTouched && effectiveRefund > refundTotal + 0.005) {
+      alert(`Rimbursimi (${fmt(effectiveRefund)}) nuk mund të jetë më i madh se totali i artikujve të kthyer (${fmt(refundTotal)}).`)
+      return
+    }
+    setSaving(true)
+    try {
+      const payload = {
+        items: selected.map(x => ({ item_id: x.it.id, qty: x.retQty })),
+        ...(refundTouched ? { refund_amount: effectiveRefund } : {}),
+      }
+      const res = await fetch(`/api/invoices/${invoice.id}/credit-note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      const r = await res.json()
+      onCreated?.(r)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="modal-header">
+          <div>
+            <h3 className="font-bold text-slate-800 text-lg">↩️ Kthim nga fatura {invoice.invoice_no}</h3>
+            <p className="text-xs text-slate-500">
+              {invoice.customer_name || 'Pa klient'} · Zgjidh artikujt që klienti po kthen dhe përshtat sasinë
+            </p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="text-center text-slate-400 py-8">Duke ngarkuar artikujt...</div>
+          ) : items.length === 0 ? (
+            <div className="text-center text-slate-400 py-8">Kjo faturë nuk ka artikuj.</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-slate-500">{items.length} artikuj në faturë</span>
+                <div className="flex gap-1">
+                  <button onClick={selectAll} className="px-2 py-1 text-[11px] rounded bg-slate-100 hover:bg-slate-200 text-slate-700">Zgjidh të gjitha</button>
+                  <button onClick={selectNone} className="px-2 py-1 text-[11px] rounded bg-slate-100 hover:bg-slate-200 text-slate-700">Pastro</button>
+                </div>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th className="px-2 py-2 w-8"></th>
+                    <th className="px-2 py-2 text-left font-semibold">Produkti</th>
+                    <th className="px-2 py-2 text-right font-semibold w-20">Sasia orig.</th>
+                    <th className="px-2 py-2 text-right font-semibold w-24">Kthen</th>
+                    <th className="px-2 py-2 text-right font-semibold w-28">Rimbursim</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(it => {
+                    const r = rows[it.id] || { selected: false, qty: '0' }
+                    const origQty = Math.abs(parseFloat(it.qty) || 0)
+                    const retQty = parseFloat(r.qty) || 0
+                    const ratio = origQty > 0 ? Math.min(1, retQty / origQty) : 0
+                    const refund = (parseFloat(it.total_with_vat) || 0) * ratio
+                    return (
+                      <tr key={it.id} className={`border-b border-slate-100 ${r.selected ? 'bg-purple-50/50' : ''}`}>
+                        <td className="px-2 py-2 text-center">
+                          <input type="checkbox" checked={!!r.selected} onChange={() => toggle(it.id)} className="w-4 h-4 accent-purple-600" />
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="text-slate-800 font-medium">{it.name || <span className="italic text-slate-400">— pa emër —</span>}</div>
+                          {it.barcode && <div className="text-[10px] font-mono text-slate-500">{it.barcode}</div>}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-slate-600">{origQty}</td>
+                        <td className="px-2 py-2">
+                          <input type="number" step="any" min="0" max={origQty}
+                            value={r.qty}
+                            disabled={!r.selected}
+                            onChange={e => setQty(it.id, e.target.value)}
+                            className="input-field-sm text-right tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums font-semibold text-slate-800">
+                          {r.selected && retQty > 0 ? fmt(refund) : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+        <div className="modal-footer flex-col items-stretch gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali i artikujve ({currency})</label>
+              <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold">{fmt(refundTotal)}</div>
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-semibold">Rimbursimi aktual ({currency})</label>
+              <input
+                type="number" step="0.01" min="0" max={refundTotal || undefined}
+                value={refundTouched ? refundOverride : (refundTotal ? refundTotal.toFixed(2) : '')}
+                onChange={e => { setRefundOverride(e.target.value); setRefundTouched(true) }}
+                className="input-field tabular-nums font-bold text-purple-700"
+                placeholder={refundTotal.toFixed(2)}
+                disabled={selected.length === 0}
+              />
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Default = totali i artikujve. Mund të japësh më pak (p.sh. amortizim).
+              </p>
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-semibold">Fee / e mbajtur nga shopi</label>
+              <div className={`input-field tabular-nums font-bold ${refundDiff > 0.005 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                {refundDiff > 0.005 ? `${fmt(refundDiff)} ${currency}` : '✓ Rimbursim i plotë'}
+              </div>
+              {refundDiff > 0.005 && (
+                <p className="text-[10px] text-amber-600 mt-0.5">Nuk regjistrohet si borxh.</p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button onClick={onClose} className="btn-secondary">Anulo</button>
+            <button onClick={submit} disabled={saving || selected.length === 0}
+              className="btn-primary disabled:opacity-50">
+              {saving ? '⏳ Duke krijuar...' : `↩️ Krijo kthimin (${selected.length})`}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -349,7 +587,7 @@ function CreditNotePicker({ date, onClose, onPicked }) {
 }
 
 // ── List view: all invoices for the day ──────────────────────────────────────
-function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }) {
+function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, online = false }) {
   const [rawList, setRawList] = useState([])
   const [loading, setLoading] = useState(true)
   const [fClient, setFClient]   = useState('')
@@ -364,6 +602,8 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
   const [categories, setCategories] = useState([])
   const [fromDate, setFromDate] = useState(date)
   const [toDate, setToDate]     = useState(date)
+  // Vetëm në modalitet online: filtër statusi porosie.
+  const [fOrderStatus, setFOrderStatus] = useState('all')
 
   useEffect(() => { setFromDate(date); setToDate(date) }, [date])
 
@@ -381,6 +621,10 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
     const params = new URLSearchParams()
     if (fMaterial) params.set('material', fMaterial)
     if (fCategory) params.set('category', fCategory)
+    // Filtër i domosdoshëm: online=1 për "Shitje Online", online=0 për shitjet
+    // e zakonshme të dyqanit. Kështu të dy modulet nuk shohin njëri-tjetrin.
+    params.set('online', online ? '1' : '0')
+    if (online && fOrderStatus !== 'all') params.set('status', fOrderStatus)
     const qs = params.toString()
     const base = fromDate === toDate
       ? `/api/invoices/by-date/${fromDate}`
@@ -390,14 +634,19 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
       .then(r => r.json())
       .then(data => { setRawList(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => { setRawList([]); setLoading(false) })
-  }, [fromDate, toDate, refreshKey, fMaterial, fCategory])
+  }, [fromDate, toDate, refreshKey, fMaterial, fCategory, online, fOrderStatus])
 
   const rangeActive = fromDate !== date || toDate !== date
 
   const fc = fClient.toLowerCase().trim()
   const list = rawList.filter(inv => {
     if (fCurrency !== 'all' && (inv.currency || 'LEK') !== fCurrency) return false
-    if (fPayment !== 'all' && (inv.payment_method || 'cash') !== fPayment) return false
+    if (fPayment !== 'all') {
+      const ipm = inv.payment_method || 'cash'
+      // 'bank' në filtër përfshin edhe faturat e vjetra me pm='pos'
+      const matches = fPayment === 'bank' ? (ipm === 'bank' || ipm === 'pos') : ipm === fPayment
+      if (!matches) return false
+    }
     if (fType === 'sale'      && (inv.cancelled || inv.is_credit_note)) return false
     if (fType === 'return'    && (inv.cancelled || !inv.is_credit_note)) return false
     if (fType === 'cancelled' && !inv.cancelled) return false
@@ -448,18 +697,61 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
 
   const filtersActive = fc || fCurrency !== 'all' || fPayment !== 'all' || fType !== 'all' || fMaterial || fCategory
 
+  // Statuset e porosisë online — pills në krye kur online.
+  const ONLINE_STATUS_META = {
+    e_re:          { label: 'E re',          cls: 'bg-blue-100 text-blue-700',    activeCls: 'bg-blue-600 text-white',    icon: '🆕' },
+    ne_pergatitje: { label: 'Në përgatitje', cls: 'bg-amber-100 text-amber-700',  activeCls: 'bg-amber-600 text-white',   icon: '📦' },
+    derguar:       { label: 'Dërguar',       cls: 'bg-purple-100 text-purple-700',activeCls: 'bg-purple-600 text-white',  icon: '🚚' },
+    dorezuar:      { label: 'Dorëzuar',      cls: 'bg-emerald-100 text-emerald-700', activeCls: 'bg-emerald-600 text-white', icon: '✓' },
+    anuluar:       { label: 'Anuluar',       cls: 'bg-slate-100 text-slate-500',  activeCls: 'bg-slate-600 text-white',   icon: '❌' },
+  }
+  const onlineStatusCounts = online
+    ? rawList.reduce((a, i) => { const s = i.order_status || 'e_re'; a[s] = (a[s] || 0) + 1; return a }, {})
+    : {}
+  const me = getUser()
+  const isAdmin = me?.role === 'admin'
+
+  const patchStatus = async (id, status) => {
+    try {
+      const res = await fetch(`/api/invoices/${id}/order-status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_status: status }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      // Rifresko listën
+      setRawList(prev => prev.map(i => i.id === id ? { ...i, order_status: status } : i))
+    } catch (_) { /* ignore */ }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Fatura të Shitjes</h2>
+          <h2 className="text-lg font-bold text-slate-800">
+            {online ? '🛒 Shitje Online' : 'Fatura të Shitjes'}
+          </h2>
           <p className="text-xs text-slate-500">
             {fromDate === toDate
-              ? 'Lista e faturave për këtë datë'
-              : `Lista e faturave nga ${fromDate} në ${toDate}`}
+              ? (online ? 'Porositë online për këtë datë' : 'Lista e faturave për këtë datë')
+              : (online ? `Porositë online nga ${fromDate} në ${toDate}` : `Lista e faturave nga ${fromDate} në ${toDate}`)}
             {filtersActive && <span className="ml-2 text-blue-600">· {list.length} të filtruara nga {rawList.length}</span>}
           </p>
-          {(counts.sale + counts.return + counts.cancelled) > 0 && (
+          {online && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <button
+                onClick={() => setFOrderStatus('all')}
+                className={`badge cursor-pointer ${fOrderStatus === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >📋 Të gjitha: {rawList.length}</button>
+              {Object.entries(ONLINE_STATUS_META).map(([id, meta]) => (
+                <button key={id}
+                  onClick={() => setFOrderStatus(id)}
+                  className={`badge cursor-pointer ${fOrderStatus === id ? meta.activeCls : meta.cls + ' hover:opacity-80'}`}
+                >{meta.icon} {meta.label}: {onlineStatusCounts[id] || 0}</button>
+              ))}
+            </div>
+          )}
+          {!online && (counts.sale + counts.return + counts.cancelled) > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               <button
                 onClick={() => setFType('all')}
@@ -486,7 +778,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
             </div>
           )}
         </div>
-        <button onClick={onCreate} className="btn-primary">+ Faturë e Re</button>
+        <button onClick={onCreate} className="btn-primary">{online ? '+ Porosi e Re' : '+ Faturë e Re'}</button>
       </div>
 
       {/* Filters */}
@@ -537,7 +829,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
             <option value="all">Të gjitha</option>
             <option value="mikse">🔀 Mikse</option>
             <option value="cash">💵 Cash</option>
-            <option value="pos">💳 POS</option>
+            <option value="bank">💳 Me POS</option>
             <option value="debt">⚠️ Borxh</option>
           </select>
         </div>
@@ -587,22 +879,24 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
             <button onClick={onCreate} className="btn-primary mx-auto">+ Krijo Faturën e Parë</button>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fature</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">NIPT</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Pagesa</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Pa Zbritje</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Zbritja</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Pa TVSH</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">TVSH</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">TOTALI</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Shuma e Paguar</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Shuma Pa Paguar</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fature</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase">NIPT</th>
+                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
+                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Pagesa</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Pa Zbritje</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Zbritja</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Pa TVSH</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">TVSH</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">TOTALI</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Shuma e Paguar</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Shuma Pa Paguar</th>
+                {online && <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Statusi</th>}
+                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-40">Veprime</th>
               </tr>
             </thead>
             <tbody>
@@ -615,8 +909,8 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                 const pm  = inv.payment_method
                 const pmBadge = pm === 'debt'
                   ? <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
-                  : pm === 'pos'
-                  ? <span className="badge bg-purple-100 text-purple-700">💳 POS</span>
+                  : (pm === 'bank' || pm === 'pos')
+                  ? <span className="badge bg-blue-100 text-blue-700">💳 Me POS</span>
                   : pm === 'mikse'
                   ? <span className="badge bg-teal-100 text-teal-700">🔀 Mikse</span>
                   : <span className="badge bg-emerald-100 text-emerald-700">💵 Cash</span>
@@ -631,18 +925,18 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                   : 'border-b border-slate-100 hover:bg-slate-50'
                 return (
                 <tr key={inv.id} className={rowCls}>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                  <td className="px-2 py-2 font-mono text-xs text-slate-700">
                     {inv.invoice_no}
                     {isCancelled && <span className="ml-1.5 badge bg-slate-200 text-slate-600 text-[9px]">ANULUAR</span>}
                     {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 text-[9px]">KREDITORE</span>}
                   </td>
-                  <td className="px-4 py-3 text-slate-800">{inv.customer_name || <span className="text-slate-400 italic">— pa klient —</span>}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{inv.customer_nipt || '—'}</td>
-                  <td className="px-4 py-3 text-center text-xs">
+                  <td className="px-2 py-2 text-slate-800">{inv.customer_name || <span className="text-slate-400 italic">— pa klient —</span>}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-slate-500">{inv.customer_nipt || '—'}</td>
+                  <td className="px-2 py-2 text-center text-xs">
                     <span className="badge badge-blue">{inv.currency}</span>
                   </td>
-                  <td className="px-4 py-3 text-center text-xs">{pmBadge}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  <td className="px-2 py-2 text-center text-xs">{pmBadge}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-700">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
                     {isForeign && (
                       <div className="text-[10px] font-normal text-slate-500 italic">
@@ -650,7 +944,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className={`px-4 py-3 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400'}`}>
+                  <td className={`px-2 py-2 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400'}`}>
                     {n(inv.total_discount) > 0.005 ? `-${fmt(inv.total_discount)}` : '—'}
                     {isForeign && n(inv.total_discount) > 0.005 && (
                       <div className="text-[10px] font-normal text-orange-500/80 italic">
@@ -658,7 +952,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-700">
                     {fmt(inv.subtotal_no_vat)}
                     {isForeign && (
                       <div className="text-[10px] font-normal text-slate-500 italic">
@@ -666,7 +960,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-700">
                     {fmt(inv.total_vat)}
                     {isForeign && n(inv.total_vat) > 0.005 && (
                       <div className="text-[10px] font-normal text-slate-500 italic">
@@ -674,7 +968,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900">
+                  <td className="px-2 py-2 text-right tabular-nums font-bold text-slate-900">
                     {fmt(inv.total_with_vat)}
                     {isForeign && (
                       <div className="text-[10px] font-normal text-slate-500 italic">
@@ -682,7 +976,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700">
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-emerald-700">
                     {fmt(initPaid)}
                     {isForeign && initPaid > 0.005 && (
                       <div className="text-[10px] font-normal text-emerald-600/70 italic">
@@ -690,7 +984,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className={`px-4 py-3 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : due < -0.005 ? 'text-purple-700' : 'text-emerald-600'}`}>
+                  <td className={`px-2 py-2 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : due < -0.005 ? 'text-purple-700' : 'text-emerald-600'}`}>
                     {Math.abs(due) > 0.005 ? fmt(due) : '✓'}
                     {isForeign && Math.abs(due) > 0.005 && (
                       <div className={`text-[10px] font-normal italic ${due > 0.005 ? 'text-red-500/80' : 'text-purple-600/80'}`}>
@@ -698,17 +992,52 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  {online && (() => {
+                    const cur = inv.order_status || 'e_re'
+                    const meta = ONLINE_STATUS_META[cur]
+                    return (
+                      <td className="px-2 py-2 text-center">
+                        <span className={`badge whitespace-nowrap ${meta?.cls || ''}`} title={`Statusi: ${meta?.label}`}>
+                          {meta?.icon} {meta?.label}
+                        </span>
+                      </td>
+                    )
+                  })()}
+                  <td className="px-2 py-3">
                     <div className="flex items-center justify-center gap-1 flex-wrap">
                       <button onClick={() => onOpen(inv.id)} className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-[11px] font-medium">Hap</button>
-                      {!isCancelled && !isCredit && (
+                      {online && (() => {
+                        const cur = inv.order_status || 'e_re'
+                        // Klasat statike (Tailwind s'suporton dinamike te build).
+                        const BTN_CLS = {
+                          ne_pergatitje: 'bg-amber-50 hover:bg-amber-100 text-amber-700',
+                          derguar:       'bg-purple-50 hover:bg-purple-100 text-purple-700',
+                          dorezuar:      'bg-emerald-50 hover:bg-emerald-100 text-emerald-700',
+                          anuluar:       'bg-slate-100 hover:bg-slate-200 text-slate-700',
+                        }
+                        const btns = []
+                        if (cur === 'e_re')          btns.push(['ne_pergatitje', '📦'])
+                        if (cur === 'ne_pergatitje') btns.push(['derguar', '🚚'])
+                        if (cur === 'derguar')       btns.push(['dorezuar', '✓'])
+                        if (cur !== 'anuluar' && cur !== 'dorezuar') btns.push(['anuluar', '❌'])
+                        return btns.map(([s, icon]) => (
+                          <button key={s} onClick={() => patchStatus(inv.id, s)}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-medium ${BTN_CLS[s]}`}
+                            title={`Shëno "${ONLINE_STATUS_META[s]?.label}"`}
+                          >{icon}</button>
+                        ))
+                      })()}
+                      {!online && !isCancelled && !isCredit && (
                         <button
                           onClick={() => onStornim?.(inv.id, inv.invoice_no)}
                           className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-[11px] font-medium"
-                          title="Krijo faturë me minus dhe hape"
-                        >↩️ Stornim</button>
+                          title="Zgjidh artikujt që kthehen (mund të jetë kthim i pjesshëm)"
+                        >↩️ Kthim</button>
                       )}
-                      <button onClick={() => onDelete(inv.id, inv.invoice_no)} className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-medium">Fshi</button>
+                      {isAdmin && (
+                        <button onClick={() => onDelete(inv.id, inv.invoice_no)}
+                          className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-medium">Fshi</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -719,26 +1048,28 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
                 const t = totalsByCur[cur]
                 return (
                   <tr key={cur} className={idx > 0 ? 'border-t border-emerald-200' : ''}>
-                    <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 uppercase tracking-wide">
+                    <td colSpan={5} className="px-2 py-2 text-xs font-bold text-emerald-700 uppercase tracking-wide">
                       💵 TOTAL ({cur}) <span className="text-[10px] font-normal text-emerald-600">— {t.count} {t.count === 1 ? 'faturë' : 'fatura'}</span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.gross)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.gross)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-orange-600">
                       {t.disc > 0.005 ? `-${fmt(t.disc)}` : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.sub)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.vat)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(t.tot)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 text-base">{fmt(t.paid)}</td>
-                    <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.sub)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.vat)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(t.tot)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-emerald-700 text-base">{fmt(t.paid)}</td>
+                    <td className={`px-2 py-2 text-right tabular-nums font-extrabold text-base ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
                       {t.due > 0.005 ? fmt(t.due) : '✓'}
                     </td>
+                    {online && <td></td>}
                     <td></td>
                   </tr>
                 )
               })}
             </tfoot>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -746,7 +1077,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey }
 }
 
 // ── Editor: single invoice with line items ───────────────────────────────────
-function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
+function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   const [loading, setLoading]         = useState(true)
   const [saving, setSaving]           = useState(false)
   const [invoiceDate, setInvoiceDate] = useState(date)
@@ -760,7 +1091,15 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
   const [paidTouched, setPaidTouched] = useState(false)
   // Mixed-payment breakdown (used only when paymentMethod === 'mikse')
   const [paidCash, setPaidCash]       = useState('')
-  const [paidPos,  setPaidPos]        = useState('')
+  const [paidBank, setPaidBank]       = useState('')
+  // Fushat për porosi online — përdoren vetëm kur `online === true`.
+  const [channel, setChannel]         = useState('Instagram')
+  const [shippingAddress, setShippingAddress] = useState('')
+  const [trackingNo, setTrackingNo]   = useState('')
+  const [orderStatus, setOrderStatus] = useState('e_re')
+  // Splits pagese për "mikse" — çdo rresht ka metodë + monedhë + shumë + kurs
+  // drejt LEK. Backend-i konverton në monedhën e faturës për amount_paid.
+  const [paymentSplits, setPaymentSplits] = useState([])
   const [notes, setNotes]             = useState('')
   const [items, setItems]             = useState([emptyItem()])
   const [allRates, setAllRates]       = useState({ LEK: 1 })
@@ -789,18 +1128,20 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           })
           setCurrency(inv.currency || 'LEK')
           setExchangeRate(inv.exchange_rate || 1)
-          const pm = ['cash','debt','pos','mikse'].includes(inv.payment_method) ? inv.payment_method : 'cash'
+          // Legacy 'pos' normalizohet në 'bank' kur ngarkohet.
+          const rawPm = inv.payment_method === 'pos' ? 'bank' : inv.payment_method
+          const pm = ['cash','bank','debt','mikse'].includes(rawPm) ? rawPm : 'cash'
           setPaymentMethod(pm)
           // Show what was recorded at sale registration, not the current paid total —
           // later payments from Detyrime Klienti must not shift the editor either.
           const initPaid = inv.initial_amount_paid != null ? inv.initial_amount_paid : inv.amount_paid
-          // Për cash/POS ku paid përputhet me total-in (rasti normal, dhe kreditore),
+          // Për cash/bankë ku paid përputhet me total-in (rasti normal, dhe kreditore),
           // e lëmë bosh që "Shuma e Paguar" të sinkronizohet automatikisht kur user
           // ndryshon çmimet e artikujve. Ndryshe faturat kreditore mbanin paid=old-total
           // dhe krijonin një "due" të rrejshëm.
           const totalInv = n(inv.total_with_vat)
           const paidMatchesTotal = initPaid != null && Math.abs(n(initPaid) - totalInv) < 0.01
-          if ((pm === 'cash' || pm === 'pos') && paidMatchesTotal) {
+          if ((pm === 'cash' || pm === 'bank') && paidMatchesTotal) {
             setAmountPaid('')
             setPaidTouched(false)
           } else {
@@ -808,9 +1149,41 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
             setPaidTouched(true)
           }
           setPaidCash(inv.paid_cash != null ? String(inv.paid_cash) : '')
-          setPaidPos (inv.paid_pos  != null ? String(inv.paid_pos)  : '')
+          // Prefer paid_bank; fall back to legacy paid_pos.
+          const legacyBank = inv.paid_bank != null ? inv.paid_bank : inv.paid_pos
+          setPaidBank(legacyBank != null ? String(legacyBank) : '')
+          // Splits hidrohen nga backend-i; për fatura legacy pa splits
+          // krijojmë rreshta nga payment_method + paid_cash/paid_bank/amount_paid
+          // që UI e unifikuar të mos shohë kurrë një faturë pa splits.
+          if (Array.isArray(inv.payment_splits) && inv.payment_splits.length > 0) {
+            setPaymentSplits(inv.payment_splits.map(s => ({
+              method: s.method,
+              currency: s.currency,
+              amount: String(s.amount),
+              exchange_rate: String(s.exchange_rate),
+            })))
+          } else {
+            const invCur = inv.currency || 'LEK'
+            const invR = String(inv.exchange_rate || 1)
+            const legacy = []
+            if (pm === 'mikse') {
+              if (n(inv.paid_cash) !== 0) legacy.push({ method: 'cash', currency: invCur, amount: String(inv.paid_cash), exchange_rate: invR })
+              if (n(legacyBank)     !== 0) legacy.push({ method: 'bank', currency: invCur, amount: String(legacyBank), exchange_rate: invR })
+            } else if (pm === 'cash' || pm === 'bank') {
+              const paid = initPaid != null ? n(initPaid) : n(inv.total_with_vat)
+              if (paid !== 0) legacy.push({ method: pm, currency: invCur, amount: String(paid), exchange_rate: invR })
+            }
+            // 'debt' → splits mbeten bosh (asgjë nuk u pagua)
+            setPaymentSplits(legacy)
+          }
           setNotes(inv.notes || '')
           setItems((inv.items && inv.items.length > 0) ? inv.items : [emptyItem()])
+          // Fushat online — hidrohen edhe kur faturën po e hapim nga moduli
+          // klasik, kështu që të mos i humbasim rastësisht.
+          setChannel(inv.channel || 'Instagram')
+          setShippingAddress(inv.shipping_address || '')
+          setTrackingNo(inv.tracking_no || '')
+          setOrderStatus(inv.order_status || 'e_re')
         } else {
           setInvoiceDate(date)
           const noRes = await fetch(`/api/invoices/next-no?date=${date}`).then(r => r.json())
@@ -819,6 +1192,11 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           setCurrency('LEK')
           setExchangeRate(1)
           setItems([emptyItem()])
+          setPaymentSplits([])
+          setChannel('Instagram')
+          setShippingAddress('')
+          setTrackingNo('')
+          setOrderStatus('e_re')
         }
       } finally {
         if (!cancel) setLoading(false)
@@ -896,12 +1274,25 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
   }
 
   const pickProduct = (idx, p) => {
+    // Produktet me promocion aktive përdorin çmimin e reduktuar direkt si çmim
+    // bazë të rreshtit. Çdo zbritje shtesë që fut përdoruesi (Zbritje €/%) do
+    // të aplikohet mbi çmimin e promocionit. Snapshot i promocionit ruhet edhe
+    // te rreshti (`on_promotion` + `promo_discount_pct`) që të shfaqet badge-i
+    // "PROMO" edhe kur hapim faturën më vonë.
+    const basePrice = n(p.sell_price)
+    const onPromo = p.is_promotion && n(p.promo_discount_pct) > 0
+    const effectivePrice = onPromo
+      ? basePrice * (1 - n(p.promo_discount_pct) / 100)
+      : basePrice
     setItem(idx, {
       product_id: p.id,
       barcode: p.barcode || '',
       name: p.name,
-      unit_price_no_vat: eurToInvoiceCurrency(p.sell_price || 0),
+      gram: p.gram != null ? p.gram : 0,
+      unit_price_no_vat: eurToInvoiceCurrency(effectivePrice),
       vat_rate: p.vat_rate != null ? p.vat_rate : 20,
+      on_promotion: onPromo ? 1 : 0,
+      promo_discount_pct: onPromo ? n(p.promo_discount_pct) : 0,
     })
   }
 
@@ -916,6 +1307,74 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
     } catch { /* ignore */ }
   }
 
+  // ── Splits pagese ─────────────────────────────────────────────────────────
+  const addSplit = (method = 'cash') => {
+    const cur = currency
+    const rate = allRates[cur] != null ? String(allRates[cur]) : String(exchangeRate || 1)
+    setPaymentSplits(prev => [...prev, { method, currency: cur, amount: '', exchange_rate: rate }])
+  }
+
+  const updateSplit = (idx, patch) => {
+    setPaymentSplits(prev => {
+      const nextArr = prev.map((s, i) => {
+        if (i !== idx) return s
+        const next = { ...s, ...patch }
+        // Kur ndryshohet monedha, rifresko kursin nga tabela e ditës.
+        if (patch.currency && patch.currency !== s.currency) {
+          const r = allRates[patch.currency]
+          next.exchange_rate = r != null ? String(r) : '1'
+        }
+        return next
+      })
+      // Auto-sync monedhën e faturës: nëse të gjitha splits ndajnë të njëjtën
+      // monedhë dhe ajo ndryshon nga fatura, kalo faturën në atë monedhë
+      // (rikonverton çmimet e artikujve me kursin e ri).
+      if (patch.currency && nextArr.length > 0) {
+        const first = nextArr[0].currency
+        const allSame = nextArr.every(s => s.currency === first)
+        if (allSame && first !== currency) changeCurrency(first)
+      }
+      return nextArr
+    })
+  }
+
+  const removeSplit = (idx) => setPaymentSplits(prev => prev.filter((_, i) => i !== idx))
+
+  // Preset-e të shpejta për splits — zëvendësojnë tabs-et e vjetra Cash/POS/Borxh.
+  const setCashFull = () => {
+    const rate = allRates[currency] != null ? String(allRates[currency]) : String(exchangeRate || 1)
+    setPaymentSplits([{ method: 'cash', currency, amount: String(+(totals.tot || 0).toFixed(2)), exchange_rate: rate }])
+    setPaidTouched(true)
+  }
+  const setBankFull = () => {
+    const rate = allRates[currency] != null ? String(allRates[currency]) : String(exchangeRate || 1)
+    setPaymentSplits([{ method: 'bank', currency, amount: String(+(totals.tot || 0).toFixed(2)), exchange_rate: rate }])
+    setPaidTouched(true)
+  }
+  const clearSplits = () => { setPaymentSplits([]); setPaidTouched(true) }
+
+  // Deduho metodën e pagesës nga splits për ruajtjen dhe për badge-t në listë:
+  // 0 splits → borxh; 1 split në monedhën e faturës → cash/bank; ndryshe → mikse.
+  const inferPaymentMethod = (splits, invoiceCurrency) => {
+    if (splits.length === 0) return 'debt'
+    if (splits.length === 1 && splits[0].currency === invoiceCurrency) {
+      return splits[0].method === 'bank' ? 'bank' : 'cash'
+    }
+    return 'mikse'
+  }
+
+  // Total i paguar në monedhën e faturës — konverton çdo split → LEK → faturës.
+  const splitsPaidInInvoice = (() => {
+    const invR = parseFloat(exchangeRate) || 1
+    let lek = 0
+    for (const s of paymentSplits) {
+      const amt = parseFloat(s.amount) || 0
+      const r = parseFloat(s.exchange_rate) || 1
+      lek += amt * r
+    }
+    return +(lek / invR).toFixed(2)
+  })()
+
   // Totals
   const lineTotals = items.map(computeLine)
   const totals = lineTotals.reduce((acc, l) => ({
@@ -926,10 +1385,26 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
 
   const save = async () => {
     if (saving) return
-    const validItems = items.filter(it => (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.unit_price_no_vat) > 0)
+    const validItems = items
+      .filter(it => (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.unit_price_no_vat) > 0)
+      .map(it => ({
+        ...it,
+        gram: n(it.gram),
+        on_promotion: it.on_promotion ? 1 : 0,
+        promo_discount_pct: n(it.promo_discount_pct),
+      }))
     if (validItems.length === 0) { alert('Shtoni të paktën një artikull.'); return }
     setSaving(true)
     try {
+      const splitsPayload = paymentSplits
+        .map(s => ({
+          method: s.method === 'bank' ? 'bank' : 'cash',
+          currency: (s.currency || 'LEK').toUpperCase(),
+          amount: parseFloat(s.amount) || 0,
+          exchange_rate: parseFloat(s.exchange_rate) || 1,
+        }))
+        .filter(s => s.amount !== 0)
+      const inferredPm = inferPaymentMethod(splitsPayload, currency)
       const payload = {
         date: invoiceDate,
         invoice_no: invoiceNo,
@@ -937,12 +1412,21 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
         customer_nipt: customer.customer_nipt,
         currency,
         exchange_rate: parseFloat(exchangeRate) || 1,
-        payment_method: paymentMethod,
-        amount_paid: amountPaid === '' ? null : parseFloat(amountPaid),
-        paid_cash: paymentMethod === 'mikse' ? (parseFloat(paidCash) || 0) : 0,
-        paid_pos:  paymentMethod === 'mikse' ? (parseFloat(paidPos)  || 0) : 0,
+        payment_method: inferredPm,
+        // amount_paid përdoret vetëm si fallback nga backend-i kur splits janë bosh.
+        amount_paid: splitsPayload.length > 0 ? null : (amountPaid === '' ? null : parseFloat(amountPaid)),
+        paid_cash: 0,
+        paid_bank: 0,
+        payment_splits: splitsPayload,
         notes,
         items: validItems,
+        ...(online ? {
+          is_online: 1,
+          channel,
+          shipping_address: shippingAddress,
+          tracking_no: trackingNo,
+          order_status: orderStatus,
+        } : {}),
       }
       const url = invoiceId ? `/api/invoices/${invoiceId}` : '/api/invoices'
       const method = invoiceId ? 'PUT' : 'POST'
@@ -977,7 +1461,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
             <h2 className="text-lg font-bold text-slate-800">
-              {invoiceId ? 'Edito Faturën' : 'Faturë e Re Shitje'}
+              {online
+                ? (invoiceId ? '🛒 Edito Porosinë Online' : '🛒 Porosi e Re Online')
+                : (invoiceId ? 'Edito Faturën' : 'Faturë e Re Shitje')}
             </h2>
             <p className="text-xs text-slate-500 font-mono">Nr. {invoiceNo}</p>
           </div>
@@ -1035,65 +1521,89 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
           </p>
         </div>
         <div className="col-span-2 md:col-span-4">
-          <label className="form-label">Lloji i Pagesës</label>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('cash'); setAmountPaid(''); setPaidTouched(false) }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'cash' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'
-              }`}
-              title="Shuma e Paguar = Totali (i paguar plotësisht)"
-            >💵 Cash</button>
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('pos'); setAmountPaid(''); setPaidTouched(false) }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'pos' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'
-              }`}
-              title="POS / Kartë — Shuma e Paguar = Totali (i paguar plotësisht)"
-            >💳 POS</button>
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('debt'); setAmountPaid('0'); setPaidTouched(true) }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'debt' ? 'bg-white shadow-sm text-amber-700' : 'text-slate-500 hover:text-slate-700'
-              }`}
-              title="Shuma e Paguar vendoset manualisht; Pa Paguar = Totali − Shuma e Paguar"
-            >⚠️ Borxh</button>
-            <button
-              type="button"
-              onClick={() => {
-                const half = +(totals.tot / 2).toFixed(2)
-                setPaymentMethod('mikse')
-                setPaidCash(String(half))
-                setPaidPos(String(+(totals.tot - half).toFixed(2)))
-                setPaidTouched(true)
-              }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'mikse' ? 'bg-white shadow-sm text-teal-700' : 'text-slate-500 hover:text-slate-700'
-              }`}
-              title="Ndaj pagesën në Cash + POS (psh. 50% cash, 50% pos)"
-            >🔀 Mikse</button>
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <label className="form-label !mb-0">Pagesa</label>
+            <div className="flex gap-1 flex-wrap">
+              <button type="button" onClick={setCashFull}
+                className="px-2 py-1 rounded-md text-xs font-medium bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200"
+                title="Zëvendëso splits me një rresht Cash për totalin e plotë">💵 Cash i plotë</button>
+              <button type="button" onClick={setBankFull}
+                className="px-2 py-1 rounded-md text-xs font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200"
+                title="Zëvendëso splits me një rresht POS për totalin e plotë">💳 POS i plotë</button>
+              <button type="button" onClick={clearSplits}
+                className="px-2 py-1 rounded-md text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200"
+                title="Bosh — asgjë e paguar, gjithçka mbetet borxh">⚠️ Borxh (bosh)</button>
+            </div>
           </div>
-          {paymentMethod === 'mikse' ? (() => {
+          {(() => {
             const tot = totals.tot
-            const sumPaid = +(n(paidCash) + n(paidPos)).toFixed(2)
+            const sumPaid = splitsPaidInInvoice
             const due = +(tot - sumPaid).toFixed(2)
+            const invR = parseFloat(exchangeRate) || 1
             return (
               <div className="mt-3 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-emerald-700 uppercase font-semibold">💵 Cash ({currency})</label>
-                    <input type="number" step="0.01" min="0" value={paidCash}
-                      onChange={e => setPaidCash(e.target.value)}
-                      className="input-field tabular-nums" placeholder="0.00" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-purple-700 uppercase font-semibold">💳 POS ({currency})</label>
-                    <input type="number" step="0.01" min="0" value={paidPos}
-                      onChange={e => setPaidPos(e.target.value)}
-                      className="input-field tabular-nums" placeholder="0.00" />
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-2 py-2 text-left font-semibold w-28">Metoda</th>
+                        <th className="px-2 py-2 text-left font-semibold w-24">Monedha</th>
+                        <th className="px-2 py-2 text-right font-semibold">Shuma</th>
+                        <th className="px-2 py-2 text-right font-semibold w-28">Kursi → LEK</th>
+                        <th className="px-2 py-2 text-right font-semibold w-32">= në {currency}</th>
+                        <th className="px-2 py-2 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentSplits.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-4 text-center text-amber-700 bg-amber-50 text-xs">
+                            ⚠️ Asnjë pagesë — fatura do të mbetet <span className="font-semibold">borxh i plotë</span>. Përdor butonat lart për të shtuar pagesë.
+                          </td>
+                        </tr>
+                      )}
+                      {paymentSplits.map((s, idx) => {
+                        const amt = parseFloat(s.amount) || 0
+                        const r = parseFloat(s.exchange_rate) || 1
+                        const inInv = invR > 0 ? +((amt * r) / invR).toFixed(2) : 0
+                        return (
+                          <tr key={idx} className="border-t border-slate-100">
+                            <td className="px-1 py-1">
+                              <select value={s.method} onChange={e => updateSplit(idx, { method: e.target.value })}
+                                className="input-field-sm">
+                                <option value="cash">💵 Cash</option>
+                                <option value="bank">💳 POS/Bankë</option>
+                              </select>
+                            </td>
+                            <td className="px-1 py-1">
+                              <select value={s.currency} onChange={e => updateSplit(idx, { currency: e.target.value })}
+                                className="input-field-sm">
+                                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-1 py-1">
+                              <input type="number" step="0.01" min="0" value={s.amount}
+                                onChange={e => updateSplit(idx, { amount: e.target.value })}
+                                className="input-field-sm text-right tabular-nums" placeholder="0.00" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input type="number" step="0.0001" min="0" value={s.exchange_rate}
+                                onChange={e => updateSplit(idx, { exchange_rate: e.target.value })}
+                                disabled={s.currency === 'LEK'}
+                                className="input-field-sm text-right tabular-nums disabled:bg-slate-50" />
+                            </td>
+                            <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(inInv)}</td>
+                            <td className="px-1 py-1 text-center">
+                              <button type="button" onClick={() => removeSplit(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  <div className="p-2 border-t border-slate-100 flex gap-2">
+                    <button type="button" onClick={() => addSplit('cash')} className="btn-secondary text-xs">+ Shto Cash</button>
+                    <button type="button" onClick={() => addSplit('bank')} className="btn-secondary text-xs">+ Shto POS/Bankë</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
@@ -1107,37 +1617,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-500 uppercase font-semibold">Pa Paguar / Borxh ({currency})</label>
-                    <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                      {due > 0.005 ? fmt(due) : '✓ Paguar plotësisht'}
+                    <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 text-red-700 border-red-200' : due < -0.005 ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                      {due > 0.005 ? fmt(due) : due < -0.005 ? `+${fmt(-due)} tepër` : '✓ Paguar plotësisht'}
                     </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })() : (() => {
-            const tot = totals.tot
-            const paidVal = amountPaid === '' ? tot : n(amountPaid)
-            const due = +(tot - paidVal).toFixed(2)
-            return (
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali ({currency})</label>
-                  <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold">{fmt(tot)}</div>
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-semibold">Shuma e Paguar ({currency})</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={amountPaid}
-                    onChange={e => { setAmountPaid(e.target.value); setPaidTouched(true) }}
-                    className="input-field tabular-nums"
-                    placeholder={tot.toFixed(2)}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-semibold">Pa Paguar / Borxh ({currency})</label>
-                  <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                    {due > 0.005 ? fmt(due) : '✓ Paguar plotësisht'}
                   </div>
                 </div>
               </div>
@@ -1154,6 +1636,50 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
         </div>
       </div>
 
+      {/* Fushat për porosi online — kanali, adresa, tracking, statusi */}
+      {online && (
+        <div className="card border-purple-200 bg-purple-50/30">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xl">🛒</span>
+            <h3 className="text-sm font-bold text-slate-800">Detajet e Porosisë Online</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <label className="form-label">Kanali</label>
+              <select value={channel} onChange={e => setChannel(e.target.value)} className="input-field">
+                <option value="Instagram">📸 Instagram</option>
+                <option value="WhatsApp">💬 WhatsApp</option>
+                <option value="Facebook">📘 Facebook</option>
+                <option value="Telefon">📞 Telefon</option>
+                <option value="Website">🌐 Website</option>
+                <option value="Tjeter">Tjetër</option>
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Statusi i Porosisë</label>
+              <select value={orderStatus} onChange={e => setOrderStatus(e.target.value)} className="input-field">
+                <option value="e_re">🆕 E re</option>
+                <option value="ne_pergatitje">📦 Në përgatitje</option>
+                <option value="derguar">🚚 Dërguar</option>
+                <option value="dorezuar">✓ Dorëzuar</option>
+                <option value="anuluar">❌ Anuluar</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="form-label">Nr. i Ndjekjes (tracking)</label>
+              <input type="text" value={trackingNo} onChange={e => setTrackingNo(e.target.value)}
+                className="input-field font-mono" placeholder="opsional — kodi i dërgesës" />
+            </div>
+            <div className="md:col-span-4">
+              <label className="form-label">Adresa e Dërgimit</label>
+              <textarea value={shippingAddress} onChange={e => setShippingAddress(e.target.value)}
+                className="input-field resize-none" rows={2}
+                placeholder="Emri i marrësit, adresa, qyteti, telefoni për transportuesin..." />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Items table */}
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
@@ -1164,23 +1690,31 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
                 <th className="px-2 py-2 text-left font-semibold w-64">Produkti (barkod ose emër)</th>
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Sasia</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Çm. pa TVSH</th>
+                <th className="px-2 py-2 text-right font-semibold w-20">Gramatura</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Zbritje €</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Zbritje %</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Vlera pa TVSH</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
-                <th className="px-2 py-2 text-right font-semibold w-20">TVSH</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Vlera me TVSH (TOTAL)</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Çmimi final</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {items.map((it, idx) => {
                 const lt = lineTotals[idx]
+                const base = n(it.qty) * n(it.unit_price_no_vat)
+                const discEur = discountEurFor(it)
                 return (
                   <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
                     <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
+                      {it.on_promotion && (
+                        <div className="mt-0.5">
+                          <span className="badge bg-rose-100 text-rose-700 text-[9px] font-bold">
+                            🏷️ PROMO {n(it.promo_discount_pct) > 0 ? `-${n(it.promo_discount_pct)}%` : ''}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-1 py-1">
                       <input
@@ -1198,9 +1732,23 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
                     </td>
                     <td className="px-1 py-1">
                       <input
-                        type="number" step="0.01" value={it.unit_price_no_vat}
-                        onChange={e => setItem(idx, { unit_price_no_vat: e.target.value })}
+                        type="number" step="0.001" min="0" value={it.gram}
+                        onChange={e => setItem(idx, { gram: e.target.value })}
                         className="input-field-sm text-right"
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={discEur === 0 ? '' : discEur.toFixed(2)}
+                        onChange={e => {
+                          const eur = parseFloat(e.target.value) || 0
+                          if (base <= 0) { setItem(idx, { discount_percent: 0 }); return }
+                          const pct = Math.max(0, Math.min(100, (eur / base) * 100))
+                          setItem(idx, { discount_percent: +pct.toFixed(4) })
+                        }}
+                        className="input-field-sm text-right"
+                        placeholder="0.00"
                       />
                     </td>
                     <td className="px-1 py-1">
@@ -1210,7 +1758,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
                         className="input-field-sm text-right"
                       />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(lt.subtotal_no_vat)}</td>
                     <td className="px-1 py-1">
                       <input
                         type="number" step="0.01" min="0" max="100" value={it.vat_rate}
@@ -1218,7 +1765,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
                         className="input-field-sm text-right"
                       />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(lt.vat_amount)}</td>
                     <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900">{fmt(lt.total_with_vat)}</td>
                     <td className="px-1 py-1 text-center">
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
@@ -1229,10 +1775,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
             </tbody>
             <tfoot className="bg-blue-50 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={6} className="px-2 py-2 text-right text-slate-600">TOTALI ({currency}):</td>
-                <td className="px-2 py-2 text-right tabular-nums text-slate-800">{fmt(totals.sub)}</td>
-                <td></td>
-                <td className="px-2 py-2 text-right tabular-nums text-slate-800">{fmt(totals.vat)}</td>
+                <td colSpan={8} className="px-2 py-2 text-right text-slate-600">TOTALI ({currency}):</td>
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
               </tr>
@@ -1248,13 +1791,18 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved }) {
 }
 
 // ── Main entry ───────────────────────────────────────────────────────────────
-export default function FaturaShitje({ date, openInvoiceId, onConsumeOpen }) {
+// `online` prop: kur true, komponenti bëhet moduli "Shitje Online" — filtron
+// listën për fatura online (`is_online=1`), shfaq statuse porosie, dhe në
+// editor kërkon fushat shtesë (kanali, adresa, tracking, statusi).
+export default function FaturaShitje({ date, openInvoiceId, onConsumeOpen, openNew, onConsumeNew, online = false }) {
   const [mode, setMode]               = useState('list')   // list | edit
   const [editingId, setEditingId]     = useState(null)
   const [refreshKey, setRefreshKey]   = useState(0)
   // Stornimi krijohet menjëherë në DB për të hapur redaktuesin; nëse përdoruesi
   // del me Anulo/Mbrapa pa e ruajtur, e fshijmë në vend që ta lëmë në bazë.
   const [pendingStornoId, setPendingStornoId] = useState(null)
+  // Modal për kthim të pjesshëm — mban faturën origjinale që u zgjodh.
+  const [returnFor, setReturnFor] = useState(null)
 
   // When a parent route asks us to open a specific invoice, switch into edit mode
   useEffect(() => {
@@ -1264,6 +1812,15 @@ export default function FaturaShitje({ date, openInvoiceId, onConsumeOpen }) {
       onConsumeOpen?.()
     }
   }, [openInvoiceId, onConsumeOpen])
+
+  // Nga një link "Shitje e Re" — hap direkt editorin bosh
+  useEffect(() => {
+    if (openNew) {
+      setEditingId(null)
+      setMode('edit')
+      onConsumeNew?.()
+    }
+  }, [openNew, onConsumeNew])
 
   const openInvoice = (id) => { setEditingId(id); setMode('edit') }
   const createNew   = ()   => { setEditingId(null); setMode('edit') }
@@ -1291,38 +1848,46 @@ export default function FaturaShitje({ date, openInvoiceId, onConsumeOpen }) {
     setRefreshKey(k => k + 1)
   }
 
+  // Hap modalin e kthimit — user zgjedh vetëm artikujt që kthehen dhe sasinë.
+  // Modali thërret API me items=[{item_id, qty}] dhe pastaj hap kreditoren në
+  // editor për verifikim / rregullim final.
   const stornoInvoice = async (id, no) => {
-    if (!confirm(`Krijo faturë stornim (me minus) për ${no}?`)) return
-    const res = await fetch(`/api/invoices/${id}/credit-note`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}))
-      alert(e.error || 'Gabim')
-      return
-    }
-    const r = await res.json()
+    // Ngarko një snapshot minimal të faturës që modali të ketë kontekst.
+    try {
+      const inv = await fetch(`/api/invoices/${id}`).then(r => r.json())
+      setReturnFor(inv)
+    } catch (_) { alert('Nuk u ngarkua fatura') }
+  }
+
+  const onReturnCreated = (r) => {
+    setReturnFor(null)
     setRefreshKey(k => k + 1)
-    if (r.id) {
-      setPendingStornoId(r.id)
-      setEditingId(r.id)
-      setMode('edit')
-    }
+    // Kreditorja krijohet me shumat e sakta (artikujt e zgjedhur + refund
+    // proporcional i pagesave). Nuk hapim editorin automatikisht — kjo do të
+    // shkaktonte 403 për shitësit që s'kanë PUT. Admini mund të klikojë "Hap"
+    // te rreshti i kreditores nëse duhet ta rregullojë manualisht.
   }
 
   if (mode === 'edit') {
-    return <InvoiceEditor date={date} invoiceId={editingId} onClose={closeEditor} onSaved={onSaved} />
+    return (
+      <>
+        <InvoiceEditor date={date} invoiceId={editingId} onClose={closeEditor} onSaved={onSaved} online={online} />
+        {returnFor && <PartialReturnModal invoice={returnFor} onClose={() => setReturnFor(null)} onCreated={onReturnCreated} />}
+      </>
+    )
   }
   return (
-    <InvoiceList
-      date={date}
-      onOpen={openInvoice}
-      onCreate={createNew}
-      onDelete={deleteInvoice}
-      onStornim={stornoInvoice}
-      refreshKey={refreshKey}
-    />
+    <>
+      <InvoiceList
+        date={date}
+        onOpen={openInvoice}
+        onCreate={createNew}
+        onDelete={deleteInvoice}
+        onStornim={stornoInvoice}
+        refreshKey={refreshKey}
+        online={online}
+      />
+      {returnFor && <PartialReturnModal invoice={returnFor} onClose={() => setReturnFor(null)} onCreated={onReturnCreated} />}
+    </>
   )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import DateRangeFilter from './DateRangeFilter.jsx'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -20,12 +21,14 @@ function todayLocal() {
   return `${y}-${m}-${dd}`
 }
 
+
 export default function Kasaforta() {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
   const [showConvert, setShowConvert] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [dateRange, setDateRange] = useState({ from: '', to: '' })
 
   useEffect(() => {
     let cancel = false
@@ -41,11 +44,17 @@ export default function Kasaforta() {
   if (error)   return <div className="card p-8 text-center text-red-500 text-sm">⚠ {error}</div>
   if (!data)   return null
 
-  const { balance = {}, history = [] } = data
+  const { balance = {}, history: rawHistory = [] } = data
+
+  const history = rawHistory.filter(r => {
+    if (dateRange.from && r.date < dateRange.from) return false
+    if (dateRange.to   && r.date > dateRange.to)   return false
+    return true
+  })
 
   const activeCurs = CURS.filter(c =>
     (balance[c] || 0) !== 0 ||
-    history.some(h => (h[c]?.deposit || 0) || (h[c]?.withdraw || 0) || (h[c]?.closeout_in || 0))
+    history.some(h => (h[c]?.deposit || 0) || (h[c]?.withdraw || 0) || (h[c]?.closeout_in || 0) || (h[c]?.conv_in || 0) || (h[c]?.conv_out || 0))
   )
   const shownCurs = activeCurs.length ? activeCurs : ['LEK']
 
@@ -88,10 +97,24 @@ export default function Kasaforta() {
         />
       )}
 
+      <DateRangeFilter
+        from={dateRange.from}
+        to={dateRange.to}
+        onChange={setDateRange}
+        emptyForAll
+        compact
+        hint="Filtron historikun e kasafortës"
+      />
+
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Historiku i Lëvizjeve</h4>
-          <span className="text-xs text-slate-400">{history.length} ditë me lëvizje</span>
+          <span className="text-xs text-slate-400">
+            {history.length} ditë me lëvizje
+            {(dateRange.from || dateRange.to) && rawHistory.length !== history.length && (
+              <span className="ml-1 text-slate-500">(nga {rawHistory.length})</span>
+            )}
+          </span>
         </div>
         {history.length === 0 ? (
           <div className="p-10 text-center text-slate-400">
@@ -109,6 +132,7 @@ export default function Kasaforta() {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase" title="Gjendja e kasafortës në fillim të kësaj date">Bilanci Fillestar</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Derdhje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Mbyllje Dite</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase" title="Konvertim monedhe brenda kasafortës (shtim / heqje)">Konvertim</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Tërheqje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Neto</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase" title="Gjendja e kasafortës në fund të kësaj date (fillestar + neto)">Bilanci Final</th>
@@ -118,9 +142,15 @@ export default function Kasaforta() {
                 {history.map(r => (
                   shownCurs.filter(c => {
                     const cur = r[c] || {}
-                    return cur.deposit || cur.withdraw || cur.closeout_in
+                    return cur.deposit || cur.withdraw || cur.closeout_in || cur.conv_in || cur.conv_out
                   }).map((c, idx, arr) => {
                     const cur = r[c] || {}
+                    const convEvents = cur.conversions || []
+                    const convTitle = convEvents
+                      .map(ev => ev.direction === 'in'
+                        ? `🔄 +${fmt(ev.amount)} ${c} ← ${fmt(ev.other_amount)} ${ev.other_cur} (1 ${ev.other_cur} = ${ev.rate} ${c})${ev.note ? ' · ' + ev.note : ''}`
+                        : `🔄 −${fmt(ev.amount)} ${c} → ${fmt(ev.other_amount)} ${ev.other_cur} (1 ${c} = ${ev.rate} ${ev.other_cur})${ev.note ? ' · ' + ev.note : ''}`
+                      ).join('\n')
                     return (
                       <tr key={`${r.date}-${c}`} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="px-3 py-2 text-slate-700 font-mono text-xs">
@@ -135,6 +165,28 @@ export default function Kasaforta() {
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-amber-700">
                           {cur.closeout_in > 0 ? `+${fmt(cur.closeout_in)}` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums" title={convTitle}>
+                          {cur.conv_in > 0 && (
+                            <span className="text-sky-700 font-semibold">🔄 +{fmt(cur.conv_in)}</span>
+                          )}
+                          {cur.conv_in > 0 && cur.conv_out > 0 && <span className="text-slate-300 mx-1">·</span>}
+                          {cur.conv_out > 0 && (
+                            <span className="text-violet-700 font-semibold">🔄 −{fmt(cur.conv_out)}</span>
+                          )}
+                          {cur.conv_in === 0 && cur.conv_out === 0 && <span className="text-slate-300">—</span>}
+                          {convEvents.length > 0 && (
+                            <div className="text-[10px] text-slate-500 mt-0.5 space-y-0.5">
+                              {convEvents.map((ev, i) => (
+                                <div key={i} className="truncate max-w-[240px]" title={convTitle}>
+                                  {ev.direction === 'in'
+                                    ? <>← {fmt(ev.other_amount)} {ev.other_cur}</>
+                                    : <>→ {fmt(ev.other_amount)} {ev.other_cur}</>
+                                  }
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-rose-700">
                           {cur.withdraw > 0 ? `−${fmt(cur.withdraw)}` : '—'}
@@ -154,6 +206,7 @@ export default function Kasaforta() {
           </div>
         )}
       </div>
+
     </div>
   )
 }

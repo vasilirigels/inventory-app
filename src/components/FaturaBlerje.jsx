@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import * as XLSX from 'xlsx'
+import { generateBarcode, printLabels } from '../lib/barcode.js'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -13,31 +13,56 @@ function emptyItem() {
     product_id: null, barcode: '', name: '',
     qty: 1, purchase_price_no_vat: 0, discount_percent: 0,
     vat_rate: 20, sell_price: 0, material: '',
+    is_promotion: false, promo_discount_pct: 0,
   }
 }
 
-// ── Excel column auto-detector (mirrors Products.jsx) ───────────────────────
+// ── Excel column auto-detector ─────────────────────────────────────────────
+// Detektim me prioritet + përjashtim: kolonat më specifike (p.sh. barkodi,
+// "Cmimi PA TVSH") kërkohen para atyre gjenerike, dhe një kolonë e mapuar
+// një herë nuk ripërdoret. Kjo zgjidh rastin kur një Excel ka "SHITJET"
+// (flag me 1) por s'ka çmim shitjeje — nuk duhet të keqinterpretohet si
+// `sell_price`.
 function detectMapping(headers) {
-  const find = (...keys) => {
-    for (const k of keys) {
-      const i = headers.findIndex(h =>
-        String(h).toLowerCase().replace(/\s+/g, '_').includes(k.toLowerCase())
-      )
-      if (i !== -1) return i
+  const norm = h => String(h ?? '')
+    .toLowerCase()
+    .replace(/[çÇ]/g, 'c')
+    .replace(/[ëË]/g, 'e')
+    .replace(/\s+/g, '_')
+  const normalized = headers.map(norm)
+  const used = new Set()
+
+  const findFirst = patterns => {
+    for (const p of patterns) {
+      for (let i = 0; i < normalized.length; i++) {
+        if (used.has(i)) continue
+        if (normalized[i].includes(p)) { used.add(i); return i }
+      }
     }
     return -1
   }
-  return {
-    name:       find('emri', 'name', 'produkt', 'article', 'pershkrim', 'description', 'artikull'),
-    category:   find('kategori', 'category', 'tip', 'lloj'),
-    brand:      find('brendi', 'brand', 'prodhu'),
-    sku:        find('sku', 'kodi', 'code', 'ref', 'nr.', 'nr '),
-    barcode:    find('barkod', 'barcode'),
-    cost_price: find('kosto', 'cost', 'blerje', 'cmimi_k', 'çmimi_k'),
-    sell_price: find('shitje', 'sell', 'price', 'çmimi_sh', 'cmimi_sh', 'çmimi', 'cmimi'),
-    stock:      find('stoku', 'stock', 'sasia', 'qty', 'quantity', 'gjendje', 'cope'),
-    min_stock:  find('minim', 'min_stock', 'alarm'),
-  }
+
+  // Renditja e prioritetit: e specifikja para përgjithësisë.
+  const barcode    = findFirst(['barkod', 'barcode'])
+  const sku        = findFirst([
+    'sku', 'numer_serial', 'nr_serial', 'numer_seri', 'nr_seri', 'nr._seri',
+    'seri', 'kodi_art', 'kodi', 'code', 'ref_no', 'ref',
+  ])
+  const cost_price = findFirst([
+    'cmimi_pa_tvsh', 'cmimi_bler', 'cm_bler',
+    'pa_tvsh', 'blerje', 'kosto', 'cost', 'cmimi_k',
+  ])
+  const sell_price = findFirst([
+    'cmimi_shitj', 'cm_shitj', 'shitje_pa', 'shit_pa_tvsh',
+    'sell_price', 'sell', 'price', 'cmimi_sh',
+  ])
+  const stock      = findFirst(['sasia', 'sasi', 'stoku', 'stock', 'qty', 'quantity', 'gjendje', 'cope'])
+  const min_stock  = findFirst(['stok_min', 'min_stock', 'minim', 'alarm'])
+  const category   = findFirst(['kategori', 'category', 'tip', 'lloj'])
+  const brand      = findFirst(['brendi', 'brand', 'prodhu'])
+  const name       = findFirst(['pershkrim', 'emri', 'name', 'produkt', 'article', 'description', 'artikull'])
+
+  return { name, category, brand, sku, barcode, cost_price, sell_price, stock, min_stock }
 }
 
 function rowToProduct(row, m) {
@@ -483,8 +508,10 @@ function ImportExcelModal({ onClose, onImported }) {
     setFileName(file.name)
     setError('')
     const reader = new FileReader()
-    reader.onload = evt => {
+    reader.onload = async evt => {
       try {
+        // Ngarko XLSX (~300KB gzip) vetëm tani që user hapi importin.
+        const XLSX = await import('xlsx')
         const wb  = XLSX.read(evt.target.result, { type: 'array' })
         const ws  = wb.Sheets[wb.SheetNames[0]]
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
@@ -683,6 +710,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const [items, setItems]       = useState([emptyItem()])
   const [allRates, setAllRates] = useState({ LEK: 1 })
   const [showImport, setShowImport] = useState(false)
+  const [bulkPromoPct, setBulkPromoPct] = useState('20')
 
   useEffect(() => {
     let cancel = false
@@ -756,6 +784,61 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const removeItem = (idx) =>
     setItems(prev => prev.length === 1 ? [emptyItem()] : prev.filter((_, i) => i !== idx))
 
+  // Gjenero barkod për një rresht. Nëse rreshti është produkt ekzistues, e
+  // ruajmë menjëherë në DB që skaneri të gjejë produktin edhe para se të
+  // ruhet fatura. Në produktet e reja, mbetet vetëm në state deri në ruajtje.
+  const generateForRow = async (idx) => {
+    const it = items[idx]
+    if (it.barcode && !confirm('Ky rresht ka tashmë një barkod. Zëvendëso me një të ri?')) return
+    const code = generateBarcode()
+    setItem(idx, { barcode: code })
+    if (it.product_id) {
+      try {
+        await fetch(`/api/products/${it.product_id}/barcode`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode: code }),
+        })
+      } catch (e) {
+        alert('Barkodi u gjenerua por s\'u ruajt në produkt: ' + (e.message || e))
+      }
+    }
+  }
+
+  const generateForEmptyRows = async () => {
+    const targets = items
+      .map((it, i) => ({ it, i }))
+      .filter(({ it }) => !it.barcode || !String(it.barcode).trim())
+    if (targets.length === 0) { alert('Të gjithë rreshtat kanë tashmë barkod.'); return }
+    if (!confirm(`Gjenero barkod për ${targets.length} rreshta bosh?`)) return
+    // Gjenero lokalisht të gjithë; shto në state njëherësh që të mos përplasen
+    // update-t sekuenciale.
+    const codes = targets.map(() => generateBarcode())
+    setItems(prev => prev.map((it, i) => {
+      const idx = targets.findIndex(t => t.i === i)
+      return idx === -1 ? it : { ...it, barcode: codes[idx] }
+    }))
+    // Persist për ata me product_id.
+    for (let k = 0; k < targets.length; k++) {
+      const { it } = targets[k]
+      if (it.product_id) {
+        try {
+          await fetch(`/api/products/${it.product_id}/barcode`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ barcode: codes[k] }),
+          })
+        } catch { /* ruhet përsëri kur ruhet fatura */ }
+      }
+    }
+  }
+
+  const printAllLabels = () => {
+    const eligible = items.filter(it => it.barcode && String(it.barcode).trim())
+    if (eligible.length === 0) { alert('Asnjë rresht me barkod. Gjenero ose plotëso barkodet së pari.'); return }
+    printLabels(eligible)
+  }
+
   // Products / Excel imports are stored with prices in EUR. When the invoice
   // uses a different currency, convert via the LEK pivot using rates fetched
   // for this invoice's date.
@@ -815,6 +898,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
       sell_price:            eurToInvoiceCurrency(p.sell_price || 0),
       vat_rate: p.vat_rate != null ? p.vat_rate : 20,
       material: p.material || '',
+      is_promotion: !!p.is_promotion,
+      promo_discount_pct: p.is_promotion ? (parseFloat(p.promo_discount_pct) || 0) : 0,
     })
   }
 
@@ -1007,7 +1092,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               <tr className="text-slate-500">
                 <th className="px-2 py-2 text-left font-semibold w-8">#</th>
                 <th className="px-2 py-2 text-left font-semibold w-56">Produkti (barkod ose emër)</th>
-                <th className="px-2 py-2 text-left font-semibold w-28">Barkodi</th>
+                <th className="px-2 py-2 text-left font-semibold w-44">Barkodi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasia</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Çm. Blerje pa TVSH</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Zbritje %</th>
@@ -1016,6 +1101,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <th className="px-2 py-2 text-right font-semibold w-20">TVSH</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Vlera me TVSH</th>
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800">Çm. SHITJE</th>
+                <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-50 text-rose-700" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
             </thead>
@@ -1029,8 +1115,27 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
                     </td>
                     <td className="px-1 py-1">
-                      <input type="text" value={it.barcode} readOnly
-                        className="input-field-sm font-mono bg-slate-50 text-slate-600" placeholder="—" />
+                      <div className="flex items-center gap-0.5">
+                        <input
+                          type="text" value={it.barcode}
+                          onChange={e => setItem(idx, { barcode: e.target.value })}
+                          className="input-field-sm font-mono flex-1 min-w-0"
+                          placeholder="—"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => generateForRow(idx)}
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm"
+                          title="Gjenero barkod të ri (Code128, GS-XXXXXXXX)"
+                        >🔀</button>
+                        <button
+                          type="button"
+                          onClick={() => printLabels([it])}
+                          disabled={!it.barcode}
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Printo etiketë për këtë produkt"
+                        >🖨️</button>
+                      </div>
                     </td>
                     <td className="px-1 py-1">
                       <input type="number" step="any" value={it.qty}
@@ -1060,6 +1165,32 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                         onChange={e => setItem(idx, { sell_price: e.target.value })}
                         className="input-field-sm text-right font-semibold text-emerald-800" />
                     </td>
+                    <td className="px-1 py-1 text-center bg-rose-50/40">
+                      <div className="flex items-center justify-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={!!it.is_promotion}
+                          disabled={!it.product_id}
+                          onChange={e => setItem(idx, {
+                            is_promotion: e.target.checked,
+                            promo_discount_pct: e.target.checked ? (n(it.promo_discount_pct) || 0) : 0,
+                          })}
+                          className="w-4 h-4 accent-rose-600 disabled:opacity-30"
+                          title={it.product_id
+                            ? 'Shënoje këtë produkt si në promocion'
+                            : 'Zgjidh një produkt ekzistues për ta shënuar si promocion'}
+                        />
+                        <input
+                          type="number" step="0.01" min="0" max="100"
+                          value={it.is_promotion ? (it.promo_discount_pct ?? 0) : ''}
+                          disabled={!it.is_promotion}
+                          onChange={e => setItem(idx, { promo_discount_pct: e.target.value })}
+                          className="input-field-sm text-right w-14 disabled:bg-slate-100 disabled:text-slate-300"
+                          placeholder="%"
+                          title="Zbritja % për këtë produkt gjatë promocionit"
+                        />
+                      </div>
+                    </td>
                     <td className="px-1 py-1 text-center">
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
                     </td>
@@ -1076,6 +1207,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
                 <td></td>
+                <td></td>
               </tr>
             </tfoot>
           </table>
@@ -1084,6 +1216,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
             <button onClick={() => setShowImport(true)} className="btn-secondary text-xs">📥 Importo Excel</button>
+            <button
+              onClick={generateForEmptyRows}
+              className="btn-secondary text-xs"
+              title="Gjenero barkod Code128 (GS-XXXXXXXX) për çdo rresht që s'ka ende barkod"
+            >🔀 Gjenero Barkodet</button>
+            <button
+              onClick={printAllLabels}
+              className="text-xs bg-slate-900 hover:bg-slate-800 text-white font-semibold px-2 py-1.5 rounded-lg"
+              title="Printo etiketa (50×30mm) për të gjithë rreshtat me barkod"
+            >🖨️ Printo Etiketat</button>
             <select
               value=""
               onChange={e => {
@@ -1113,6 +1255,42 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               <option value="4.5">×4.5 (blerje × 4.5)</option>
               <option value="5">×5 (blerje × 5)</option>
             </select>
+            <div className="flex items-center gap-1 pl-2 border-l border-slate-200">
+              <span className="text-[10px] text-rose-700 font-semibold uppercase">Promo Bulk:</span>
+              <input
+                type="number" step="0.01" min="0" max="100"
+                value={bulkPromoPct}
+                onChange={e => setBulkPromoPct(e.target.value)}
+                className="input-field-sm text-right w-16"
+                placeholder="% ulje"
+                title="Zbritja % që do aplikohet për të gjitha produktet e faturës"
+              />
+              <button
+                onClick={() => {
+                  const pct = Math.max(0, Math.min(100, parseFloat(bulkPromoPct) || 0))
+                  const eligible = items.filter(it => it.product_id).length
+                  if (eligible === 0) { alert('Asnjë rresht me produkt të lidhur. Zgjidh një produkt ekzistues për çdo rresht.'); return }
+                  if (!confirm(`Vër ${eligible} produkte në promocion me ${pct}% ulje?`)) return
+                  setItems(prev => prev.map(it => it.product_id
+                    ? { ...it, is_promotion: true, promo_discount_pct: pct }
+                    : it))
+                }}
+                className="text-xs bg-rose-600 hover:bg-rose-500 text-white font-semibold px-2 py-1.5 rounded-lg"
+                title="Shënoji të gjitha produktet e lidhur si promocion me % e mësipërme"
+              >🏷️ Vër të gjitha</button>
+              <button
+                onClick={() => {
+                  const eligible = items.filter(it => it.is_promotion).length
+                  if (eligible === 0) return
+                  if (!confirm(`Hiq ${eligible} produkte nga promocioni?`)) return
+                  setItems(prev => prev.map(it => it.is_promotion
+                    ? { ...it, is_promotion: false, promo_discount_pct: 0 }
+                    : it))
+                }}
+                className="text-xs bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 px-2 py-1.5 rounded-lg"
+                title="Hiq promocionin nga të gjithë rreshtat e faturës aktuale"
+              >Hiq</button>
+            </div>
           </div>
           <p className="text-[10px] text-slate-500">
             <span className="inline-block w-3 h-3 bg-emerald-100 mr-1 align-middle border border-emerald-300"></span>

@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import { getUser } from '../lib/auth.js'
 
 const CAT_ICONS = {
   'Unazë': '💍', 'Vathë': '✨', 'Byzylyk': '📿',
@@ -105,13 +106,17 @@ const CustomTooltip = ({ active, payload, label }) => {
 }
 
 export default function Dashboard({ onNavigate }) {
+  const isSales = getUser()?.role === 'sales'
+
   // Periudha e zgjedhur — default: nga fillimi i muajit → sot.
   const [dateRange, setDateRange] = useState({ from: monthStart(), to: today() })
 
   const [products, setProducts]         = useState([])
   const [invoicesRange, setInvoicesRange] = useState([])
   const [arkaToday, setArkaToday]       = useState(null)
+  const [ratesToday, setRatesToday]     = useState({ LEK: 1 })
   const [clientDebts, setClientDebts]   = useState([])
+  const [clientDebtsRange, setClientDebtsRange] = useState([])   // borxhet nga faturat e periudhës së zgjedhur
   const [supplierDebts, setSupplierDebts] = useState([])
   const [invSummary, setInvSummary]     = useState(null)     // e përgjithshme (stok aktual)
   const [invSummaryRange, setInvSummaryRange] = useState(null) // për periudhën e zgjedhur (fitim)
@@ -127,27 +132,31 @@ export default function Dashboard({ onNavigate }) {
       fetch('/api/client-debts/summary?onlyDebt=1').then(r => r.json()).catch(() => []),
       fetch('/api/supplier-debts/summary?onlyDebt=1').then(r => r.json()).catch(() => []),
       fetch('/api/inventory-summary').then(r => r.json()).catch(() => null),
+      fetch(`/api/exchange-rates/${t}`).then(r => r.json()).catch(() => null),
     ])
-      .then(([prods, arka, cDebts, sDebts, invSum]) => {
+      .then(([prods, arka, cDebts, sDebts, invSum, ratesRes]) => {
         setProducts(Array.isArray(prods) ? prods : [])
         setArkaToday(arka || null)
         setClientDebts(Array.isArray(cDebts) ? cDebts : [])
         setSupplierDebts(Array.isArray(sDebts) ? sDebts : [])
         setInvSummary(invSum || null)
+        setRatesToday(ratesRes?.rates || { LEK: 1 })
       })
   }, [])
 
-  // Të dhëna që varen nga periudha e zgjedhur (fatura, fitim).
+  // Të dhëna që varen nga periudha e zgjedhur (fatura, fitim, borxhe klientësh nga periudha).
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return
     setLoading(true)
     Promise.all([
       fetch(`/api/invoices/by-range?from=${dateRange.from}&to=${dateRange.to}`).then(r => r.json()).catch(() => []),
       fetch(`/api/inventory-summary?from=${dateRange.from}&to=${dateRange.to}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/client-debts/summary?onlyDebt=1&from=${dateRange.from}&to=${dateRange.to}`).then(r => r.json()).catch(() => []),
     ])
-      .then(([invs, invSumRng]) => {
+      .then(([invs, invSumRng, cDebtsRng]) => {
         setInvoicesRange(Array.isArray(invs) ? invs : [])
         setInvSummaryRange(invSumRng || null)
+        setClientDebtsRange(Array.isArray(cDebtsRng) ? cDebtsRng : [])
       })
       .finally(() => { setLoading(false); setInitialLoad(false) })
   }, [dateRange.from, dateRange.to])
@@ -163,9 +172,7 @@ export default function Dashboard({ onNavigate }) {
     .sort((a, b) => a.stock - b.stock)
     .slice(0, 8)
 
-  const catBreakdown = Object.entries(
-    products.reduce((acc, p) => { acc[p.category] = (acc[p.category] || 0) + 1; return acc }, {})
-  ).sort((a, b) => b[1] - a[1])
+  const promotionProducts = products.filter(p => p.is_promotion)
 
   // ── Sales chart data — për periudhën e zgjedhur
   const chartData = fillDailySales(invoicesRange, dateRange.from, dateRange.to)
@@ -203,10 +210,6 @@ export default function Dashboard({ onNavigate }) {
 
   // ── Sot: nga arka-ditore — multi-currency
   const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
-  const CUR_SYM = { LEK: 'L', EUR: '€', USD: '$', GBP: '£', CHF: '₣' }
-  const activeCash = CURS
-    .map(c => ({ cur: c, v: n(arkaToday?.cash_balance?.[c]) }))
-    .filter(x => Math.abs(x.v) > 0.005)
   const dueToday = CURS
     .map(c => ({ cur: c, v: n(arkaToday?.amount_due?.[c]) }))
     .filter(x => x.v > 0.005)
@@ -227,6 +230,14 @@ export default function Dashboard({ onNavigate }) {
   const supplierDueLek = sDebtByCur.LEK?.due || 0
   const clientDueOthers   = totalNonLek(cDebtByCur)
   const supplierDueOthers = totalNonLek(sDebtByCur)
+
+  // ── Borxhe të krijuara në periudhë (nga faturat e periudhës së zgjedhur, akoma të papaguara)
+  const cDebtRangeByCur = groupByCurrency(clientDebtsRange)
+  const clientDueRangeLek    = cDebtRangeByCur.LEK?.due || 0
+  const clientDueRangeOthers = Object.entries(cDebtRangeByCur)
+    .filter(([c, t]) => c !== 'LEK' && t.due > 0.005)
+    .map(([c, t]) => ({ cur: c, v: t.due }))
+  const clientRangeCount = clientDebtsRange.length
 
   // ── Fatura fundit
   const recentInvoices = [...invoicesRange]
@@ -257,19 +268,90 @@ export default function Dashboard({ onNavigate }) {
   return (
     <div className="space-y-4 md:space-y-5">
 
-      {/* Filtër Periudhe — ndikon te grafi, faturat, dhe fitimi */}
-      <DateRangeFilter
-        from={dateRange.from}
-        to={dateRange.to}
-        onChange={setDateRange}
-        loading={loading}
-        hint="Ndikon: grafiku, faturat, fitim & marzh"
-      />
+      {/* Filtër Periudhe + Shitje e Re */}
+      <div className="flex items-stretch gap-3 flex-wrap">
+        <div className="flex-1 min-w-[280px]">
+          <DateRangeFilter
+            from={dateRange.from}
+            to={dateRange.to}
+            onChange={setDateRange}
+            loading={loading}
+            hint="Ndikon: grafiku, faturat, fitim & marzh"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('fatura-shitje', { newInvoice: true })}
+          className="btn-primary whitespace-nowrap px-3 py-2 text-xs flex items-center gap-1.5 self-center"
+          title="Hap një faturë të re shitjeje"
+        >
+          <span className="text-sm">🧾</span>
+          <span>Shitje e Re</span>
+        </button>
+      </div>
 
-      {/* Rreshti 1 — SOT (Arka + Detyrime) */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
+      {/* Rreshti 1 — Kesh në Arkë Sot (të gjitha monedhat, si tek Arka Ditore) */}
+      <button
+        type="button"
+        onClick={() => onNavigate('arka-ditore')}
+        className="w-full text-left card bg-gradient-to-r from-slate-900 to-slate-800 !border-slate-700 hover:ring-2 hover:ring-blue-400 transition"
+      >
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm md:text-base font-semibold text-slate-100 flex items-center gap-2">
+              <span className="text-xl">💵</span> Kesh në Arkë Sot
+            </h3>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              Mbartje + Kesh nga shitjet − Shpenzime − Blerje kesh
+            </p>
+          </div>
+          <span className="text-[10px] text-slate-400 uppercase tracking-wide">→ Arka Ditore</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          {CURS.map(c => {
+            const v = n(arkaToday?.cash_balance?.[c])
+            return (
+              <div key={c} className="bg-slate-800/70 rounded-lg px-3 py-2 border border-slate-700">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">{c}</div>
+                <div className={`text-lg md:text-xl font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+                  {fmt(v)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {/* Total i konvertuar në EUR me kursin e ditës */}
+        {(() => {
+          const eurRate = n(ratesToday?.EUR)
+          if (eurRate <= 0) return null
+          let lekTotal = 0
+          for (const c of CURS) {
+            const v = n(arkaToday?.cash_balance?.[c])
+            const r = c === 'LEK' ? 1 : n(ratesToday?.[c])
+            lekTotal += v * r
+          }
+          const eurTotal = lekTotal / eurRate
+          const cls = eurTotal < 0 ? 'text-rose-400' : eurTotal > 0 ? 'text-emerald-300' : 'text-slate-500'
+          return (
+            <div className="mt-3 rounded-lg bg-gradient-to-r from-emerald-900/40 to-slate-800 border border-emerald-800/50 px-4 py-2.5 flex items-baseline justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[10px] text-emerald-300/80 uppercase tracking-wide font-semibold">Total në EUR</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  1 EUR = {fmt(eurRate)} LEK
+                </div>
+              </div>
+              <div className={`text-xl md:text-2xl font-extrabold tabular-nums whitespace-nowrap ${cls}`}>
+                {fmt(eurTotal)} <span className="text-xs font-semibold text-slate-300">EUR</span>
+              </div>
+            </div>
+          )
+        })()}
+      </button>
+
+      {/* Rreshti 2 — Xhiro + Detyrime */}
+      <div className={`grid grid-cols-1 gap-3 md:gap-4 ${isSales ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
         <MultiCurrencyCard
-          label="Xhiro (Periudha)"
+          label="Xhiro Ditore"
           items={activeXhiroRange}
           emptyText="Asnjë faturë në periudhë"
           sub={`${rangeInvoiceCount} fatura · ${dateRange.from} → ${dateRange.to}`}
@@ -277,46 +359,36 @@ export default function Dashboard({ onNavigate }) {
           color="emerald"
           onClick={() => onNavigate('fatura-shitje')}
         />
-        <MultiCurrencyCard
-          label="Kesh në Arkë Sot"
-          items={activeCash}
-          emptyText="Arka bosh"
-          sub="Mbartje + Kesh − Shpenzime − Blerje kesh"
-          icon="💵"
-          color="blue"
-          onClick={() => onNavigate('arka-ditore')}
-        />
-        <StatCard
-          label="Detyrime Klientësh"
-          value={clientDueLek > 0 ? fmt(clientDueLek) : '—'}
-          sub={buildDebtSub(cDebtByCur, clientDebts.length, 'klientë')}
-          icon="👥"
-          color="rose"
+        <ClientDebtCard
+          rangeLek={clientDueRangeLek}
+          rangeOthers={clientDueRangeOthers}
+          rangeCount={clientRangeCount}
+          from={dateRange.from}
+          to={dateRange.to}
           onClick={() => onNavigate('detyrime')}
         />
-        <StatCard
-          label="Detyrime Furnitorësh"
-          value={supplierDueLek > 0 ? fmt(supplierDueLek) : '—'}
-          sub={buildDebtSub(sDebtByCur, supplierDebts.length, 'furnitorë')}
-          icon="🏭"
-          color="amber"
-          onClick={() => onNavigate('detyrime-furnitor')}
-        />
+        {!isSales && (
+          <StatCard
+            label="Detyrime Furnitorësh"
+            value={supplierDueLek > 0 ? fmt(supplierDueLek) : '—'}
+            sub={buildDebtSub(sDebtByCur, supplierDebts.length, 'furnitorë')}
+            icon="🏭"
+            color="amber"
+            onClick={() => onNavigate('detyrime-furnitor')}
+          />
+        )}
       </div>
 
-      {/* Rreshti 2 — Inventari */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-        <StatCard label="Gjithsej Produkte" value={fmt(total)} icon="📦" color="blue"
-          onClick={() => onNavigate('products')} />
-        <StatCard label="Stok i Ulët" value={fmt(lowStock)} icon="⚠️" color="amber"
-          sub={lowStock > 0 ? 'shih listën poshtë' : 'gjithçka në rregull'} />
-        <StatCard label="Pa Stok" value={fmt(outOfStock)} icon="🚫" color="rose"
-          sub={outOfStock > 0 ? 'kërkon rifurnizim' : ''} />
-        <StatCard label="Vlera Inventarit (LEK)" value={invValueLek > 0 ? fmt(invValueLek) : '—'} icon="💰" color="emerald"
-          onClick={() => onNavigate('inventar-permbledhese')} />
-      </div>
+      {/* Rreshti 2 — Inventari (fshihet për shitësin) */}
+      {!isSales && (
+        <div className="grid grid-cols-1 gap-3 md:gap-4">
+          <StatCard label="Gjithsej Produkte" value={fmt(total)} icon="📦" color="blue"
+            onClick={() => onNavigate('products')} />
+        </div>
+      )}
 
-      {/* Rreshti 3 — Fitim & Marzh për periudhën, sipas monedhës origjinale */}
+      {/* Rreshti 3 — Fitim & Marzh për periudhën, sipas monedhës origjinale (vetëm admin) */}
+      {!isSales && (
       <div className="card bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border border-emerald-200">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
@@ -383,45 +455,48 @@ export default function Dashboard({ onNavigate }) {
           </div>
         )}
       </div>
+      )}
 
-      {/* Sales chart */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3 md:mb-4 flex-wrap gap-2">
-          <div className="min-w-0">
-            <h3 className="text-sm md:text-base font-semibold text-slate-800">Shitjet — {rangeDays} ditë <span className="text-[10px] md:text-xs font-normal text-slate-500">({chartModeLabel})</span></h3>
-            <p className="text-[10px] md:text-xs text-slate-500 mt-0.5 truncate">
-              {fmt(totalSalesLek)} LEK · {rangeInvoiceCount} fatura · {chartData.length} kategori
-            </p>
+      {/* Sales chart (fshihet për shitësin) */}
+      {!isSales && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-3 md:mb-4 flex-wrap gap-2">
+            <div className="min-w-0">
+              <h3 className="text-sm md:text-base font-semibold text-slate-800">Shitjet — {rangeDays} ditë <span className="text-[10px] md:text-xs font-normal text-slate-500">({chartModeLabel})</span></h3>
+              <p className="text-[10px] md:text-xs text-slate-500 mt-0.5 truncate">
+                {fmt(totalSalesLek)} LEK · {rangeInvoiceCount} fatura · {chartData.length} kategori
+              </p>
+            </div>
+            <button onClick={() => onNavigate('fatura-shitje')} className="btn-secondary text-xs whitespace-nowrap">Fatura Shitje →</button>
           </div>
-          <button onClick={() => onNavigate('fatura-shitje')} className="btn-secondary text-xs whitespace-nowrap">Fatura Shitje →</button>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                tickFormatter={d =>
+                  chartMode === 'month' ? d.slice(5) :        // MM
+                  chartMode === 'week'  ? d.slice(5, 10) :    // MM-DD (dita e hënë)
+                  d.slice(8)                                   // DD
+                }
+                axisLine={false}
+                tickLine={false}
+                interval={chartData.length > 40 ? Math.floor(chartData.length / 20) : 0}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={v => v ? fmt(v) : ''}
+                width={50}
+              />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f1f5f9' }} />
+              <Bar dataKey="lek_total" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={32} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
-        <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 10, fill: '#94a3b8' }}
-              tickFormatter={d =>
-                chartMode === 'month' ? d.slice(5) :        // MM
-                chartMode === 'week'  ? d.slice(5, 10) :    // MM-DD (dita e hënë)
-                d.slice(8)                                   // DD
-              }
-              axisLine={false}
-              tickLine={false}
-              interval={chartData.length > 40 ? Math.floor(chartData.length / 20) : 0}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: '#94a3b8' }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={v => v ? fmt(v) : ''}
-              width={50}
-            />
-            <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f1f5f9' }} />
-            <Bar dataKey="lek_total" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={32} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      )}
 
       {/* Detaje ditore: shpenzime + blerje kesh + borxh (multi-currency) */}
       {(expensesToday.length > 0 || purchasesToday.length > 0 || dueToday.length > 0) && (
@@ -435,27 +510,29 @@ export default function Dashboard({ onNavigate }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-5">
 
-        {/* Kolona majtas: Alarme + Fatura Fundit */}
-        <div className="xl:col-span-2 space-y-4 md:space-y-5">
-          {/* Stock alerts */}
+        {/* Kolona majtas: Produkte Promocion + Fatura Fundit */}
+        <div className="space-y-4 md:space-y-5">
+          {/* Produkte në promocion */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-slate-800">Alarme Stoku</h3>
-              {alertProducts.length > 0 && <span className="badge bg-red-100 text-red-700">{alertProducts.length} produkte</span>}
+              <h3 className="font-semibold text-slate-800">🏷️ Produkte Promocion</h3>
+              {promotionProducts.length > 0 && (
+                <span className="badge bg-rose-100 text-rose-700">{promotionProducts.length} produkte</span>
+              )}
             </div>
-            {alertProducts.length === 0 ? (
+            {promotionProducts.length === 0 ? (
               <div className="text-center py-8 text-slate-400">
-                <div className="text-4xl mb-2">✅</div>
-                <p className="text-sm">Të gjitha produktet kanë stok të mjaftueshëm</p>
+                <div className="text-4xl mb-2">🏷️</div>
+                <p className="text-sm">Asnjë produkt në promocion aktualisht</p>
               </div>
             ) : (
               <div className="space-y-2 max-h-72 overflow-y-auto">
-                {alertProducts.map(p => (
-                  <div key={p.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-blue-200 transition-colors">
+                {promotionProducts.slice(0, 8).map(p => (
+                  <div key={p.id} className="flex items-center justify-between p-3 bg-rose-50/40 rounded-xl border border-rose-100 hover:border-rose-200 transition-colors">
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${p.stock === 0 ? 'bg-red-100' : 'bg-amber-100'}`}>
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 bg-rose-100">
                         {CAT_ICONS[p.category] || '📦'}
                       </div>
                       <div>
@@ -464,18 +541,20 @@ export default function Dashboard({ onNavigate }) {
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <span className={`badge ${p.stock === 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {p.stock === 0 ? 'Pa stok' : `${p.stock} copë`}
-                      </span>
-                      <p className="text-xs text-slate-400 mt-0.5">Min: {p.min_stock}</p>
+                      <p className="text-sm font-bold text-slate-800 tabular-nums">
+                        €{Number(p.sell_price || 0).toFixed(2)}
+                      </p>
+                      <p className={`text-[10px] mt-0.5 ${p.stock === 0 ? 'text-rose-500' : p.stock <= p.min_stock ? 'text-amber-500' : 'text-slate-400'}`}>
+                        Stok: {p.stock ?? 0}
+                      </p>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-            {alertProducts.length > 0 && (
-              <button onClick={() => onNavigate('products')} className="btn-secondary w-full mt-4 justify-center text-xs">
-                Shko tek Produktet →
+            {promotionProducts.length > 0 && (
+              <button onClick={() => onNavigate('produkte-promocion')} className="btn-secondary w-full mt-4 justify-center text-xs">
+                Shih të gjitha →
               </button>
             )}
           </div>
@@ -528,44 +607,18 @@ export default function Dashboard({ onNavigate }) {
           </div>
         </div>
 
-        {/* Kolona djathtas: Kategori + Veprime të Shpejta */}
+        {/* Kolona djathtas: Veprime të Shpejta */}
         <div className="space-y-4">
           <div className="card">
-            <h3 className="font-semibold text-slate-800 mb-3">Produkte sipas Kategorisë</h3>
-            {catBreakdown.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-4">—</p>
-            ) : (
-              <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                {catBreakdown.map(([cat, cnt]) => (
-                  <div key={cat} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
-                    <div className="flex items-center gap-2">
-                      <span>{CAT_ICONS[cat] || '📦'}</span>
-                      <span className="text-sm text-slate-700">{cat}</span>
-                    </div>
-                    <span className="badge bg-blue-100 text-blue-700 font-semibold">{cnt}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="card">
             <h3 className="font-semibold text-slate-800 mb-3">Veprime të Shpejta</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { icon: '🧾', label: 'Fatura Shitje',      page: 'fatura-shitje' },
-                { icon: '🛒', label: 'Fatura Blerje',      page: 'fatura-blerje' },
-                { icon: '🏦', label: 'Arka Ditore',        page: 'arka-ditore' },
-                { icon: '💼', label: 'Kasaforta',          page: 'arka-kasaforta' },
-                { icon: '👥', label: 'Detyrime Klienti',   page: 'detyrime' },
-                { icon: '🏭', label: 'Detyrime Furnitor',  page: 'detyrime-furnitor' },
-                { icon: '📦', label: 'Produktet',          page: 'products' },
-                { icon: '🏬', label: 'Magazina',           page: 'inventar-permbledhese' },
-              ].map(a => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {QUICK_ACTIONS
+                .filter(a => !isSales || a.salesOk)
+                .map(a => (
                 <button key={a.page} onClick={() => onNavigate(a.page)}
-                  className="flex flex-col items-center gap-1 px-2 py-3 rounded-xl hover:bg-slate-50 border border-slate-100 hover:border-blue-200 transition-all text-center">
-                  <span className="text-2xl">{a.icon}</span>
-                  <span className="text-[11px] font-medium text-slate-700 leading-tight">{a.label}</span>
+                  className="flex flex-col items-center gap-2 px-2 py-5 rounded-xl hover:bg-slate-50 border border-slate-100 hover:border-blue-200 transition-all text-center">
+                  <span className="text-4xl">{a.icon}</span>
+                  <span className="text-base font-bold text-slate-700 leading-snug">{a.label}</span>
                 </button>
               ))}
             </div>
@@ -576,6 +629,49 @@ export default function Dashboard({ onNavigate }) {
   )
 }
 
+// ── Veprime të Shpejta ─────────────────────────────────────────────────────
+// I gjithë navigimi i sidebar-it, i sheshuar. `salesOk` përcakton nëse zëri
+// shfaqet edhe për rolin 'sales' (rregullat e vërteta zbatohen te App.jsx).
+const QUICK_ACTIONS = [
+  // Renditja e kërkuar për shitësin
+  { icon: '📅', label: 'Xhiro Ditore',           page: 'raport-xhiro-ditore', salesOk: true  },
+  { icon: '💸', label: 'Shpenzime Ditore',       page: 'arka-shpenzime',      salesOk: true  },
+  { icon: '⚠️', label: 'Borxhi Klientit',        page: 'detyrime',            salesOk: true  },
+  { icon: '💱', label: 'Konvertime',             page: 'arka-kasaforta',      salesOk: true  },
+  { icon: '♻️', label: 'Hurda',                  page: 'arka-konv-hurda',     salesOk: true  },
+  { icon: '🏛️', label: 'Lëvizje Banke',          page: 'arka-levizje-banke',  salesOk: true  },
+  { icon: '🏧', label: 'Tërheqje Kasafortë',     page: 'arka-terheqje',       salesOk: true  },
+  { icon: '📥', label: 'Derdhje Kasafortë',      page: 'arka-kasaforta',      salesOk: true  },
+  { icon: '💻', label: 'Shitje Brenda Stafit',   page: 'shitje-online',       salesOk: true  },
+  { icon: '🏷️', label: 'Promocionet',            page: 'produkte-promocion',  salesOk: true  },
+  { icon: '🛠️', label: 'Riparimet',              page: 'riparimet',           salesOk: true  },
+  { icon: '↩️', label: 'Kthimet',                page: 'kthime-online',       salesOk: true  },
+  { icon: '💬', label: 'Komentet',               page: 'komentet',            salesOk: true  },
+  { icon: '💼', label: 'Kasaforta',              page: 'arka-kasaforta',      salesOk: true  },
+  { icon: '🏦', label: 'Arka',                   page: 'arka-ditore',         salesOk: true  },
+
+  // Vetëm admin — nuk shfaqen për shitësin
+  { icon: '🧾', label: 'Fatura Shitje',          page: 'fatura-shitje',           salesOk: false },
+  { icon: '🛒', label: 'Fatura Blerje',          page: 'fatura-blerje',           salesOk: false },
+  { icon: '💠', label: 'Blerje HAS',             page: 'blerje-has',              salesOk: false },
+  { icon: '📦', label: 'Produktet',              page: 'products',                salesOk: false },
+  { icon: '👤', label: 'Klienti',                page: 'klienti',                 salesOk: false },
+  { icon: '🏭', label: 'Furnitor',               page: 'furnitor',                salesOk: false },
+  { icon: '👥', label: 'Klientët (Borxhe)',      page: 'customers',               salesOk: false },
+  { icon: '🏬', label: 'Regjistri Magazinash',   page: 'magazinat',               salesOk: false },
+  { icon: '⬇️', label: 'Fletë Hyrje',            page: 'magazina-hyrje',          salesOk: false },
+  { icon: '⬆️', label: 'Fletë Dalje',            page: 'magazina-dalje',          salesOk: false },
+  { icon: '📋', label: 'Përmbledhëse Inventari', page: 'inventar-permbledhese',   salesOk: false },
+  { icon: '📈', label: 'Analize Klient',         page: 'analize-veprime',         salesOk: false },
+  { icon: '🏭', label: 'Detyrime Furnitor',      page: 'detyrime-furnitor',       salesOk: false },
+  { icon: '📉', label: 'Analize Furnitor',       page: 'analize-veprime-furnitor', salesOk: false },
+  { icon: '📊', label: 'Raport Shitje',          page: 'raport-shitje-artikuj',   salesOk: false },
+  { icon: '📊', label: 'Raport Blerje',          page: 'raport-blerje-artikuj',   salesOk: false },
+  { icon: '💸', label: 'Raport Shpenzime',       page: 'raport-shpenzime',        salesOk: false },
+  { icon: '📊', label: 'Përmbledhëse',           page: 'permbledhese',            salesOk: false },
+  { icon: '📣', label: 'Marketingu',             page: 'marketing',               salesOk: false },
+]
+
 // ── UI helpers ────────────────────────────────────────────────────────────
 
 const COLOR_MAP = {
@@ -585,6 +681,63 @@ const COLOR_MAP = {
   rose:    { bg: 'bg-rose-50',    icBg: 'bg-rose-100',    text: 'text-rose-700' },
   orange:  { bg: 'bg-orange-50',  icBg: 'bg-orange-100',  text: 'text-orange-700' },
   slate:   { bg: 'bg-slate-50',   icBg: 'bg-slate-100',   text: 'text-slate-700' },
+}
+
+// Kartë "Detyrime Klientësh (Periudha)" — shfaq borxhet e krijuara nga faturat
+// e periudhës së zgjedhur (ende të papaguara). Klikimi hap faqen e detyrimeve me listën e plotë.
+function ClientDebtCard({ rangeLek, rangeOthers, rangeCount, from, to, onClick }) {
+  const c = COLOR_MAP.rose
+  const hasRange = rangeLek > 0.005 || rangeOthers.length > 0
+  const isSingleDay = from && to && from === to
+  const periodLabel = isSingleDay ? from : (from && to ? `${from} → ${to}` : 'Periudha')
+  return (
+    <button
+      onClick={onClick}
+      className={`card ${c.bg} !p-3 md:!p-4 text-left hover:ring-2 hover:ring-blue-200 transition`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 mb-1 leading-tight">
+            Detyrime Klienti <span className="text-slate-400">Ditore</span>
+          </p>
+          {hasRange ? (
+            <>
+              <p className={`text-[10px] md:text-xs font-medium tabular-nums ${c.text} truncate leading-tight`}>
+                {rangeLek > 0.005 ? fmt(rangeLek) : (rangeOthers[0] ? fmt(rangeOthers[0].v) : '—')}
+                {' '}
+                <span className="text-xs md:text-sm font-semibold text-slate-500">
+                  {rangeLek > 0.005 ? 'LEK' : (rangeOthers[0]?.cur || '')}
+                </span>
+              </p>
+              {(rangeLek > 0.005 ? rangeOthers : rangeOthers.slice(1)).length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {(rangeLek > 0.005 ? rangeOthers : rangeOthers.slice(1)).map(o => (
+                    <div key={o.cur} className="text-[11px] md:text-xs text-slate-600 tabular-nums">
+                      <span className="font-semibold">{fmt(o.v)}</span>{' '}
+                      <span className="text-[9px] md:text-[10px] text-slate-500 font-medium">{o.cur}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate" title={periodLabel}>
+                {rangeCount} faturë{rangeCount === 1 ? '' : 'a'} · {periodLabel}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className={`text-[10px] md:text-xs font-medium ${c.text} truncate leading-tight`}>—</p>
+              <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate" title={periodLabel}>
+                asnjë borxh në periudhë · {periodLabel}
+              </p>
+            </>
+          )}
+        </div>
+        <div className={`w-8 h-8 md:w-11 md:h-11 ${c.icBg} rounded-lg md:rounded-xl flex items-center justify-center text-lg md:text-2xl flex-shrink-0`}>
+          👥
+        </div>
+      </div>
+    </button>
+  )
 }
 
 function StatCard({ label, value, sub, icon, color = 'blue', onClick }) {
@@ -598,8 +751,8 @@ function StatCard({ label, value, sub, icon, color = 'blue', onClick }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] md:text-xs font-medium text-slate-500 mb-1 leading-tight">{label}</p>
-          <p className={`text-lg md:text-2xl xl:text-3xl font-extrabold tabular-nums ${c.text} truncate leading-tight`}>{value}</p>
+          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 mb-1 leading-tight">{label}</p>
+          <p className={`text-[10px] md:text-xs font-medium tabular-nums ${c.text} truncate leading-tight`}>{value}</p>
           {sub && <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate">{sub}</p>}
         </div>
         <div className={`w-8 h-8 md:w-11 md:h-11 ${c.icBg} rounded-lg md:rounded-xl flex items-center justify-center text-lg md:text-2xl flex-shrink-0`}>
@@ -658,12 +811,12 @@ function MultiCurrencyCard({ label, items, emptyText, sub, icon, color = 'blue',
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] md:text-xs font-medium text-slate-500 mb-1 leading-tight">{label}</p>
+          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 mb-1 leading-tight">{label}</p>
           {!primary ? (
-            <p className={`text-lg md:text-2xl xl:text-3xl font-extrabold ${c.text} truncate leading-tight`}>—</p>
+            <p className={`text-[10px] md:text-xs font-medium ${c.text} truncate leading-tight`}>—</p>
           ) : (
             <>
-              <p className={`text-lg md:text-2xl xl:text-3xl font-extrabold tabular-nums ${c.text} truncate leading-tight`}>
+              <p className={`text-[10px] md:text-xs font-medium tabular-nums ${c.text} truncate leading-tight`}>
                 {fmt(primary.v)} <span className="text-xs md:text-sm font-semibold text-slate-500">{primary.cur}</span>
               </p>
               {rest.length > 0 && (
