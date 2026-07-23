@@ -671,7 +671,6 @@ export default function Dashboard({ date, onNavigate }) {
 // shfaqet edhe për rolin 'sales' (rregullat e vërteta zbatohen te App.jsx).
 const QUICK_ACTIONS = [
   // Renditja e kërkuar për shitësin
-  { icon: '📅', label: 'Xhiro Ditore',           page: 'raport-xhiro-ditore', salesOk: true  },
   { icon: '💸', label: 'Shpenzime Ditore',       page: 'arka-shpenzime',      salesOk: true  },
   { icon: '⚠️', label: 'Borxhi Klientit',        page: 'detyrime',            salesOk: true  },
   { icon: '💱', label: 'Konvertime',             page: 'arka-kasaforta',      salesOk: true  },

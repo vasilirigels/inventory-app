@@ -36,7 +36,6 @@ const RaportShitjeArtikuj    = lazy(() => import('./components/RaportShitjeArtik
 const RaportBlerjeArtikuj    = lazy(() => import('./components/RaportBlerjeArtikuj.jsx'))
 const Shpenzime              = lazy(() => import('./components/Shpenzime.jsx'))
 const RaportShpenzime        = lazy(() => import('./components/RaportShpenzime.jsx'))
-const RaportXhiroDitore      = lazy(() => import('./components/RaportXhiroDitore.jsx'))
 const DailyFieldsForm        = lazy(() => import('./components/sections/DailyFieldsForm.jsx'))
 const UnifiedReport          = lazy(() => import('./components/sections/UnifiedReport.jsx'))
 const Komentet               = lazy(() => import('./components/Komentet.jsx'))
@@ -95,7 +94,6 @@ const SALES_ALLOWED_PAGES = new Set([
   'arka-konv-hurda',
   'arka-terheqje',
   'arka-levizje-banke',
-  'raport-xhiro-ditore',
   'raport-shpenzime',
   'detyrime',
   'komentet',
@@ -170,7 +168,6 @@ function AppInner({ user }) {
       case 'raport-blerje-artikuj': return <RaportBlerjeArtikuj onNavigate={navigateTo} />
       case 'arka-shpenzime': return <Shpenzime date={currentDate} onNavigate={navigateTo} />
       case 'raport-shpenzime': return <RaportShpenzime />
-      case 'raport-xhiro-ditore': return <RaportXhiroDitore onNavigate={navigateTo} />
       case 'marketing': return <Marketing date={currentDate} />
       case 'arka':      return <CashRegister date={currentDate} />
 

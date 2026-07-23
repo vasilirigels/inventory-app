@@ -20,7 +20,6 @@ const SALES_ALLOWED_PAGES = new Set([
   'arka-terheqje',        // Tërheqje nga Kasaforta
   'arka-levizje-banke',   // Lëvizje Banke (depozitim/tërheqje)
   // Raporte ditore
-  'raport-xhiro-ditore',  // Xhiro ditore
   'raport-shpenzime',     // Shpenzime ditore (raport)
   // Borxhet
   'detyrime',             // Borxhi i klientit
@@ -108,7 +107,6 @@ const NAV_GROUPS = [
       { id: 'analize-veprime', label: 'ANALIZE VEPRIME KLIENT', icon: '📈' },
       { id: 'detyrime-furnitor', label: 'Detyrime Furnitor', icon: '🏭' },
       { id: 'analize-veprime-furnitor', label: 'ANALIZE VEPRIME FURNITOR', icon: '📉' },
-      { id: 'raport-xhiro-ditore',   label: 'Raport Xhiro Ditore',   icon: '📅' },
       { id: 'permbledhese',  label: 'Përmbledhëse',           icon: '📊' },
       { id: 'marketing',     label: 'Marketingu',             icon: '📣' },
     ],
@@ -132,7 +130,6 @@ const PAGE_TITLES = {
   'analize-veprime': 'ANALIZE VEPRIME KLIENT',
   'detyrime-furnitor': 'Detyrime Furnitor',
   'analize-veprime-furnitor': 'ANALIZE VEPRIME FURNITOR',
-  'raport-xhiro-ditore':   'Raport Xhiro Ditore',
   'raport-shitje-artikuj': 'Raport Shitje — Artikuj',
   'raport-blerje-artikuj': 'Raport Blerje — Artikuj',
   'raport-shpenzime':      'Raport Shpenzime Ditore',
