@@ -123,37 +123,51 @@ export default function Dashboard({ date, onNavigate }) {
   const [loading, setLoading]           = useState(false)      // range fetch
   const [initialLoad, setInitialLoad]   = useState(true)       // vetëm herën e parë
 
-  // Snapshot-et që nuk varen nga periudha (stok, borxhe të hapura, arka e sotme).
-  // Përdor `activeToday` që të përputhet me datën aktive të App-it (currentDate).
-  const loadSnapshots = useCallback(() => {
-    const t = activeToday
+  // Snapshot-e që nuk varen nga data (stok, borxhe totale të hapura, inventar).
+  const loadStaticSnapshots = useCallback(() => {
     return Promise.all([
       fetch('/api/products').then(r => r.json()).catch(() => []),
-      fetch(`/api/arka-ditore/${t}`).then(r => r.json()).catch(() => null),
       fetch('/api/client-debts/summary?onlyDebt=1').then(r => r.json()).catch(() => []),
       fetch('/api/supplier-debts/summary?onlyDebt=1').then(r => r.json()).catch(() => []),
       fetch('/api/inventory-summary').then(r => r.json()).catch(() => null),
-      fetch(`/api/exchange-rates/${t}`).then(r => r.json()).catch(() => null),
     ])
-      .then(([prods, arka, cDebts, sDebts, invSum, ratesRes]) => {
+      .then(([prods, cDebts, sDebts, invSum]) => {
         setProducts(Array.isArray(prods) ? prods : [])
-        setArkaToday(arka || null)
         setClientDebts(Array.isArray(cDebts) ? cDebts : [])
         setSupplierDebts(Array.isArray(sDebts) ? sDebts : [])
         setInvSummary(invSum || null)
+      })
+  }, [])
+
+  useEffect(() => { loadStaticSnapshots() }, [loadStaticSnapshots])
+
+  useRealtimeSync(
+    ['products', 'customer_debts'],
+    loadStaticSnapshots
+  )
+
+  // Arka + kurset ndjekin ditën e zgjedhur nga filtri (dateRange.to). Kështu
+  // kur user-i zgjedh një datë të kaluar, kartela "Kesh në Arkë" tregon
+  // gjendjen e asaj dite, jo të sotmen. Fallback tek activeToday nëse s'ka.
+  const arkaDate = dateRange.to || activeToday
+  const loadArkaForDate = useCallback(() => {
+    const d = arkaDate
+    return Promise.all([
+      fetch(`/api/arka-ditore/${d}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/exchange-rates/${d}`).then(r => r.json()).catch(() => null),
+    ])
+      .then(([arka, ratesRes]) => {
+        setArkaToday(arka || null)
         setRatesToday(ratesRes?.rates || { LEK: 1 })
       })
-  }, [activeToday])
+  }, [arkaDate])
 
-  useEffect(() => { loadSnapshots() }, [loadSnapshots])
+  useEffect(() => { loadArkaForDate() }, [loadArkaForDate])
 
-  // Rifresko snapshot-et sa herë që një shitje/blerje/shpenzim/pagesë ndikon
-  // arkën e sotme ose borxhet e hapura.
   useRealtimeSync(
     ['invoices', 'invoice_payments', 'expense_entries', 'purchase_invoices',
-     'purchase_payments', 'hurda_purchases', 'has_purchases', 'daily_records',
-     'products', 'customer_debts'],
-    loadSnapshots
+     'purchase_payments', 'hurda_purchases', 'has_purchases', 'daily_records'],
+    loadArkaForDate
   )
 
   // Të dhëna që varen nga periudha e zgjedhur (fatura, fitim, borxhe klientësh nga periudha).
@@ -327,7 +341,7 @@ export default function Dashboard({ date, onNavigate }) {
         </button>
       </div>
 
-      {/* Rreshti 1 — Kesh në Arkë Sot (të gjitha monedhat, si tek Arka Ditore) */}
+      {/* Rreshti 1 — Kesh në Arkë për datën e zgjedhur (ndjek dateRange.to) */}
       <button
         type="button"
         onClick={() => onNavigate('arka-ditore')}
@@ -336,7 +350,7 @@ export default function Dashboard({ date, onNavigate }) {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h3 className="text-sm md:text-base font-semibold text-slate-100 flex items-center gap-2">
-              <span className="text-xl">💵</span> Kesh në Arkë Sot
+              <span className="text-xl">💵</span> Kesh në Arkë {arkaDate === activeToday ? 'Sot' : `më ${arkaDate.split('-').reverse().join('.')}`}
             </h3>
             <p className="text-[10px] text-slate-400 mt-0.5">
               Mbartje + Kesh nga shitjet − Shpenzime − Blerje kesh
