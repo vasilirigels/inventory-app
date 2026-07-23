@@ -13,6 +13,17 @@ const PORT = 3001;
 const DEV_URL = 'http://localhost:5173';
 const PROD_URL = `http://localhost:${PORT}`;
 
+// Portable mode: electron-builder-i portable seton PORTABLE_EXECUTABLE_DIR te
+// direktoria ku ndodhet .exe-ja në USB. Ruajmë userData (sesion, cache, logs)
+// pranë saj që sesioni të vijë me USB-në dhe të mos lërë gjurmë në PC.
+const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
+if (portableDir) {
+  const userDataDir = path.join(portableDir, 'AriShop-Data');
+  try { fs.mkdirSync(userDataDir, { recursive: true }); } catch (_) {}
+  app.setPath('userData', userDataDir);
+  app.setPath('sessionData', userDataDir);
+}
+
 let mainWindow = null;
 let serverProcess = null;
 

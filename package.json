@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Ari Shop",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -70,6 +70,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "AriShop-Setup-${version}.${ext}"
@@ -80,6 +86,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Ari Shop"
+    },
+    "portable": {
+      "artifactName": "AriShop-Portable-${version}.${ext}",
+      "unicode": true
     },
     "mac": {
       "target": "dmg",
