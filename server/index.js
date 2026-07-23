@@ -4102,6 +4102,188 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Version periudhë (range) i arka-ditore: kthen fluksin e keshit të agreguar
+// gjatë periudhës `from..to`. Përdoret nga Dashboard-i kur user-i zgjedh një
+// periudhë me shume ditë. NUK ka opening/physical/closeout — ato janë koncepte
+// ditore; për një periudhë, kthimi është neto (kesh in − kesh out) gjatë saj.
+app.get('/api/arka-ditore-range', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const zeroPerCur = () => ({ LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 });
+    const fx = (obj) => {
+      const out = {};
+      for (const c of CURS) out[c] = +(obj[c] || 0).toFixed(2);
+      return out;
+    };
+
+    const salesRows = await queryAll(
+      `SELECT
+         i.id                                 AS id,
+         COALESCE(i.currency, 'LEK')          AS cur,
+         COALESCE(i.total_with_vat, 0)        AS total,
+         COALESCE(i.payment_method, 'cash')   AS pm,
+         COALESCE(i.paid_cash, 0)             AS paid_cash,
+         COALESCE(i.paid_pos, 0)              AS paid_pos,
+         COALESCE(i.paid_bank, 0)             AS paid_bank,
+         (COALESCE(i.amount_paid, 0)
+           - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)
+         )                                    AS initial_paid
+       FROM invoices i
+       WHERE i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0`,
+      [from, to]
+    );
+
+    const mikseIds = salesRows.filter(r => r.pm === 'mikse').map(r => r.id);
+    const splitsByInv = {};
+    if (mikseIds.length > 0) {
+      const placeholders = mikseIds.map(() => '?').join(',');
+      const splitRows = await queryAll(
+        `SELECT invoice_id, method, COALESCE(currency, 'LEK') AS currency, COALESCE(amount, 0) AS amount
+           FROM invoice_payment_splits
+          WHERE invoice_id IN (${placeholders})`,
+        mikseIds
+      );
+      for (const s of splitRows) {
+        (splitsByInv[s.invoice_id] = splitsByInv[s.invoice_id] || []).push(s);
+      }
+    }
+
+    const xhiro_total = zeroPerCur();
+    const paid_bank   = zeroPerCur();
+    const paid_pos    = zeroPerCur();
+    const amount_due  = zeroPerCur();
+    for (const r of salesRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in xhiro_total)) continue;
+      if (r.pm === 'bank') {
+        xhiro_total[c] += r.total;
+        paid_bank[c] += r.total;
+      } else if (r.pm === 'pos') {
+        xhiro_total[c] += r.total;
+        paid_pos[c] += r.total;
+      } else if (r.pm === 'debt') {
+        xhiro_total[c] += r.total;
+        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const due     = Math.max(0, r.total - paidNow);
+        amount_due[c] += due;
+      } else if (r.pm === 'mikse') {
+        const splits = splitsByInv[r.id] || [];
+        for (const s of splits) {
+          const sc = (s.currency || c).toUpperCase();
+          if (!(sc in xhiro_total)) continue;
+          const amt = parseFloat(s.amount) || 0;
+          xhiro_total[sc] += amt;
+          if (s.method === 'bank') paid_bank[sc] += amt;
+          else if (s.method === 'pos') paid_pos[sc] += amt;
+        }
+        const paidInInvCur = (r.paid_cash || 0) + (r.paid_pos || 0) + (r.paid_bank || 0);
+        const debt = +(r.total - paidInInvCur).toFixed(2);
+        if (debt > 0.005) {
+          xhiro_total[c] += debt;
+          amount_due[c] += debt;
+        }
+      } else {
+        xhiro_total[c] += r.total;
+      }
+    }
+
+    const expRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur, COALESCE(amount, 0) AS amt
+         FROM expense_entries WHERE date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const expenses = zeroPerCur();
+    for (const r of expRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in expenses) expenses[c] += r.amt;
+    }
+
+    const purRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur, COALESCE(amount_paid, 0) AS amt
+         FROM purchase_invoices
+        WHERE date BETWEEN ? AND ? AND payment_method = 'cash'`,
+      [from, to]
+    );
+    const purchase_cash = zeroPerCur();
+    for (const r of purRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in purchase_cash) purchase_cash[c] += r.amt;
+    }
+
+    const hurdaRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur, COALESCE(total_amount, 0) AS amt
+         FROM hurda_purchases WHERE date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const hurda_cash = zeroPerCur();
+    for (const r of hurdaRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in hurda_cash) hurda_cash[c] += r.amt;
+    }
+
+    const debtPayRows = await queryAll(
+      `SELECT COALESCE(i.currency, 'LEK') AS cur, COALESCE(ip.amount, 0) AS amt
+         FROM invoice_payments ip
+         JOIN invoices i ON i.id = ip.invoice_id
+        WHERE ip.date BETWEEN ? AND ?
+          AND ip.payment_method = 'cash'
+          AND COALESCE(i.cancelled, 0) = 0`,
+      [from, to]
+    );
+    const debt_repayments = zeroPerCur();
+    for (const r of debtPayRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in debt_repayments) debt_repayments[c] += r.amt;
+    }
+
+    const hasRows = await queryAll(
+      `SELECT COALESCE(currency, 'EUR') AS cur, COALESCE(total_amount, 0) AS amt
+         FROM has_purchases WHERE date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const has_cash = zeroPerCur();
+    for (const r of hasRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (c in has_cash) has_cash[c] += r.amt;
+    }
+
+    const cash_from_sales = zeroPerCur();
+    const cash_balance    = zeroPerCur();
+    for (const c of CURS) {
+      cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
+      cash_balance[c]    = cash_from_sales[c] + debt_repayments[c]
+                          - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
+    }
+
+    res.json({
+      from, to,
+      currencies: CURS,
+      xhiro_total:     fx(xhiro_total),
+      paid_bank:       fx(paid_bank),
+      paid_pos:        fx(paid_pos),
+      amount_due:      fx(amount_due),
+      cash_from_sales: fx(cash_from_sales),
+      debt_repayments: fx(debt_repayments),
+      expenses:        fx(expenses),
+      purchase_cash:   fx(purchase_cash),
+      hurda_cash:      fx(hurda_cash),
+      has_cash:        fx(has_cash),
+      cash_balance:    fx(cash_balance),
+      counts: {
+        invoices: salesRows.length,
+        expenses: expRows.length,
+        purchases_cash: purRows.length,
+        hurda_purchases: hurdaRows.length,
+        has_purchases: hasRows.length,
+        debt_repayments: debtPayRows.length,
+      },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Mbyllje e ditës për çdo monedhë: ndaj gjendjen fizike midis kasafortës dhe
 // gjendjes fillestare të ditës pasardhëse.
 //   to_safe: { LEK, EUR, USD, GBP, CHF } → closeout_to_safe_{cur} për këtë datë

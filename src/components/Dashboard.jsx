@@ -146,21 +146,25 @@ export default function Dashboard({ date, onNavigate }) {
     loadStaticSnapshots
   )
 
-  // Arka + kurset ndjekin ditën e zgjedhur nga filtri (dateRange.to). Kështu
-  // kur user-i zgjedh një datë të kaluar, kartela "Kesh në Arkë" tregon
-  // gjendjen e asaj dite, jo të sotmen. Fallback tek activeToday nëse s'ka.
-  const arkaDate = dateRange.to || activeToday
+  // Arka + kurset ndjekin periudhën e zgjedhur. Për një ditë të vetme përdoret
+  // endpoint-i i zakonshëm (përfshin mbartjen); për periudhë përdoret varianti
+  // range që sumon lëvizjet e keshit gjatë saj (neto in − out).
+  const arkaFrom = dateRange.from || activeToday
+  const arkaTo   = dateRange.to   || activeToday
+  const isSingleDay = arkaFrom === arkaTo
   const loadArkaForDate = useCallback(() => {
-    const d = arkaDate
+    const url = isSingleDay
+      ? `/api/arka-ditore/${arkaTo}`
+      : `/api/arka-ditore-range?from=${arkaFrom}&to=${arkaTo}`
     return Promise.all([
-      fetch(`/api/arka-ditore/${d}`).then(r => r.json()).catch(() => null),
-      fetch(`/api/exchange-rates/${d}`).then(r => r.json()).catch(() => null),
+      fetch(url).then(r => r.json()).catch(() => null),
+      fetch(`/api/exchange-rates/${arkaTo}`).then(r => r.json()).catch(() => null),
     ])
       .then(([arka, ratesRes]) => {
         setArkaToday(arka || null)
         setRatesToday(ratesRes?.rates || { LEK: 1 })
       })
-  }, [arkaDate])
+  }, [isSingleDay, arkaFrom, arkaTo])
 
   useEffect(() => { loadArkaForDate() }, [loadArkaForDate])
 
@@ -350,10 +354,15 @@ export default function Dashboard({ date, onNavigate }) {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h3 className="text-sm md:text-base font-semibold text-slate-100 flex items-center gap-2">
-              <span className="text-xl">💵</span> Kesh në Arkë {arkaDate === activeToday ? 'Sot' : `më ${arkaDate.split('-').reverse().join('.')}`}
+              <span className="text-xl">💵</span>
+              {isSingleDay
+                ? `Kesh në Arkë ${arkaTo === activeToday ? 'Sot' : `më ${arkaTo.split('-').reverse().join('.')}`}`
+                : `Kesh nga Periudha ${arkaFrom.split('-').reverse().join('.')} → ${arkaTo.split('-').reverse().join('.')}`}
             </h3>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              Mbartje + Kesh nga shitjet − Shpenzime − Blerje kesh
+              {isSingleDay
+                ? 'Mbartje + Kesh nga shitjet + Pagesa borxhi − Shpenzime − Blerje kesh'
+                : 'Neto: Kesh nga shitjet + Pagesa borxhi − Shpenzime − Blerje kesh (gjatë periudhës)'}
             </p>
           </div>
           <span className="text-[10px] text-slate-400 uppercase tracking-wide">→ Arka Ditore</span>
