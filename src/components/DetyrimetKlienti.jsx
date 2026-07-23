@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { exportToExcel, exportToPdf, formatNum } from '../utils/export.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import MoneyInput from './MoneyInput.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -95,7 +96,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
   const [amount, setAmount]   = useState('')
   const [date, setDate]       = useState(today())
   const [method, setMethod]   = useState('cash')
-  const [payCurrency, setPayCurrency] = useState('LEK')
+  const [payCurrency, setPayCurrency] = useState('EUR')
   const [rates, setRates]     = useState({ LEK: 1 })
   const [notes, setNotes]     = useState('')
   const [saving, setSaving]   = useState(false)
@@ -373,8 +374,8 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                 </div>
                 <div>
                   <label className="form-label">Shuma ({payCurrency})</label>
-                  <input type="number" step="0.01" min="0.01"
-                    value={amount} onChange={e => setAmount(e.target.value)}
+                  <MoneyInput
+                    value={amount} onChange={v => setAmount(String(v))}
                     className="input-field tabular-nums"
                     placeholder={dueInPayCcy != null ? fmt(dueInPayCcy) : '—'} />
                   {payCurrency !== inv.currency && amount && payRate && (

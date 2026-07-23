@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { clearSession } from '../lib/auth.js'
 import { useUnreadCommentsCount } from '../lib/unreadComments.js'
+import CommentToast from './CommentToast.jsx'
 
 // Faqet që role='sales' mund të shohë (veprimet ditore + raportet ditore).
 const SALES_ALLOWED_PAGES = new Set([
@@ -67,7 +68,6 @@ const NAV_GROUPS = [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
           { id: 'shitje-online',         label: '🛒 Shitje Online' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },
-          { id: 'kthime-online',         label: 'Kthime Online & Stafi' },
           { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
         ],
       },
@@ -109,7 +109,6 @@ const NAV_GROUPS = [
       { id: 'detyrime-furnitor', label: 'Detyrime Furnitor', icon: '🏭' },
       { id: 'analize-veprime-furnitor', label: 'ANALIZE VEPRIME FURNITOR', icon: '📉' },
       { id: 'raport-xhiro-ditore',   label: 'Raport Xhiro Ditore',   icon: '📅' },
-      { id: 'raport-shpenzime',      label: 'Raport Shpenzime Ditore',      icon: '💸' },
       { id: 'permbledhese',  label: 'Përmbledhëse',           icon: '📊' },
       { id: 'marketing',     label: 'Marketingu',             icon: '📣' },
     ],
@@ -207,6 +206,7 @@ export default function Layout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
+      <CommentToast onOpenKomentet={() => handleNavigate('komentet')} />
 
       {/* ── Backdrop për mobile (kliku mbyll sidebar-in) ── */}
       {sidebarOpen && (

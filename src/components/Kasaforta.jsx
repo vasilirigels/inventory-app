@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import MoneyInput from './MoneyInput.jsx'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -214,8 +215,8 @@ export default function Kasaforta() {
 // ── Modal për konvertim monedhash brenda kasafortës ────────────────────────
 function ConvertModal({ balance, onClose, onSaved }) {
   const [date, setDate]           = useState(todayLocal())
-  const [fromCur, setFromCur]     = useState('EUR')
-  const [toCur, setToCur]         = useState('LEK')
+  const [fromCur, setFromCur]     = useState('LEK')
+  const [toCur, setToCur]         = useState('EUR')
   const [fromAmt, setFromAmt]     = useState('')
   const [toAmt, setToAmt]         = useState('')
   const [rateManual, setRateManual] = useState('')
@@ -336,20 +337,18 @@ function ConvertModal({ balance, onClose, onSaved }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="form-label">Shuma për të nxjerrë ({fromCur})</label>
-              <input
-                type="number" step="0.01" min="0"
+              <MoneyInput
                 value={fromAmt}
-                onChange={e => { setLastEdited('from'); setFromAmt(e.target.value) }}
+                onChange={v => { setLastEdited('from'); setFromAmt(String(v)) }}
                 className="input-field tabular-nums font-bold"
                 placeholder="0.00"
               />
             </div>
             <div>
               <label className="form-label">Shuma për të derdhur ({toCur})</label>
-              <input
-                type="number" step="0.01" min="0"
+              <MoneyInput
                 value={toAmt}
-                onChange={e => { setLastEdited('to'); setToAmt(e.target.value) }}
+                onChange={v => { setLastEdited('to'); setToAmt(String(v)) }}
                 className="input-field tabular-nums font-bold"
                 placeholder="0.00"
               />

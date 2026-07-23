@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getUser } from '../lib/auth.js'
+import MoneyInput from './MoneyInput.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -19,11 +20,29 @@ function truePaidCashPos(inv) {
   return init
 }
 
+// Ndanjë splits (nga endpoint list-i si string `method:cur:amount|...`) sipas
+// (metodë, monedhë) dhe kthen array {method, currency, amount} për shfaqje.
+function parseSplitsSummary(str) {
+  if (!str) return []
+  const map = new Map()
+  for (const part of String(str).split('|')) {
+    const [method, currency, amount] = part.split(':')
+    if (!method || !currency) continue
+    const key = `${method}:${currency}`
+    const amt = parseFloat(amount) || 0
+    map.set(key, (map.get(key) || 0) + amt)
+  }
+  return Array.from(map, ([key, amount]) => {
+    const [method, currency] = key.split(':')
+    return { method, currency, amount }
+  })
+}
+
 function emptyItem() {
   return {
-    product_id: null, barcode: '', name: '',
+    product_id: null, serial_no: '', barcode: '', name: '',
     qty: 1, gram: 0, unit_price_no_vat: 0, discount_percent: 0,
-    vat_rate: 20,
+    vat_rate: 0,
     on_promotion: 0, promo_discount_pct: 0,
   }
 }
@@ -651,7 +670,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
     if (fType === 'return'    && (inv.cancelled || !inv.is_credit_note)) return false
     if (fType === 'cancelled' && !inv.cancelled) return false
     if (fc) {
-      const hay = `${inv.customer_name || ''} ${inv.customer_nipt || ''}`.toLowerCase()
+      const hay = `${inv.customer_name || ''} ${inv.barcodes || ''}`.toLowerCase()
       if (!hay.includes(fc)) return false
     }
     return true
@@ -806,10 +825,10 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
           />
         </div>
         <div className="flex-1 min-w-[200px]">
-          <label className="form-label">Klienti (emër / NIPT)</label>
+          <label className="form-label">Klient / Barkod (emër ose barkod)</label>
           <input
             type="text" value={fClient} onChange={e => setFClient(e.target.value)}
-            className="input-field" placeholder="kërko..."
+            className="input-field" placeholder="kërko emër ose barkod..."
           />
         </div>
         <div>
@@ -983,6 +1002,27 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                         = {fmt(initPaid * rate)} LEK
                       </div>
                     )}
+                    {pm === 'mikse' && (() => {
+                      const splits = parseSplitsSummary(inv.splits_summary)
+                      if (splits.length === 0) return null
+                      return (
+                        <div className="mt-0.5 flex flex-wrap gap-0.5 justify-end">
+                          {splits.map((s, i) => (
+                            <span
+                              key={i}
+                              className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium ${
+                                s.method === 'cash'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              }`}
+                              title={`${s.method === 'cash' ? 'Cash' : 'POS/Bankë'} · ${s.currency}`}
+                            >
+                              {s.method === 'cash' ? '💵' : '💳'} {fmt(s.amount)} {s.currency}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td className={`px-2 py-2 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : due < -0.005 ? 'text-purple-700' : 'text-emerald-600'}`}>
                     {Math.abs(due) > 0.005 ? fmt(due) : '✓'}
@@ -1083,7 +1123,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   const [invoiceDate, setInvoiceDate] = useState(date)
   const [invoiceNo, setInvoiceNo]     = useState('')
   const [customer, setCustomer]       = useState({ customer_name: '', customer_nipt: '', address: '', phone: '' })
-  const [currency, setCurrency]       = useState('LEK')
+  const [currency, setCurrency]       = useState('EUR')
   const [exchangeRate, setExchangeRate] = useState(1)
   const [rateSource, setRateSource]   = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
@@ -1189,8 +1229,8 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
           const noRes = await fetch(`/api/invoices/next-no?date=${date}`).then(r => r.json())
           if (cancel) return
           setInvoiceNo(noRes.invoice_no || '')
-          setCurrency('LEK')
-          setExchangeRate(1)
+          setCurrency('EUR')
+          setExchangeRate(r.EUR || 1)
           setItems([emptyItem()])
           setPaymentSplits([])
           setChannel('Instagram')
@@ -1286,11 +1326,12 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
       : basePrice
     setItem(idx, {
       product_id: p.id,
+      serial_no: p.serial_no || '',
       barcode: p.barcode || '',
       name: p.name,
       gram: p.gram != null ? p.gram : 0,
       unit_price_no_vat: eurToInvoiceCurrency(effectivePrice),
-      vat_rate: p.vat_rate != null ? p.vat_rate : 20,
+      vat_rate: p.vat_rate != null ? p.vat_rate : 0,
       on_promotion: onPromo ? 1 : 0,
       promo_discount_pct: onPromo ? n(p.promo_discount_pct) : 0,
     })
@@ -1339,19 +1380,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   }
 
   const removeSplit = (idx) => setPaymentSplits(prev => prev.filter((_, i) => i !== idx))
-
-  // Preset-e të shpejta për splits — zëvendësojnë tabs-et e vjetra Cash/POS/Borxh.
-  const setCashFull = () => {
-    const rate = allRates[currency] != null ? String(allRates[currency]) : String(exchangeRate || 1)
-    setPaymentSplits([{ method: 'cash', currency, amount: String(+(totals.tot || 0).toFixed(2)), exchange_rate: rate }])
-    setPaidTouched(true)
-  }
-  const setBankFull = () => {
-    const rate = allRates[currency] != null ? String(allRates[currency]) : String(exchangeRate || 1)
-    setPaymentSplits([{ method: 'bank', currency, amount: String(+(totals.tot || 0).toFixed(2)), exchange_rate: rate }])
-    setPaidTouched(true)
-  }
-  const clearSplits = () => { setPaymentSplits([]); setPaidTouched(true) }
 
   // Deduho metodën e pagesës nga splits për ruajtjen dhe për badge-t në listë:
   // 0 splits → borxh; 1 split në monedhën e faturës → cash/bank; ndryshe → mikse.
@@ -1523,17 +1551,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
         <div className="col-span-2 md:col-span-4">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <label className="form-label !mb-0">Pagesa</label>
-            <div className="flex gap-1 flex-wrap">
-              <button type="button" onClick={setCashFull}
-                className="px-2 py-1 rounded-md text-xs font-medium bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200"
-                title="Zëvendëso splits me një rresht Cash për totalin e plotë">💵 Cash i plotë</button>
-              <button type="button" onClick={setBankFull}
-                className="px-2 py-1 rounded-md text-xs font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200"
-                title="Zëvendëso splits me një rresht POS për totalin e plotë">💳 POS i plotë</button>
-              <button type="button" onClick={clearSplits}
-                className="px-2 py-1 rounded-md text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200"
-                title="Bosh — asgjë e paguar, gjithçka mbetet borxh">⚠️ Borxh (bosh)</button>
-            </div>
           </div>
           {(() => {
             const tot = totals.tot
@@ -1549,7 +1566,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         <th className="px-2 py-2 text-left font-semibold w-28">Metoda</th>
                         <th className="px-2 py-2 text-left font-semibold w-24">Monedha</th>
                         <th className="px-2 py-2 text-right font-semibold">Shuma</th>
-                        <th className="px-2 py-2 text-right font-semibold w-28">Kursi → LEK</th>
                         <th className="px-2 py-2 text-right font-semibold w-32">= në {currency}</th>
                         <th className="px-2 py-2 w-8"></th>
                       </tr>
@@ -1557,8 +1573,8 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     <tbody>
                       {paymentSplits.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="px-3 py-4 text-center text-amber-700 bg-amber-50 text-xs">
-                            ⚠️ Asnjë pagesë — fatura do të mbetet <span className="font-semibold">borxh i plotë</span>. Përdor butonat lart për të shtuar pagesë.
+                          <td colSpan={5} className="px-3 py-4 text-center text-amber-700 bg-amber-50 text-xs">
+                            ⚠️ Asnjë pagesë — fatura do të mbetet <span className="font-semibold">borxh i plotë</span>. Përdor butonat më poshtë për të shtuar pagesë.
                           </td>
                         </tr>
                       )}
@@ -1582,15 +1598,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                               </select>
                             </td>
                             <td className="px-1 py-1">
-                              <input type="number" step="0.01" min="0" value={s.amount}
-                                onChange={e => updateSplit(idx, { amount: e.target.value })}
+                              <MoneyInput value={s.amount}
+                                onChange={v => updateSplit(idx, { amount: v })}
                                 className="input-field-sm text-right tabular-nums" placeholder="0.00" />
-                            </td>
-                            <td className="px-1 py-1">
-                              <input type="number" step="0.0001" min="0" value={s.exchange_rate}
-                                onChange={e => updateSplit(idx, { exchange_rate: e.target.value })}
-                                disabled={s.currency === 'LEK'}
-                                className="input-field-sm text-right tabular-nums disabled:bg-slate-50" />
                             </td>
                             <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(inInv)}</td>
                             <td className="px-1 py-1 text-center">
@@ -1688,6 +1698,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
               <tr className="text-slate-500">
                 <th className="px-2 py-2 text-left font-semibold w-8">#</th>
                 <th className="px-2 py-2 text-left font-semibold w-64">Produkti (barkod ose emër)</th>
+                <th className="px-2 py-2 text-left font-semibold w-28">Nr Serie</th>
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Sasia</th>
                 <th className="px-2 py-2 text-right font-semibold w-20">Gramatura</th>
@@ -1718,6 +1729,13 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     </td>
                     <td className="px-1 py-1">
                       <input
+                        type="text" value={it.serial_no || ''} readOnly
+                        className="input-field-sm font-mono bg-slate-50 text-slate-600"
+                        placeholder="—"
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
                         type="text" value={it.barcode} readOnly
                         className="input-field-sm font-mono bg-slate-50 text-slate-600"
                         placeholder="—"
@@ -1738,11 +1756,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                       />
                     </td>
                     <td className="px-1 py-1">
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={discEur === 0 ? '' : discEur.toFixed(2)}
-                        onChange={e => {
-                          const eur = parseFloat(e.target.value) || 0
+                      <MoneyInput
+                        value={discEur}
+                        onChange={eur => {
                           if (base <= 0) { setItem(idx, { discount_percent: 0 }); return }
                           const pct = Math.max(0, Math.min(100, (eur / base) * 100))
                           setItem(idx, { discount_percent: +pct.toFixed(4) })
@@ -1775,7 +1791,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             </tbody>
             <tfoot className="bg-blue-50 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={8} className="px-2 py-2 text-right text-slate-600">TOTALI ({currency}):</td>
+                <td colSpan={9} className="px-2 py-2 text-right text-slate-600">TOTALI ({currency}):</td>
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
               </tr>

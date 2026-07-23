@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import { getUser } from '../lib/auth.js'
+import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 
 const CAT_ICONS = {
   'Unazë': '💍', 'Vathë': '✨', 'Byzylyk': '📿',
@@ -30,11 +31,6 @@ function daysAgo(k) {
   const d = new Date(); d.setDate(d.getDate() - k)
   return toISOLocal(d)
 }
-function monthStart() {
-  const d = new Date(); d.setDate(1)
-  return toISOLocal(d)
-}
-
 function diffDays(from, to) {
   const a = new Date(from + 'T00:00:00')
   const b = new Date(to   + 'T00:00:00')
@@ -105,11 +101,15 @@ const CustomTooltip = ({ active, payload, label }) => {
   )
 }
 
-export default function Dashboard({ onNavigate }) {
+export default function Dashboard({ date, onNavigate }) {
   const isSales = getUser()?.role === 'sales'
 
-  // Periudha e zgjedhur — default: nga fillimi i muajit → sot.
-  const [dateRange, setDateRange] = useState({ from: monthStart(), to: today() })
+  // "Sot" merret nga App-i (currentDate) që të përputhet me faqet e tjera
+  // (ArkaDitore, FaturaShitje, etj.). Nëse s'jepet, fallback tek data lokale.
+  const activeToday = date || today()
+
+  // Periudha e zgjedhur — default: vetëm sot.
+  const [dateRange, setDateRange] = useState({ from: activeToday, to: activeToday })
 
   const [products, setProducts]         = useState([])
   const [invoicesRange, setInvoicesRange] = useState([])
@@ -123,10 +123,11 @@ export default function Dashboard({ onNavigate }) {
   const [loading, setLoading]           = useState(false)      // range fetch
   const [initialLoad, setInitialLoad]   = useState(true)       // vetëm herën e parë
 
-  // Snapshot-et që nuk varen nga data (stok, borxhe të hapura, arka e sotme).
-  useEffect(() => {
-    const t = today()
-    Promise.all([
+  // Snapshot-et që nuk varen nga periudha (stok, borxhe të hapura, arka e sotme).
+  // Përdor `activeToday` që të përputhet me datën aktive të App-it (currentDate).
+  const loadSnapshots = useCallback(() => {
+    const t = activeToday
+    return Promise.all([
       fetch('/api/products').then(r => r.json()).catch(() => []),
       fetch(`/api/arka-ditore/${t}`).then(r => r.json()).catch(() => null),
       fetch('/api/client-debts/summary?onlyDebt=1').then(r => r.json()).catch(() => []),
@@ -142,13 +143,24 @@ export default function Dashboard({ onNavigate }) {
         setInvSummary(invSum || null)
         setRatesToday(ratesRes?.rates || { LEK: 1 })
       })
-  }, [])
+  }, [activeToday])
+
+  useEffect(() => { loadSnapshots() }, [loadSnapshots])
+
+  // Rifresko snapshot-et sa herë që një shitje/blerje/shpenzim/pagesë ndikon
+  // arkën e sotme ose borxhet e hapura.
+  useRealtimeSync(
+    ['invoices', 'invoice_payments', 'expense_entries', 'purchase_invoices',
+     'purchase_payments', 'hurda_purchases', 'has_purchases', 'daily_records',
+     'products', 'customer_debts'],
+    loadSnapshots
+  )
 
   // Të dhëna që varen nga periudha e zgjedhur (fatura, fitim, borxhe klientësh nga periudha).
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return
-    setLoading(true)
-    Promise.all([
+  const loadRange = useCallback((withSpinner = true) => {
+    if (!dateRange.from || !dateRange.to) return Promise.resolve()
+    if (withSpinner) setLoading(true)
+    return Promise.all([
       fetch(`/api/invoices/by-range?from=${dateRange.from}&to=${dateRange.to}`).then(r => r.json()).catch(() => []),
       fetch(`/api/inventory-summary?from=${dateRange.from}&to=${dateRange.to}`).then(r => r.json()).catch(() => null),
       fetch(`/api/client-debts/summary?onlyDebt=1&from=${dateRange.from}&to=${dateRange.to}`).then(r => r.json()).catch(() => []),
@@ -158,8 +170,15 @@ export default function Dashboard({ onNavigate }) {
         setInvSummaryRange(invSumRng || null)
         setClientDebtsRange(Array.isArray(cDebtsRng) ? cDebtsRng : [])
       })
-      .finally(() => { setLoading(false); setInitialLoad(false) })
+      .finally(() => { if (withSpinner) setLoading(false); setInitialLoad(false) })
   }, [dateRange.from, dateRange.to])
+
+  useEffect(() => { loadRange(true) }, [loadRange])
+
+  // Rifresko range-in pa spinner sa herë që faturat ndryshojnë (shitje e re,
+  // pagesë borxhi, kthim, etj.). Përdor un-spinner që të mos "flashi" UI-në.
+  const refreshRange = useCallback(() => loadRange(false), [loadRange])
+  useRealtimeSync(['invoices', 'invoice_payments', 'customer_debts'], refreshRange)
 
   // ── Inventar
   const total      = products.length
@@ -197,11 +216,29 @@ export default function Dashboard({ onNavigate }) {
   // Numri i faturave në periudhë
   const rangeInvoiceCount = invoicesRange.filter(i => !i.cancelled).length
 
-  // Xhiro për periudhën, e ndarë sipas monedhës origjinale (pa konvertim).
+  // Xhiro për periudhën, e ndarë sipas monedhës. Për fatura 'mikse' me splits
+  // në disa monedha, çdo split kontribon tek monedha e vet reale (kesh + POS/bankë).
+  // Pjesa e mbetur (borxh i papaguar) mbetet tek monedha e faturës. Kështu një
+  // shitje 100 EUR + 50 USD + 30 GBP paraqitet ndaras në tre monedhat, jo në EUR.
   const xhiroByCurRange = invoicesRange.reduce((acc, inv) => {
     if (inv.cancelled) return acc
-    const cur = inv.currency || 'LEK'
-    acc[cur] = (acc[cur] || 0) + n(inv.total_with_vat)
+    const invCur = inv.currency || 'LEK'
+    const tot = n(inv.total_with_vat)
+    if (inv.payment_method === 'mikse' && inv.splits_summary) {
+      // Shto secilin split tek monedha e vet.
+      for (const part of String(inv.splits_summary).split('|')) {
+        const [, cur, amountStr] = part.split(':')
+        const amt = parseFloat(amountStr) || 0
+        if (!cur || amt === 0) continue
+        acc[cur] = (acc[cur] || 0) + amt
+      }
+      // Borxhi i mbetur (nëse ka) i atribuohet monedhës së faturës.
+      const initPaid = n(inv.paid_cash) + n(inv.paid_pos) + n(inv.paid_bank)
+      const unpaid = +(tot - initPaid).toFixed(2)
+      if (unpaid > 0.005) acc[invCur] = (acc[invCur] || 0) + unpaid
+    } else {
+      acc[invCur] = (acc[invCur] || 0) + tot
+    }
     return acc
   }, {})
   const activeXhiroRange = Object.keys(xhiroByCurRange)
@@ -645,7 +682,6 @@ const QUICK_ACTIONS = [
   { icon: '💻', label: 'Shitje Brenda Stafit',   page: 'shitje-online',       salesOk: true  },
   { icon: '🏷️', label: 'Promocionet',            page: 'produkte-promocion',  salesOk: true  },
   { icon: '🛠️', label: 'Riparimet',              page: 'riparimet',           salesOk: true  },
-  { icon: '↩️', label: 'Kthimet',                page: 'kthime-online',       salesOk: true  },
   { icon: '💬', label: 'Komentet',               page: 'komentet',            salesOk: true  },
   { icon: '💼', label: 'Kasaforta',              page: 'arka-kasaforta',      salesOk: true  },
   { icon: '🏦', label: 'Arka',                   page: 'arka-ditore',         salesOk: true  },
@@ -667,7 +703,6 @@ const QUICK_ACTIONS = [
   { icon: '📉', label: 'Analize Furnitor',       page: 'analize-veprime-furnitor', salesOk: false },
   { icon: '📊', label: 'Raport Shitje',          page: 'raport-shitje-artikuj',   salesOk: false },
   { icon: '📊', label: 'Raport Blerje',          page: 'raport-blerje-artikuj',   salesOk: false },
-  { icon: '💸', label: 'Raport Shpenzime',       page: 'raport-shpenzime',        salesOk: false },
   { icon: '📊', label: 'Përmbledhëse',           page: 'permbledhese',            salesOk: false },
   { icon: '📣', label: 'Marketingu',             page: 'marketing',               salesOk: false },
 ]

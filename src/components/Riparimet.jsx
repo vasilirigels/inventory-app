@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getUser } from '../lib/auth.js'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
+import MoneyInput from './MoneyInput.jsx'
 
 const STATUS_META = {
   pranuar:  { label: 'Pranuar',     cls: 'bg-slate-100 text-slate-700',    dot: 'bg-slate-400' },
@@ -25,7 +26,7 @@ function EMPTY() {
     issue_description: '',
     notes: '',
     price: '',
-    currency: 'LEK',
+    currency: 'EUR',
     status: 'pranuar',
     date_delivered: '',
     paid: 0,
@@ -105,8 +106,8 @@ function RepairModal({ repair, onClose, onSave }) {
 
               <div>
                 <label className="form-label">Çmimi</label>
-                <input type="number" step="0.01" value={form.price}
-                  onChange={e => set('price', e.target.value)}
+                <MoneyInput value={form.price}
+                  onChange={v => set('price', String(v))}
                   className="input-field text-right tabular-nums" placeholder="0.00" />
               </div>
               <div>

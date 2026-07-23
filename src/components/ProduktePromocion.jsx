@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getUser } from '../lib/auth.js'
+import MoneyInput from './MoneyInput.jsx'
 
 const CAT_ICONS = {
   'Unazë': '💍', 'Vathë': '✨', 'Byzylyk': '📿',
@@ -12,13 +13,17 @@ function fmt(v) {
   return x.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// Listë e produkteve që janë aktualisht në promocion.
-// Admin mund të heqë promocionin direkt nga këtu.
+// Listë e produkteve që janë aktualisht në promocion. Admin mund të ndryshojë
+// çmimin origjinal, % e zbritjes, ose të heqë promocionin nga këtu.
 export default function ProduktePromocion({ onNavigate }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
   const [search, setSearch] = useState('')
+  // Edits lokale për çdo rresht: { [id]: { sell_price?, promo_discount_pct? } }
+  const [edits, setEdits] = useState({})
+  // Feedback pas ruajtjes: { [id]: 'ok' | 'err' }
+  const [flash, setFlash] = useState({})
   const isAdmin = getUser()?.role === 'admin'
 
   const load = async () => {
@@ -27,6 +32,7 @@ export default function ProduktePromocion({ onNavigate }) {
       const all = await fetch('/api/products').then(r => r.json())
       const promo = (Array.isArray(all) ? all : []).filter(p => !!p.is_promotion)
       setRows(promo)
+      setEdits({})
     } catch (e) { console.error(e) }
     setLoading(false)
   }
@@ -46,6 +52,54 @@ export default function ProduktePromocion({ onNavigate }) {
     } finally { setBusyId(null) }
   }
 
+  const setEdit = (id, patch) => {
+    setEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }))
+  }
+
+  const showFlash = (id, kind) => {
+    setFlash(prev => ({ ...prev, [id]: kind }))
+    setTimeout(() => setFlash(prev => {
+      const { [id]: _, ...rest } = prev
+      return rest
+    }), 1500)
+  }
+
+  const save = async (p) => {
+    const patch = edits[p.id] || {}
+    const newSell = patch.sell_price != null ? parseFloat(patch.sell_price) : (parseFloat(p.sell_price) || 0)
+    const newPct  = patch.promo_discount_pct != null
+      ? Math.max(0, Math.min(100, parseFloat(patch.promo_discount_pct) || 0))
+      : (parseFloat(p.promo_discount_pct) || 0)
+    setBusyId(p.id)
+    try {
+      const res = await fetch(`/api/products/${p.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...p,
+          sell_price: newSell,
+          promo_discount_pct: newPct,
+          is_promotion: 1,
+        }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        alert(e.message || e.error || 'Gabim gjatë ruajtjes')
+        showFlash(p.id, 'err')
+        return
+      }
+      showFlash(p.id, 'ok')
+      // Përditëso rreshtin lokalisht pa u nisur për një load të plotë
+      setRows(prev => prev.map(x => x.id === p.id
+        ? { ...x, sell_price: newSell, promo_discount_pct: newPct }
+        : x))
+      setEdits(prev => { const { [p.id]: _, ...rest } = prev; return rest })
+    } catch (e) {
+      alert(e.message || 'Gabim')
+      showFlash(p.id, 'err')
+    } finally { setBusyId(null) }
+  }
+
   const q = search.toLowerCase().trim()
   const visible = q
     ? rows.filter(p =>
@@ -61,7 +115,7 @@ export default function ProduktePromocion({ onNavigate }) {
           <div>
             <h2 className="text-lg font-bold text-slate-800">🏷️ Produkte në Promocion</h2>
             <p className="text-xs text-slate-500 mt-1">
-              Produktet e shënuara nga admin si aktualisht në promocion. Për t'i shtuar, shko tek Produktet ose Fatura Blerje.
+              Produktet e shënuara nga admin si aktualisht në promocion. Mund të ndryshosh Çmimin Origjinal dhe % e Zbritjes direkt këtu.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -85,7 +139,7 @@ export default function ProduktePromocion({ onNavigate }) {
             {visible.length} {visible.length === 1 ? 'produkt' : 'produkte'}
           </h3>
           {rows.length > 0 && isAdmin && (
-            <span className="text-[10px] text-slate-400">Kliko 🗑 për të hequr promocionin</span>
+            <span className="text-[10px] text-slate-400">Ndrysho vlerat dhe kliko 💾 për të ruajtur</span>
           )}
         </div>
 
@@ -107,20 +161,26 @@ export default function ProduktePromocion({ onNavigate }) {
                   <th className="px-3 py-2 text-left  text-xs font-semibold text-slate-500 uppercase">Kategoria</th>
                   <th className="px-3 py-2 text-left  text-xs font-semibold text-slate-500 uppercase">Produkti</th>
                   <th className="px-3 py-2 text-left  text-xs font-semibold text-slate-500 uppercase">SKU / Barkod</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Çmimi Origjinal</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-rose-600 uppercase" title="Zbritja aktuale e promocionit">Zbritja %</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase w-32">Çmimi Origjinal</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-rose-600 uppercase w-24" title="Zbritja aktuale e promocionit">Zbritja %</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-emerald-700 uppercase" title="Çmimi pas aplikimit të zbritjes së promocionit">Çmimi me Promo</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Stok</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase"></th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase w-28"></th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map(p => {
-                  const pct = parseFloat(p.promo_discount_pct) || 0
-                  const orig = parseFloat(p.sell_price) || 0
-                  const promoPrice = +(orig * (1 - pct / 100)).toFixed(2)
+                  const patch = edits[p.id] || {}
+                  const editedSell = patch.sell_price != null ? parseFloat(patch.sell_price) : parseFloat(p.sell_price) || 0
+                  const editedPct  = patch.promo_discount_pct != null
+                    ? parseFloat(patch.promo_discount_pct) || 0
+                    : parseFloat(p.promo_discount_pct) || 0
+                  const promoPrice = +(editedSell * (1 - editedPct / 100)).toFixed(2)
+                  const dirty = patch.sell_price != null || patch.promo_discount_pct != null
+                  const busy = busyId === p.id
+                  const fl = flash[p.id]
                   return (
-                  <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <tr key={p.id} className={`border-b border-slate-100 hover:bg-slate-50 ${dirty ? 'bg-amber-50/40' : ''}`}>
                     <td className="px-3 py-2 text-slate-600">
                       <span className="mr-1.5">{CAT_ICONS[p.category] || '📦'}</span>
                       <span className="text-xs">{p.category}</span>
@@ -133,11 +193,30 @@ export default function ProduktePromocion({ onNavigate }) {
                       {p.sku || '—'}
                       {p.barcode && <div className="text-slate-400">{p.barcode}</div>}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-500 line-through">
-                      €{fmt(orig)}
+                    <td className="px-3 py-2">
+                      {isAdmin ? (
+                        <MoneyInput
+                          value={editedSell}
+                          onChange={v => setEdit(p.id, { sell_price: v })}
+                          className="input-field-sm text-right tabular-nums w-full"
+                        />
+                      ) : (
+                        <span className="text-right tabular-nums text-slate-500 line-through">€{fmt(editedSell)}</span>
+                      )}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-rose-600">
-                      {pct > 0 ? `-${fmt(pct)}%` : '—'}
+                    <td className="px-3 py-2">
+                      {isAdmin ? (
+                        <input
+                          type="number" step="0.01" min="0" max="100"
+                          value={editedPct}
+                          onChange={e => setEdit(p.id, { promo_discount_pct: e.target.value })}
+                          className="input-field-sm text-right tabular-nums w-full font-bold text-rose-600"
+                        />
+                      ) : (
+                        <span className="text-right tabular-nums font-bold text-rose-600">
+                          {editedPct > 0 ? `-${fmt(editedPct)}%` : '—'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-emerald-700">
                       €{fmt(promoPrice)}
@@ -145,14 +224,24 @@ export default function ProduktePromocion({ onNavigate }) {
                     <td className={`px-3 py-2 text-right tabular-nums font-medium ${p.stock === 0 ? 'text-rose-600' : p.stock <= p.min_stock ? 'text-amber-600' : 'text-slate-700'}`}>
                       {p.stock ?? 0}
                     </td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
                       {isAdmin ? (
-                        <button
-                          onClick={() => remove(p.id)}
-                          disabled={busyId === p.id}
-                          className="px-2 py-1 rounded-lg text-xs text-rose-600 hover:bg-rose-50 font-medium disabled:opacity-50"
-                          title="Hiqe nga promocioni"
-                        >🗑 Hiq</button>
+                        <div className="flex items-center justify-end gap-1">
+                          {fl === 'ok' && <span className="text-[10px] text-emerald-600 font-semibold">✓</span>}
+                          {fl === 'err' && <span className="text-[10px] text-rose-600 font-semibold">✕</span>}
+                          <button
+                            onClick={() => save(p)}
+                            disabled={busy || !dirty}
+                            className="px-2 py-1 rounded-lg text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Ruaj ndryshimet"
+                          >💾</button>
+                          <button
+                            onClick={() => remove(p.id)}
+                            disabled={busy}
+                            className="px-2 py-1 rounded-lg text-xs text-rose-600 hover:bg-rose-50 font-medium disabled:opacity-50"
+                            title="Hiqe nga promocioni"
+                          >🗑</button>
+                        </div>
                       ) : <span className="text-[10px] text-slate-300">—</span>}
                     </td>
                   </tr>

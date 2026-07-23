@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import MoneyInput from './MoneyInput.jsx'
 
 // Zgjedhës i zërit të shpenzimit me krijim inline: kur user zgjedh "+ Krijo zër
 // të ri..." nga dropdown-i, kontrolli kthehet në një input të vogël që POST-on
@@ -82,7 +83,7 @@ function fmt(v) {
 }
 
 function emptyDraft() {
-  return { category_id: '', description: '', currency: 'LEK', amount: '', exchange_rate: '1' }
+  return { category_id: '', description: '', currency: 'EUR', amount: '', exchange_rate: '1' }
 }
 
 export default function Shpenzime({ date, onNavigate }) {
@@ -255,7 +256,7 @@ export default function Shpenzime({ date, onNavigate }) {
       {/* New entry row */}
       <div className="card">
         <h3 className="text-sm font-semibold text-slate-700 mb-3">+ Shto Shpenzim</h3>
-        <div className="grid grid-cols-2 md:grid-cols-7 gap-2 items-end">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 items-end">
           <div className="md:col-span-2">
             <label className="form-label">Zëri</label>
             <ExpenseCategoryPicker
@@ -299,26 +300,13 @@ export default function Shpenzime({ date, onNavigate }) {
           </div>
           <div>
             <label className="form-label">Vlera ({draft.currency})</label>
-            <input
-              type="number" step="0.01" value={draft.amount}
-              onChange={e => setDraft(d => ({ ...d, amount: e.target.value }))}
+            <MoneyInput
+              value={draft.amount}
+              onChange={v => setDraft(d => ({ ...d, amount: String(v) }))}
               className="input-field text-right tabular-nums"
             />
           </div>
-          <div>
-            <label className="form-label">
-              Kursi <span className="text-[10px] text-slate-400">(1 {draft.currency} = ? LEK)</span>
-            </label>
-            <input
-              type="number" step="0.0001" min="0"
-              value={draft.currency === 'LEK' ? 1 : draft.exchange_rate}
-              disabled={draft.currency === 'LEK'}
-              onChange={e => setDraft(d => ({ ...d, exchange_rate: e.target.value }))}
-              className="input-field text-right tabular-nums disabled:bg-slate-100 disabled:text-slate-400"
-              placeholder={draft.currency === 'LEK' ? '1' : 'p.sh. 98.5'}
-            />
-          </div>
-          <div className="md:col-span-7 flex items-center justify-between">
+          <div className="md:col-span-6 flex items-center justify-between">
             <p className="text-xs text-slate-500">
               Total LEK: <span className="font-bold text-blue-700 tabular-nums">
                 {fmt(n(draft.amount) * (draft.currency === 'LEK' ? 1 : n(draft.exchange_rate)))}
@@ -448,9 +436,9 @@ export default function Shpenzime({ date, onNavigate }) {
                         </select>
                       </td>
                       <td className="px-2 py-1">
-                        <input
-                          type="number" step="0.01" value={editDraft.amount}
-                          onChange={e => setEditDraft(d => ({ ...d, amount: e.target.value }))}
+                        <MoneyInput
+                          value={editDraft.amount}
+                          onChange={v => setEditDraft(d => ({ ...d, amount: String(v) }))}
                           className="input-field-sm text-right tabular-nums"
                         />
                       </td>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { generateBarcode, printLabels } from '../lib/barcode.js'
+import MoneyInput from './MoneyInput.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -10,8 +11,9 @@ function fmt(v) {
 
 function emptyItem() {
   return {
-    product_id: null, barcode: '', name: '',
-    qty: 1, purchase_price_no_vat: 0, discount_percent: 0,
+    product_id: null, serial_no: '', barcode: '', name: '',
+    category: '', unit: 'copë', gram: 0,
+    qty: 1, purchase_price_no_vat: 0, cost_price: 0, discount_percent: 0,
     vat_rate: 20, sell_price: 0, material: '',
     is_promotion: false, promo_discount_pct: 0,
   }
@@ -700,7 +702,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const [invoiceNo, setInvoiceNo] = useState('')
   const [supplierName, setSupplierName] = useState('')
   const [supplierNipt, setSupplierNipt] = useState('')
-  const [currency, setCurrency] = useState('LEK')
+  const [currency, setCurrency] = useState('EUR')
   const [exchangeRate, setExchangeRate] = useState(1)
   const [rateSource, setRateSource]   = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
@@ -892,9 +894,14 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const pickProduct = (idx, p) => {
     setItem(idx, {
       product_id: p.id,
+      serial_no: p.serial_no || '',
       barcode: p.barcode || '',
       name: p.name,
-      purchase_price_no_vat: eurToInvoiceCurrency(p.cost_price || 0),
+      category: p.category || '',
+      unit: p.unit || 'copë',
+      gram: p.gram != null ? p.gram : 0,
+      purchase_price_no_vat: eurToInvoiceCurrency(p.purchase_price_no_vat || 0),
+      cost_price:            eurToInvoiceCurrency(p.cost_price || 0),
       sell_price:            eurToInvoiceCurrency(p.sell_price || 0),
       vat_rate: p.vat_rate != null ? p.vat_rate : 20,
       material: p.material || '',
@@ -1060,10 +1067,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 </div>
                 <div>
                   <label className="text-[10px] text-slate-500 uppercase font-semibold">Shuma e Paguar ({currency})</label>
-                  <input
-                    type="number" step="0.01" min="0"
+                  <MoneyInput
                     value={amountPaid}
-                    onChange={e => setAmountPaid(e.target.value)}
+                    onChange={v => setAmountPaid(String(v))}
                     className="input-field tabular-nums"
                     placeholder={tot.toFixed(2)}
                   />
@@ -1090,30 +1096,27 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           <table className="w-full text-xs">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr className="text-slate-500">
-                <th className="px-2 py-2 text-left font-semibold w-8">#</th>
-                <th className="px-2 py-2 text-left font-semibold w-56">Produkti (barkod ose emër)</th>
-                <th className="px-2 py-2 text-left font-semibold w-44">Barkodi</th>
-                <th className="px-2 py-2 text-right font-semibold w-14">Sasia</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Çm. Blerje pa TVSH</th>
-                <th className="px-2 py-2 text-right font-semibold w-14">Zbritje %</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Vlera pa TVSH</th>
-                <th className="px-2 py-2 text-right font-semibold w-12">TVSH %</th>
-                <th className="px-2 py-2 text-right font-semibold w-20">TVSH</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Vlera me TVSH</th>
-                <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800">Çm. SHITJE</th>
+                <th className="px-2 py-2 text-left font-semibold w-8">Nr.</th>
+                <th className="px-2 py-2 text-left font-semibold w-40">Barkodi</th>
+                <th className="px-2 py-2 text-left font-semibold w-28">Nr Serie</th>
+                <th className="px-2 py-2 text-left font-semibold w-56">Pershkrimi</th>
+                <th className="px-2 py-2 text-left font-semibold w-28">Kategoria</th>
+                <th className="px-2 py-2 text-left font-semibold w-16">Njesi</th>
+                <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
+                <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Cmimi PA</th>
+                <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Cmim Kosto €</th>
+                <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800">Cmim Shitje €</th>
                 <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-50 text-rose-700" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {items.map((it, idx) => {
-                const lt = lineTotals[idx]
                 return (
                   <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
-                    <td className="px-1 py-1">
-                      <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
-                    </td>
                     <td className="px-1 py-1">
                       <div className="flex items-center gap-0.5">
                         <input
@@ -1138,31 +1141,51 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                       </div>
                     </td>
                     <td className="px-1 py-1">
+                      <input type="text" value={it.serial_no || ''}
+                        onChange={e => setItem(idx, { serial_no: e.target.value })}
+                        className="input-field-sm font-mono" placeholder="—" />
+                    </td>
+                    <td className="px-1 py-1">
+                      <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input type="text" value={it.category || ''}
+                        onChange={e => setItem(idx, { category: e.target.value })}
+                        className="input-field-sm" placeholder="—" />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input type="text" value={it.unit || ''}
+                        onChange={e => setItem(idx, { unit: e.target.value })}
+                        className="input-field-sm" placeholder="copë" />
+                    </td>
+                    <td className="px-1 py-1">
                       <input type="number" step="any" value={it.qty}
                         onChange={e => setItem(idx, { qty: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
                     <td className="px-1 py-1">
-                      <input type="number" step="0.01" value={it.purchase_price_no_vat}
-                        onChange={e => setItem(idx, { purchase_price_no_vat: e.target.value })}
+                      <input type="number" step="0.001" min="0" value={it.gram}
+                        onChange={e => setItem(idx, { gram: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
                     <td className="px-1 py-1">
-                      <input type="number" step="0.01" min="0" max="100" value={it.discount_percent}
-                        onChange={e => setItem(idx, { discount_percent: e.target.value })}
+                      <MoneyInput value={it.purchase_price_no_vat}
+                        onChange={v => setItem(idx, { purchase_price_no_vat: v })}
                         className="input-field-sm text-right" />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(lt.subtotal_no_vat)}</td>
                     <td className="px-1 py-1">
                       <input type="number" step="0.01" min="0" max="100" value={it.vat_rate}
                         onChange={e => setItem(idx, { vat_rate: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(lt.vat_amount)}</td>
-                    <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900">{fmt(lt.total_with_vat)}</td>
+                    <td className="px-1 py-1">
+                      <MoneyInput value={it.cost_price}
+                        onChange={v => setItem(idx, { cost_price: v })}
+                        className="input-field-sm text-right" />
+                    </td>
                     <td className="px-1 py-1 bg-emerald-50">
-                      <input type="number" step="0.01" min="0" value={it.sell_price}
-                        onChange={e => setItem(idx, { sell_price: e.target.value })}
+                      <MoneyInput value={it.sell_price}
+                        onChange={v => setItem(idx, { sell_price: v })}
                         className="input-field-sm text-right font-semibold text-emerald-800" />
                     </td>
                     <td className="px-1 py-1 text-center bg-rose-50/40">
@@ -1200,13 +1223,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             </tbody>
             <tfoot className="bg-blue-50 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={6} className="px-2 py-2 text-right text-slate-600">TOTALI ({currency}):</td>
-                <td className="px-2 py-2 text-right tabular-nums text-slate-800">{fmt(totals.sub)}</td>
-                <td></td>
-                <td className="px-2 py-2 text-right tabular-nums text-slate-800">{fmt(totals.vat)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</td>
-                <td></td>
-                <td></td>
+                <td colSpan={13} className="px-2 py-2 text-right text-slate-600">
+                  TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800">{fmt(totals.sub)}</span>
+                  {' · '}TVSH: <span className="tabular-nums text-slate-800">{fmt(totals.vat)}</span>
+                  {' · '}me TVSH: <span className="tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</span>
+                </td>
                 <td></td>
               </tr>
             </tfoot>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import MoneyInput from './MoneyInput.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -482,8 +483,8 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
               {spotLoading ? '⏳' : '🔄 Spot'}
             </button>
           </label>
-          <input type="number" step="0.01" min="0"
-            value={pricePerGram} onChange={e => setPricePerGram(e.target.value)}
+          <MoneyInput
+            value={pricePerGram} onChange={v => setPricePerGram(String(v))}
             className="input-field tabular-nums" placeholder="0.00" />
           {spotEurPerGram && (
             <p className="text-[10px] text-slate-500 mt-0.5">

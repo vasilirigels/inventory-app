@@ -250,12 +250,17 @@ const SALES_WRITE_ALLOW = [
   // Kthim / kreditore (i plotë ose i pjesshëm) — shitësi ka të drejtë ta bëjë
   // pa duhur admin, sepse është veprim ditor i klientit në dyqan.
   { method: 'POST', pattern: /^\/api\/invoices\/\d+\/credit-note$/ },
+  // Pagesa borxhi klienti — regjistrim i pagesës mbi faturën ekzistuese.
+  { method: 'POST', pattern: /^\/api\/invoices\/\d+\/payments$/ },
   // Update i statusit të porosisë online — quick-action nga lista
   { method: 'PATCH', pattern: /^\/api\/invoices\/\d+\/order-status$/ },
   // Shpenzime ditore
   { method: 'POST', pattern: /^\/api\/expense-entries$/ },
   // Zër i ri shpenzimi — krijohet inline gjatë shtimit të shpenzimit
   { method: 'POST', pattern: /^\/api\/expense-categories$/ },
+  // Shpenzime Marketingu — të njëjtin flow si shpenzimet
+  { method: 'POST', pattern: /^\/api\/marketing-entries$/ },
+  { method: 'POST', pattern: /^\/api\/marketing-categories$/ },
   // Klientë të rinj gjatë faturës
   { method: 'POST', pattern: /^\/api\/clients$/ },
   // Lëvizje bankë (depozitim/tërheqje) + tërheqje kasafortë + konvertime
@@ -1584,7 +1589,10 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
     const onl = buildOnlineFilter(online, status);
     const rows = await queryAll(
       `SELECT i.*,
-         (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
+         (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid,
+         (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
+         (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
+            FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary
        FROM invoices i WHERE i.date = ? ${filter.sql} ${onl.sql} ORDER BY i.id ASC`,
       [date, ...filter.params, ...onl.params]
     );
@@ -1600,7 +1608,10 @@ app.get('/api/invoices/by-range', async (req, res) => {
     const onl = buildOnlineFilter(online, status);
     const rows = await queryAll(
       `SELECT i.*,
-         (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid
+         (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid,
+         (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
+         (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
+            FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary
        FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ${onl.sql} ORDER BY i.date ASC, i.id ASC`,
       [from, to, ...filter.params, ...onl.params]
     );
@@ -1786,12 +1797,12 @@ app.post('/api/invoices', async (req, res) => {
     const invoiceId = invoice?.id;
     for (const it of items) {
       await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, gram, unit_price_no_vat,
+        `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
           on_promotion, promo_discount_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          invoiceId, it.product_id || null, it.barcode || '', it.name || '',
+          invoiceId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
@@ -1896,12 +1907,12 @@ app.put('/api/invoices/:id', async (req, res) => {
     await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
     for (const it of items) {
       await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, gram, unit_price_no_vat,
+        `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
           on_promotion, promo_discount_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          id, it.product_id || null, it.barcode || '', it.name || '',
+          id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
@@ -2120,12 +2131,12 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
     const newId = created?.id;
     for (const it of itemsToMirror) {
       await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, barcode, name, qty, gram, unit_price_no_vat,
+        `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
           on_promotion, promo_discount_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          newId, it.product_id || null, it.barcode || '', it.name || '',
+          newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           -(it.qty || 0), -(parseFloat(it.gram) || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
           -(it.subtotal_no_vat || 0), it.vat_rate || 0,
           -(it.vat_amount || 0), -(it.total_with_vat || 0),
@@ -2655,12 +2666,13 @@ app.post('/api/purchase-invoices', async (req, res) => {
     const newId = created?.id;
     for (const it of items) {
       await run(
-        `INSERT INTO purchase_items (purchase_id, product_id, barcode, name, qty, purchase_price_no_vat,
-          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
+          purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          newId, it.product_id || null, it.barcode || '', it.name || '',
-          it.qty, it.purchase_price_no_vat, it.discount_percent,
+          newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
+          it.category || '', it.unit || '', parseFloat(it.gram) || 0,
+          it.qty, it.purchase_price_no_vat, parseFloat(it.cost_price) || 0, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           parseFloat(it.sell_price) || 0,
         ]
@@ -2723,12 +2735,13 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
     for (const it of items) {
       await run(
-        `INSERT INTO purchase_items (purchase_id, product_id, barcode, name, qty, purchase_price_no_vat,
-          discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
+          purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          id, it.product_id || null, it.barcode || '', it.name || '',
-          it.qty, it.purchase_price_no_vat, it.discount_percent,
+          id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
+          it.category || '', it.unit || '', parseFloat(it.gram) || 0,
+          it.qty, it.purchase_price_no_vat, parseFloat(it.cost_price) || 0, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           parseFloat(it.sell_price) || 0,
         ]
@@ -3852,8 +3865,12 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     // kesh_nga_shitjet (nëpërmjet formulës xhiro − bank − pos − due), dhe
     // amount_due mban vetëm mbetjen. Amount_paid këtu është snapshot i
     // regjistrimit (pagesat e mëpasme nga Detyrimet nuk hyjnë në arkën e ditës).
+    // Për 'mikse' me splits në disa monedha, ndarja bëhet sipas monedhës reale
+    // të secilit split (jo sipas monedhës së faturës) — që arka të pasqyrojë
+    // pagesat fizike EUR/USD/GBP/etj. që hynë faktikisht në sirtar.
     const salesRows = await queryAll(
       `SELECT
+         i.id                                 AS id,
          COALESCE(i.currency, 'LEK')          AS cur,
          COALESCE(i.total_with_vat, 0)        AS total,
          COALESCE(i.payment_method, 'cash')   AS pm,
@@ -3868,6 +3885,23 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       [date]
     );
 
+    // Për fatura 'mikse', ngarko splits që të atribuojmë secilën pagesë tek
+    // monedha e vet reale (jo tek monedha e faturës).
+    const mikseIds = salesRows.filter(r => r.pm === 'mikse').map(r => r.id);
+    const splitsByInv = {};
+    if (mikseIds.length > 0) {
+      const placeholders = mikseIds.map(() => '?').join(',');
+      const splitRows = await queryAll(
+        `SELECT invoice_id, method, COALESCE(currency, 'LEK') AS currency, COALESCE(amount, 0) AS amount
+           FROM invoice_payment_splits
+          WHERE invoice_id IN (${placeholders})`,
+        mikseIds
+      );
+      for (const s of splitRows) {
+        (splitsByInv[s.invoice_id] = splitsByInv[s.invoice_id] || []).push(s);
+      }
+    }
+
     const xhiro_total = zeroPerCur();
     const paid_bank   = zeroPerCur();
     const paid_pos    = zeroPerCur();
@@ -3875,20 +3909,44 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const r of salesRows) {
       const c = (r.cur || 'LEK').toUpperCase();
       if (!(c in xhiro_total)) continue;
-      xhiro_total[c] += r.total;
-      if (r.pm === 'bank') paid_bank[c] += r.total;
-      else if (r.pm === 'pos') paid_pos[c] += r.total;
+      if (r.pm === 'bank') {
+        xhiro_total[c] += r.total;
+        paid_bank[c] += r.total;
+      }
+      else if (r.pm === 'pos') {
+        xhiro_total[c] += r.total;
+        paid_pos[c] += r.total;
+      }
       else if (r.pm === 'debt') {
+        xhiro_total[c] += r.total;
         const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
         const due     = Math.max(0, r.total - paidNow);
         amount_due[c] += due;
         // paidNow bie te kesh_nga_shitjet automatikisht (xhiro − bank − pos − due).
       }
       else if (r.pm === 'mikse') {
-        paid_bank[c] += r.paid_bank;
-        paid_pos[c]  += r.paid_pos;
-        const debt = r.total - r.paid_cash - r.paid_pos - r.paid_bank;
-        if (debt > 0) amount_due[c] += debt;
+        // Atribuo çdo split tek monedha e vet reale.
+        const splits = splitsByInv[r.id] || [];
+        for (const s of splits) {
+          const sc = (s.currency || c).toUpperCase();
+          if (!(sc in xhiro_total)) continue;
+          const amt = parseFloat(s.amount) || 0;
+          xhiro_total[sc] += amt;
+          if (s.method === 'bank') paid_bank[sc] += amt;
+          else if (s.method === 'pos') paid_pos[sc] += amt;
+          // Cash splits kalojnë tek kesh_nga_shitjet përmes xhiro − bank − pos − due.
+        }
+        // Pjesa e papaguar mbetet borxh në monedhën e faturës.
+        const paidInInvCur = (r.paid_cash || 0) + (r.paid_pos || 0) + (r.paid_bank || 0);
+        const debt = +(r.total - paidInInvCur).toFixed(2);
+        if (debt > 0.005) {
+          xhiro_total[c] += debt;
+          amount_due[c] += debt;
+        }
+      }
+      else {
+        // pm === 'cash' (default)
+        xhiro_total[c] += r.total;
       }
     }
 
@@ -5281,6 +5339,192 @@ app.get('/api/reports/expenses', async (req, res) => {
       .sort((a, b) => b.total_lek - a.total_lek);
 
     res.json({ rows, totals, by_category });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// SHPENZIME MARKETINGU — të njëjtin flow si shpenzimet ditore
+// ============================================================
+app.get('/api/marketing-categories', async (req, res) => {
+  try {
+    const includeInactive = req.query.all === '1';
+    const where = includeInactive ? '' : 'WHERE COALESCE(active, 1) = 1';
+    res.json(await queryAll(`SELECT * FROM marketing_categories ${where} ORDER BY name COLLATE NOCASE ASC`));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/marketing-categories', async (req, res) => {
+  try {
+    const { name, description } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+    await run(
+      `INSERT INTO marketing_categories (name, description, active) VALUES (?, ?, 1)`,
+      [name.trim(), description || '']
+    );
+    const row = await queryOne('SELECT * FROM marketing_categories ORDER BY id DESC LIMIT 1');
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/marketing-categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, active } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+    await run(
+      `UPDATE marketing_categories SET name = ?, description = ?, active = ? WHERE id = ?`,
+      [name.trim(), description || '', active === 0 ? 0 : 1, id]
+    );
+    res.json(await queryOne('SELECT * FROM marketing_categories WHERE id = ?', [id]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/marketing-categories/:id', async (req, res) => {
+  try {
+    await run('DELETE FROM marketing_categories WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/marketing-entries/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const rows = await queryAll(
+      `SELECT m.*, c.name AS category_name,
+              (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
+       FROM marketing_expenses m
+       LEFT JOIN marketing_categories c ON c.id = m.category_id
+       WHERE m.date = ?
+       ORDER BY m.id ASC`,
+      [date]
+    );
+    const totals = rows.reduce((a, r) => {
+      const cur = r.currency || 'LEK';
+      a.total_lek += +(r.total_lek || 0);
+      a.by_currency[cur] = (a.by_currency[cur] || 0) + (r.amount || 0);
+      return a;
+    }, { total_lek: 0, by_currency: {} });
+    res.json({ rows, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/marketing-entries', async (req, res) => {
+  try {
+    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const cur = pickCurrency(currency);
+    const amt = parseFloat(amount) || 0;
+    const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
+    if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+    await run(
+      `INSERT INTO marketing_expenses (date, category_id, description, currency, amount, exchange_rate,
+         amount_lek, amount_eur, amount_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        date,
+        category_id || null,
+        description || '',
+        cur, amt, rate,
+        cur === 'LEK' ? amt : 0,
+        cur === 'EUR' ? amt : 0,
+        cur === 'USD' ? amt : 0,
+      ]
+    );
+    const row = await queryOne(
+      `SELECT m.*, c.name AS category_name,
+              (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
+       FROM marketing_expenses m LEFT JOIN marketing_categories c ON c.id = m.category_id
+       ORDER BY m.id DESC LIMIT 1`
+    );
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/marketing-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
+    const existing = await queryOne('SELECT date FROM marketing_expenses WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const cur = pickCurrency(currency);
+    const amt = parseFloat(amount) || 0;
+    const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
+    if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+    await run(
+      `UPDATE marketing_expenses SET date = ?, category_id = ?, description = ?,
+         currency = ?, amount = ?, exchange_rate = ?,
+         amount_lek = ?, amount_eur = ?, amount_usd = ?
+       WHERE id = ?`,
+      [
+        date || existing.date,
+        category_id || null,
+        description || '',
+        cur, amt, rate,
+        cur === 'LEK' ? amt : 0,
+        cur === 'EUR' ? amt : 0,
+        cur === 'USD' ? amt : 0,
+        id,
+      ]
+    );
+    res.json(await queryOne(
+      `SELECT m.*, c.name AS category_name,
+              (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
+       FROM marketing_expenses m LEFT JOIN marketing_categories c ON c.id = m.category_id
+       WHERE m.id = ?`, [id]
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/marketing-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/reports/marketing', async (req, res) => {
+  try {
+    const { from, to, category_id, currency } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+    const params = [from, to];
+    let where = `m.date BETWEEN ? AND ?`;
+    if (category_id) {
+      where += ` AND m.category_id = ?`;
+      params.push(parseInt(category_id));
+    }
+    if (currency) {
+      where += ` AND COALESCE(m.currency, 'LEK') = ?`;
+      params.push(String(currency).toUpperCase());
+    }
+
+    const entries = await queryAll(
+      `SELECT m.*, c.name AS category_name,
+              (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
+       FROM marketing_expenses m
+       LEFT JOIN marketing_categories c ON c.id = m.category_id
+       WHERE ${where}
+       ORDER BY m.date ASC, m.id ASC`,
+      params
+    );
+
+    const rows = entries.map(e => ({
+      ...e,
+      currency: e.currency || 'LEK',
+      amount: +(e.amount || 0),
+      exchange_rate: +(e.exchange_rate || 1),
+      total_lek: +(e.total_lek || 0),
+    }));
+
+    const totals = rows.reduce((a, r) => {
+      a.total_lek += r.total_lek;
+      a.by_currency[r.currency] = (a.by_currency[r.currency] || 0) + r.amount;
+      return a;
+    }, { total_lek: 0, by_currency: {} });
+    totals.total_lek = +totals.total_lek.toFixed(2);
+
+    res.json({ rows, totals });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

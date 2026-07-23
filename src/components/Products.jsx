@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import { loadXLSX } from '../lib/xlsx.js'
+import MoneyInput from './MoneyInput.jsx'
 
 // ── Image upload helpers ───────────────────────────────────────────────────────
 function ProductImage({ product, onUploaded }) {
@@ -91,7 +92,7 @@ const CAT_COLORS = {
 const EMPTY = {
   name: '', sku: '', barcode: '', category: 'Unazë',
   brand: '', description: '', cost_price: '', sell_price: '',
-  stock: '', min_stock: '5', vat_rate: '20', gram: '',
+  stock: '', min_stock: '5', vat_rate: '0', gram: '',
   serial_no: '', purchase_price_no_vat: '',
 }
 
@@ -372,7 +373,7 @@ function rowToProduct(row, m) {
     purchase_price_no_vat: parseFloat(get(m.purchase_price_no_vat, 0)) || 0,
     cost_price: parseFloat(get(m.cost_price, 0)) || 0,
     sell_price: parseFloat(get(m.sell_price, 0)) || 0,
-    vat_rate:   get(m.vat_rate, '') === '' ? 20 : (parseFloat(get(m.vat_rate, 20)) || 0),
+    vat_rate:   get(m.vat_rate, '') === '' ? 0 : (parseFloat(get(m.vat_rate, 0)) || 0),
     unit:       String(get(m.unit, 'copë')).trim() || 'copë',
     gram:       parseFloat(get(m.gram, 0)) || 0,
     stock:      parseInt(get(m.stock, 0)) || 0,
@@ -690,7 +691,7 @@ function ProductModal({ product, onClose, onSave }) {
           sell_price:  product.sell_price !== undefined ? String(product.sell_price) : '',
           stock:       product.stock !== undefined ? String(product.stock) : '',
           min_stock:   product.min_stock !== undefined ? String(product.min_stock) : '5',
-          vat_rate:    product.vat_rate !== undefined && product.vat_rate !== null ? String(product.vat_rate) : '20',
+          vat_rate:    product.vat_rate !== undefined && product.vat_rate !== null ? String(product.vat_rate) : '0',
           gram:        product.gram !== undefined && product.gram !== null ? String(product.gram) : '',
           serial_no:   product.serial_no || '',
           purchase_price_no_vat: product.purchase_price_no_vat != null ? String(product.purchase_price_no_vat) : '',
@@ -718,7 +719,7 @@ function ProductModal({ product, onClose, onSave }) {
       sell_price: parseFloat(form.sell_price) || 0,
       stock:      parseInt(form.stock)         || 0,
       min_stock:  parseInt(form.min_stock)     || 5,
-      vat_rate:   form.vat_rate === '' || form.vat_rate == null ? 20 : parseFloat(form.vat_rate),
+      vat_rate:   form.vat_rate === '' || form.vat_rate == null ? 0 : parseFloat(form.vat_rate),
       gram:       parseFloat(form.gram) || 0,
       serial_no:  form.serial_no || '',
       purchase_price_no_vat: parseFloat(form.purchase_price_no_vat) || 0,
@@ -782,20 +783,20 @@ function ProductModal({ product, onClose, onSave }) {
               </div>
               <div>
                 <label className="form-label">Çmimi PA TVSH — Blerje (€)</label>
-                <input type="number" step="0.01" min="0" value={form.purchase_price_no_vat}
-                  onChange={e => set('purchase_price_no_vat', e.target.value)}
+                <MoneyInput value={form.purchase_price_no_vat}
+                  onChange={v => set('purchase_price_no_vat', String(v))}
                   className="input-field" placeholder="0.00" />
                 <p className="text-[10px] text-slate-400 mt-0.5">Çmimi bazë nga furnitori (pa TVSH).</p>
               </div>
               <div>
                 <label className="form-label">Çmimi Kosto (€)</label>
-                <input type="number" step="0.01" min="0" value={form.cost_price} onChange={e => set('cost_price', e.target.value)}
+                <MoneyInput value={form.cost_price} onChange={v => set('cost_price', String(v))}
                   className="input-field" placeholder="0.00" />
                 <p className="text-[10px] text-slate-400 mt-0.5">Kosto totale (me TVSH + tarifat).</p>
               </div>
               <div>
                 <label className="form-label">Çmimi Shitje (€)</label>
-                <input type="number" step="0.01" min="0" value={form.sell_price} onChange={e => set('sell_price', e.target.value)}
+                <MoneyInput value={form.sell_price} onChange={v => set('sell_price', String(v))}
                   className="input-field" placeholder="0.00" />
                 <div className="flex flex-wrap items-center gap-1 mt-1.5">
                   <span className="text-[10px] text-slate-500 mr-0.5">nga kosto:</span>

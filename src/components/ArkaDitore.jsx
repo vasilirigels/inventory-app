@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import MoneyInput from './MoneyInput.jsx'
+import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -28,8 +30,9 @@ export default function ArkaDitore({ date, onNavigate }) {
   const [savedMsg, setSavedMsg]   = useState('')
   const saveTimer = useRef(null)
 
-  const load = async () => {
-    setLoading(true); setError('')
+  // Rifresko vetëm data-t e llogaritura (arka + kurset) — pa prekur inputet e
+  // përdoruesit për cash fizik / kasafortë (që mund të jenë duke u shkruar).
+  const refreshData = useCallback(async () => {
     try {
       const [d, rt] = await Promise.all([
         fetch(`/api/arka-ditore/${date}`).then(r => r.json()),
@@ -37,6 +40,14 @@ export default function ArkaDitore({ date, onNavigate }) {
       ])
       setData(d)
       setRates(rt?.rates || null)
+      return d
+    } catch (e) { setError(e.message || 'Gabim'); return null }
+  }, [date])
+
+  const load = async () => {
+    setLoading(true); setError('')
+    const d = await refreshData()
+    if (d) {
       const phys = zeroPerCur()
       const safe = zeroPerCur()
       for (const c of CURS) {
@@ -44,11 +55,19 @@ export default function ArkaDitore({ date, onNavigate }) {
         safe[c] = d.closeout_to_safe?.[c] ? String(d.closeout_to_safe[c]) : ''
       }
       setPhysInput(phys); setToSafeInput(safe)
-    } catch (e) { setError(e.message || 'Gabim') }
-    finally { setLoading(false) }
+    }
+    setLoading(false)
   }
 
   useEffect(() => { load() /* eslint-disable-next-line */ }, [date])
+
+  // Rifresko automatikisht sa herë që një shitje/blerje/shpenzim/pagesë ndikon
+  // xhiron ose fluksin e keshit të ditës.
+  useRealtimeSync(
+    ['invoices', 'invoice_payments', 'expense_entries', 'purchase_invoices',
+     'hurda_purchases', 'has_purchases', 'daily_records'],
+    refreshData
+  )
 
   const savePhysical = async (values) => {
     const payload = {}
@@ -146,11 +165,19 @@ export default function ArkaDitore({ date, onNavigate }) {
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
-      <div className="card">
-        <h3 className="text-lg font-bold text-slate-800">Arka Ditore</h3>
-        <p className="text-xs text-slate-500 mt-1">
-          Bilanc i ditës për çdo monedhë, bazuar tek Fatura Shitje, Fatura Blerje (kesh) dhe Shpenzimet.
-        </p>
+      <div className="card flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-lg font-bold text-slate-800">Arka Ditore</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Bilanc i ditës për çdo monedhë, bazuar tek Fatura Shitje, Fatura Blerje (kesh) dhe Shpenzimet.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refreshData}
+          className="btn-secondary text-xs whitespace-nowrap"
+          title="Ringarko të dhënat nga serveri"
+        >🔄 Rifresko</button>
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -158,6 +185,14 @@ export default function ArkaDitore({ date, onNavigate }) {
           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Të Ardhura nga Shitja</h4>
         </div>
         <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Zëri</th>
+              {shownCurs.map(c => (
+                <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c}</th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.label} className={`border-b border-slate-100 ${r.bg}`}>
@@ -192,6 +227,14 @@ export default function ArkaDitore({ date, onNavigate }) {
           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Dalje nga Arka</h4>
         </div>
         <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Zëri</th>
+              {shownCurs.map(c => (
+                <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c}</th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {outRows.map(r => (
               <tr key={r.label} className={`border-b border-slate-100 ${r.bg}`}>
@@ -280,10 +323,9 @@ export default function ArkaDitore({ date, onNavigate }) {
           {inputCurs.map(c => (
             <div key={c}>
               <label className="text-[10px] text-amber-800 font-semibold uppercase">{c}</label>
-              <input
-                type="number" step="0.01"
+              <MoneyInput
                 value={physInput[c] ?? ''}
-                onChange={e => handlePhysChange(c, e.target.value)}
+                onChange={v => handlePhysChange(c, String(v))}
                 className="input-field text-right font-bold text-amber-900"
                 placeholder="0.00"
               />
@@ -348,11 +390,9 @@ export default function ArkaDitore({ date, onNavigate }) {
               <td className="px-3 py-2 font-semibold text-amber-800">Kalo në Kasafortë</td>
               {inputCurs.map(c => (
                 <td key={c} className="px-2 py-1">
-                  <input
-                    type="number" step="0.01" min="0"
-                    max={parseFloat(physInput[c]) || undefined}
+                  <MoneyInput
                     value={toSafeInput[c] ?? ''}
-                    onChange={e => setToSafeInput(prev => ({ ...prev, [c]: e.target.value }))}
+                    onChange={v => setToSafeInput(prev => ({ ...prev, [c]: String(v) }))}
                     className="w-full text-right border border-amber-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 font-bold text-amber-900"
                     placeholder="0"
                   />

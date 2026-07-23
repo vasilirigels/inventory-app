@@ -2,13 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getUser } from './auth.js'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 
-// "Last read comment id" ruhet lokalisht — nuk kalon në server. Përkatësisht,
-// nëse hap app-in në PC tjetër shënon si të palexuara pjesën e re, që është
-// mirë (dallim vizual për user, jo detyrim server-side).
-const KEY = 'unread_comments_last_id'
+// "Last read comment id" ruhet lokalisht për çdo user veç e veç. Kështu, kur
+// një PC përdoret nga role të ndryshëm (p.sh. shitësi shkruan, admin bën
+// login më vonë), admin-i sheh si "të palexuara" komentet që erdhën ndërsa
+// nuk ishte këtu — pa u ndikuar nga leximi i shitësit.
+const KEY_PREFIX = 'unread_comments_last_id_'
+function keyFor(userId) {
+  return `${KEY_PREFIX}${userId || 'anon'}`
+}
 
 export function getLastReadCommentId() {
-  return Number(localStorage.getItem(KEY) || 0)
+  const me = getUser()
+  return Number(localStorage.getItem(keyFor(me?.id)) || 0)
 }
 
 const listeners = new Set()
@@ -16,14 +21,70 @@ function notify() { for (const l of listeners) l() }
 
 export function setLastReadCommentId(id) {
   const prev = getLastReadCommentId()
-  if (id > prev) localStorage.setItem(KEY, String(id))
+  if (id > prev) {
+    const me = getUser()
+    localStorage.setItem(keyFor(me?.id), String(id))
+  }
   notify()
 }
 
-// Browser Notification API — kur admin/shitësi merr një koment të ri nga
-// dikush tjetër ndërsa nuk është në faqen "Komentet", i shfaqet një njoftim
-// i sistemit. Bandwidth i ulët (poll 15s), por për situatat multi-PC kjo
-// është më e prekshme se një badge në sidebar.
+// ── Njoftime në aplikacion (toast) — nuk varet nga leja e OS ────────────────
+// Pushojmë njoftimet e reja në një listë; Layout tërheq element-in e parë me
+// hook-un `useCommentToast()` dhe e shfaq si banner në cep të lart-djathtë.
+const toastQueue = []
+const toastListeners = new Set()
+function notifyToast() { for (const l of toastListeners) l() }
+
+function enqueueToast(comment) {
+  const t = {
+    id: comment.id,
+    username: comment.username || 'përdorues',
+    body: String(comment.body || '').slice(0, 200),
+    at: Date.now(),
+  }
+  toastQueue.push(t)
+  notifyToast()
+}
+
+export function dismissCommentToast(id) {
+  const idx = toastQueue.findIndex(t => t.id === id)
+  if (idx >= 0) { toastQueue.splice(idx, 1); notifyToast() }
+}
+
+export function useCommentToasts() {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const l = () => tick(x => x + 1)
+    toastListeners.add(l)
+    return () => { toastListeners.delete(l) }
+  }, [])
+  return [...toastQueue]
+}
+
+// ── Zë i shkurtër kur mbërrin një koment i ri (Web Audio, pa file) ─────────
+let audioCtx = null
+function playPing() {
+  try {
+    if (typeof window === 'undefined') return
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return
+    audioCtx = audioCtx || new AC()
+    const now = audioCtx.currentTime
+    const o = audioCtx.createOscillator()
+    const g = audioCtx.createGain()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(880, now)
+    o.frequency.exponentialRampToValueAtTime(1320, now + 0.12)
+    g.gain.setValueAtTime(0.0001, now)
+    g.gain.exponentialRampToValueAtTime(0.18, now + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.35)
+    o.connect(g); g.connect(audioCtx.destination)
+    o.start(now)
+    o.stop(now + 0.4)
+  } catch (_) { /* audio bllokuar nga browser-i deri sa user të klikojë */ }
+}
+
+// ── Browser Notification API — nëse leja jepet, shfaqim edhe njoftim OS ────
 function canNotify() {
   return typeof window !== 'undefined'
     && 'Notification' in window
@@ -43,7 +104,7 @@ function isOnKomentetPage() {
   return h === '#/komentet' || h === '#komentet'
 }
 
-function showCommentNotification(comment, extraCount) {
+function showOsNotification(comment, extraCount) {
   if (!canNotify()) return
   const title = extraCount > 0
     ? `${extraCount + 1} komente të reja`
@@ -85,20 +146,33 @@ export function useUnreadCommentsCount() {
       const data = await res.json()
       const arr = Array.isArray(data) ? data : []
       const lastRead = getLastReadCommentId()
-      const unread = arr.filter(c => c.id > lastRead && c.user_id !== me?.id).length
-      setCount(unread)
+      const unreadArr = arr.filter(c => c.id > lastRead && c.user_id !== me?.id)
+      setCount(unreadArr.length)
 
-      // Notification për komente të reja nga të tjerët.
       const maxId = arr.reduce((m, c) => Math.max(m, c.id), 0)
+      const suppress = isOnKomentetPage() && document.visibilityState === 'visible'
+
       if (lastNotifiedId.current === null) {
+        // Load i parë (p.sh. sapo bëri login): njofto për komentet e palexuara
+        // që kanë ardhur ndërsa user-i nuk ishte këtu. Këtë e bëjmë vetëm nëse
+        // ai s'është aktualisht te faqja e komenteve.
         lastNotifiedId.current = maxId
+        if (unreadArr.length > 0 && !suppress) {
+          const sorted = [...unreadArr].sort((a, b) => a.id - b.id)
+          // Për të mos mbytur me toast-e — shfaq maksimum 3 më të fundit.
+          for (const c of sorted.slice(-3)) enqueueToast(c)
+          playPing()
+          showOsNotification(sorted[sorted.length - 1], sorted.length - 1)
+        }
       } else if (maxId > lastNotifiedId.current) {
         const fresh = arr
           .filter(c => c.id > lastNotifiedId.current && c.user_id !== me?.id)
           .sort((a, b) => a.id - b.id)
         lastNotifiedId.current = maxId
-        if (fresh.length > 0 && !(isOnKomentetPage() && document.visibilityState === 'visible')) {
-          showCommentNotification(fresh[fresh.length - 1], fresh.length - 1)
+        if (fresh.length > 0 && !suppress) {
+          for (const c of fresh) enqueueToast(c)
+          playPing()
+          showOsNotification(fresh[fresh.length - 1], fresh.length - 1)
         }
       }
     } catch (_) { /* offline / boot */ }

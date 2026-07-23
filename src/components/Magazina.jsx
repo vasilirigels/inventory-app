@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import MoneyInput from './MoneyInput.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -379,7 +380,7 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
   const [fleteDate, setFleteDate] = useState(date)
   const [refNo, setRefNo]       = useState('')
   const [warehouseCode, setWarehouseCode] = useState('')
-  const [currency, setCurrency] = useState('LEK')
+  const [currency, setCurrency] = useState('EUR')
   const [exchangeRate, setExchangeRate] = useState(1)
   const [rateSource, setRateSource]   = useState('')
   const [notes, setNotes]       = useState('')
@@ -613,8 +614,8 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
                         className="input-field-sm text-right" />
                     </td>
                     <td className="px-1 py-1">
-                      <input type="number" step="0.01" value={it.unit_price}
-                        onChange={e => setItem(idx, { unit_price: e.target.value })}
+                      <MoneyInput value={it.unit_price}
+                        onChange={v => setItem(idx, { unit_price: v })}
                         className="input-field-sm text-right" />
                     </td>
                     <td className="px-1 py-1">

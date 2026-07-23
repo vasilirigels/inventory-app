@@ -156,7 +156,7 @@ function AppInner({ user }) {
   const renderPage = () => {
     // Core pages
     switch (page) {
-      case 'dashboard': return <Dashboard onNavigate={navigateTo} />
+      case 'dashboard': return <Dashboard date={currentDate} onNavigate={navigateTo} />
       case 'products':  return <Products />
       case 'produkte-promocion': return <ProduktePromocion onNavigate={navigateTo} />
       case 'customers': return <CustomersLedger onNavigate={navigateTo} />
@@ -171,7 +171,7 @@ function AppInner({ user }) {
       case 'arka-shpenzime': return <Shpenzime date={currentDate} onNavigate={navigateTo} />
       case 'raport-shpenzime': return <RaportShpenzime />
       case 'raport-xhiro-ditore': return <RaportXhiroDitore onNavigate={navigateTo} />
-      case 'marketing': return <Marketing />
+      case 'marketing': return <Marketing date={currentDate} />
       case 'arka':      return <CashRegister date={currentDate} />
 
       // Fatura Shitje — new invoice-based module

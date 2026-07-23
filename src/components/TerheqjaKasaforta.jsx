@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import MoneyInput from './MoneyInput.jsx'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -101,10 +102,9 @@ export default function TerheqjaKasaforta({ date }) {
             {CURS.map(c => (
               <div key={c}>
                 <label className="form-label">Shuma {c}</label>
-                <input
-                  type="number" step="0.01" min="0"
+                <MoneyInput
                   value={amounts[c]}
-                  onChange={e => setAmounts(a => ({ ...a, [c]: e.target.value }))}
+                  onChange={v => setAmounts(a => ({ ...a, [c]: String(v) }))}
                   className="input-field text-right font-semibold"
                   placeholder="0.00"
                 />

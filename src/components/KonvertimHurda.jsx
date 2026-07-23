@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import MoneyInput from './MoneyInput.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -294,7 +295,6 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
   const [gram, setGram]           = useState('')
   const [pricePerGram, setPricePerGram] = useState('')
   const [exchangeRate, setExchangeRate] = useState(1) // 1 EUR = ? LEK, për referencë në LEK
-  const [rateSource, setRateSource] = useState('')
   const [notes, setNotes]         = useState('')
   const [allRates, setAllRates]   = useState({ LEK: 1 })
   const currency = 'EUR'
@@ -325,7 +325,6 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
         const ratesRes = await fetch(`/api/exchange-rates/${date}`).then(r => r.json())
         if (cancel) return
         setAllRates(ratesRes.rates || { LEK: 1 })
-        setRateSource(ratesRes.source || '')
         if (purchaseId) {
           const p = await fetch(`/api/hurda-purchases/${purchaseId}`).then(r => r.json())
           if (cancel) return
@@ -358,7 +357,6 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
         const ratesRes = await fetch(`/api/exchange-rates/${purchaseDate}`).then(r => r.json())
         if (cancel) return
         setAllRates(ratesRes.rates || { LEK: 1 })
-        setRateSource(ratesRes.source || '')
         if (!purchaseId) {
           const r = await fetch(`/api/hurda-purchases/next-no?date=${purchaseDate}`).then(r => r.json())
           if (cancel) return
@@ -376,7 +374,6 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
 
   // Blerja bëhet gjithmonë në EUR.
   const totalEur = +(n(gram) * n(pricePerGram)).toFixed(2)
-  const totalLek = +(totalEur * (n(exchangeRate) || 1)).toFixed(2)
 
   const save = async () => {
     if (saving) return
@@ -484,8 +481,8 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
               {spotLoading ? '⏳' : '🔄 Spot'}
             </button>
           </label>
-          <input type="number" step="0.01" min="0"
-            value={pricePerGram} onChange={e => setPricePerGram(e.target.value)}
+          <MoneyInput
+            value={pricePerGram} onChange={v => setPricePerGram(String(v))}
             className="input-field tabular-nums" placeholder="0.00" />
           {spotEurPerGram && (
             <p className="text-[10px] text-slate-500 mt-0.5">
@@ -495,25 +492,14 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
           )}
           {spotError && <p className="text-[10px] text-red-600 mt-0.5">{spotError}</p>}
         </div>
-        <div className="col-span-2 md:col-span-4 grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali për Pagesë (EUR)</label>
-            <div className="input-field bg-emerald-50 text-emerald-800 border-emerald-200 tabular-nums font-bold text-base">
-              {fmt(totalEur)}
-            </div>
-          </div>
-          <div>
-            <label className="text-[10px] text-slate-500 uppercase font-semibold">
-              Ekuivalent në LEK
-              <span className="ml-1 text-slate-400 normal-case">(1 EUR = {n(exchangeRate).toLocaleString('sq-AL')} LEK · {rateSource || '—'})</span>
-            </label>
-            <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold text-base">
-              {fmt(totalLek)}
-            </div>
+        <div className="col-span-2">
+          <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali për Pagesë (EUR)</label>
+          <div className="input-field bg-emerald-50 text-emerald-800 border-emerald-200 tabular-nums font-bold text-base">
+            {fmt(totalEur)}
           </div>
         </div>
 
-        <div className="col-span-2 md:col-span-4">
+        <div className="col-span-2">
           <label className="form-label">Shënime</label>
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             className="input-field" placeholder="opsional" />

@@ -624,6 +624,30 @@ const MIGRATIONS = [
   )`,
   "CREATE INDEX IF NOT EXISTS idx_repairs_status ON repairs(status)",
   "CREATE INDEX IF NOT EXISTS idx_repairs_date ON repairs(date_received)",
+
+  // Nr Serie te rreshti i faturës së shitjes — kopjohet nga produkti kur zgjidhet.
+  "ALTER TABLE invoice_items ADD COLUMN serial_no TEXT DEFAULT ''",
+
+  // Kolonat e reja te rreshti i faturës së blerjes — snapshot i produktit.
+  "ALTER TABLE purchase_items ADD COLUMN serial_no TEXT DEFAULT ''",
+  "ALTER TABLE purchase_items ADD COLUMN category TEXT DEFAULT ''",
+  "ALTER TABLE purchase_items ADD COLUMN unit TEXT DEFAULT ''",
+  "ALTER TABLE purchase_items ADD COLUMN gram REAL DEFAULT 0",
+  "ALTER TABLE purchase_items ADD COLUMN cost_price REAL DEFAULT 0",
+
+  // Marketing — kategoritë dhe ristrukturimi i marketing_expenses që të ndajë
+  // të njëjtën logjikë me shpenzimet: zë (category_id) + monedhë + shumë + kurs.
+  `CREATE TABLE IF NOT EXISTS marketing_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "ALTER TABLE marketing_expenses ADD COLUMN category_id INTEGER",
+  "ALTER TABLE marketing_expenses ADD COLUMN currency TEXT DEFAULT 'LEK'",
+  "ALTER TABLE marketing_expenses ADD COLUMN amount REAL DEFAULT 0",
+  "ALTER TABLE marketing_expenses ADD COLUMN exchange_rate REAL DEFAULT 1",
 ];
 
 async function initDB() {
@@ -644,6 +668,26 @@ async function initDB() {
   try {
     await client.execute(`
       UPDATE expense_entries
+      SET currency = CASE
+            WHEN amount_lek > 0 THEN 'LEK'
+            WHEN amount_eur > 0 THEN 'EUR'
+            WHEN amount_usd > 0 THEN 'USD'
+            ELSE 'LEK'
+          END,
+          amount = CASE
+            WHEN amount_lek > 0 THEN amount_lek
+            WHEN amount_eur > 0 THEN amount_eur
+            WHEN amount_usd > 0 THEN amount_usd
+            ELSE 0
+          END,
+          exchange_rate = 1
+      WHERE COALESCE(currency, '') = '' OR amount IS NULL OR amount = 0
+    `);
+  } catch (_) {}
+  // Migrimi i njëjtë për marketingun — legacy amount_lek/eur/usd → currency + amount.
+  try {
+    await client.execute(`
+      UPDATE marketing_expenses
       SET currency = CASE
             WHEN amount_lek > 0 THEN 'LEK'
             WHEN amount_eur > 0 THEN 'EUR'
