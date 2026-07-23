@@ -5552,10 +5552,10 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
       params.push(String(currency).toUpperCase());
     }
 
-    // Çdo faturë: konvertuar në LEK me kursin e vet.
     const invoices = await queryAll(
       `SELECT
-         i.id, i.date, i.invoice_no, i.currency,
+         i.id, i.date, i.invoice_no,
+         COALESCE(i.currency, 'LEK')      AS currency,
          COALESCE(i.exchange_rate, 1)     AS exchange_rate,
          COALESCE(i.payment_method, 'cash') AS pm,
          COALESCE(i.is_credit_note, 0)    AS is_credit_note,
@@ -5572,61 +5572,155 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
       params
     );
 
-    const byDate = new Map();
-    for (const inv of invoices) {
-      const rate = +(inv.exchange_rate || 1);
-      const subLek = inv.sub * rate;
-      const vatLek = inv.vat * rate;
-      const totLek = inv.tot * rate;
-      const grossLek = (inv.sub + inv.disc) * rate;
-      const discLek = inv.disc * rate;
-      const paidLek = (inv.init_paid || 0) * rate;
-      const dueLek = totLek - paidLek;
+    // Marr splits për të gjitha faturat në periudhë — pagesa mund të ndahen
+    // në disa monedha/mënyra për të njëjtën faturë.
+    const splitsByInv = new Map();
+    if (invoices.length > 0) {
+      const ids = invoices.map(i => i.id);
+      const ph = ids.map(() => '?').join(',');
+      const splits = await queryAll(
+        `SELECT invoice_id,
+                COALESCE(method, 'cash') AS method,
+                COALESCE(currency, 'LEK') AS currency,
+                COALESCE(amount, 0) AS amount,
+                COALESCE(exchange_rate, 1) AS exchange_rate
+         FROM invoice_payment_splits WHERE invoice_id IN (${ph})`,
+        ids
+      );
+      for (const s of splits) {
+        if (!splitsByInv.has(s.invoice_id)) splitsByInv.set(s.invoice_id, []);
+        splitsByInv.get(s.invoice_id).push(s);
+      }
+    }
 
-      const day = byDate.get(inv.date) || {
-        date: inv.date, count: 0, credit_count: 0,
-        gross_lek: 0, disc_lek: 0, sub_lek: 0, vat_lek: 0, tot_lek: 0,
-        paid_lek: 0, due_lek: 0,
-        cash_lek: 0, pos_lek: 0, bank_lek: 0, debt_lek: 0,
-      };
+    // Kursi EUR/LEK: user-provided > kursi më i freskët nga faturat EUR > tabela
+    // exchange_rates > 100 (fallback).
+    let eurRate = parseFloat(req.query.eur_rate);
+    if (!Number.isFinite(eurRate) || eurRate <= 0) {
+      const eurInvs = invoices.filter(i => i.currency === 'EUR');
+      if (eurInvs.length > 0) {
+        eurInvs.sort((a, b) => (a.date < b.date ? 1 : -1));
+        eurRate = +eurInvs[0].exchange_rate || 100;
+      } else {
+        const r = await queryOne(
+          `SELECT rate FROM exchange_rates WHERE currency = 'EUR' AND date <= ? ORDER BY date DESC LIMIT 1`,
+          [to]
+        );
+        eurRate = r?.rate ? +r.rate : 100;
+      }
+    }
+    const toEur = (lek) => lek / eurRate;
+
+    const byDate = new Map();
+
+    function ensureDay(date) {
+      let d = byDate.get(date);
+      if (!d) {
+        d = {
+          date, count: 0, credit_count: 0,
+          gross_eur: 0, disc_eur: 0, sub_eur: 0, vat_eur: 0, tot_eur: 0,
+          paid_eur: 0, due_eur: 0,
+          cash_eur: 0, pos_eur: 0, bank_eur: 0, debt_eur: 0,
+          by_currency: new Map(),
+        };
+        byDate.set(date, d);
+      }
+      return d;
+    }
+
+    function ensureCur(day, cur) {
+      let c = day.by_currency.get(cur);
+      if (!c) {
+        c = { currency: cur, cash: 0, pos: 0, bank: 0, debt: 0 };
+        day.by_currency.set(cur, c);
+      }
+      return c;
+    }
+
+    for (const inv of invoices) {
+      const rate = +inv.exchange_rate || 1;
+      const day = ensureDay(inv.date);
       day.count += 1;
       if (inv.is_credit_note) day.credit_count += 1;
-      day.gross_lek += grossLek;
-      day.disc_lek  += discLek;
-      day.sub_lek   += subLek;
-      day.vat_lek   += vatLek;
-      day.tot_lek   += totLek;
-      day.paid_lek  += paidLek;
-      day.due_lek   += dueLek;
-      // Klasifikim sipas mënyrës së pagesës: cash/pos llogariten të paguara plotësisht;
-      // bank dhe debt mbajnë vlerën e tërë te kategoria përkatëse.
-      if (inv.pm === 'cash') day.cash_lek += totLek;
-      else if (inv.pm === 'pos')  day.pos_lek += totLek;
-      else if (inv.pm === 'bank') day.bank_lek += totLek;
-      else if (inv.pm === 'debt') day.debt_lek += totLek;
-      else day.cash_lek += totLek;
-      byDate.set(inv.date, day);
+
+      // Totalet e faturës → LEK → EUR (bazë).
+      const subLek   = inv.sub * rate;
+      const discLek  = inv.disc * rate;
+      const vatLek   = inv.vat * rate;
+      const totLek   = inv.tot * rate;
+      const grossLek = (inv.sub + inv.disc) * rate;
+      const paidLek  = (inv.init_paid || 0) * rate;
+      const dueLek   = totLek - paidLek;
+      day.gross_eur += toEur(grossLek);
+      day.disc_eur  += toEur(discLek);
+      day.sub_eur   += toEur(subLek);
+      day.vat_eur   += toEur(vatLek);
+      day.tot_eur   += toEur(totLek);
+      day.paid_eur  += toEur(paidLek);
+      day.due_eur   += toEur(dueLek);
+
+      // Ndarja e pagesave: splits (native currency) kanë prioritet; përndryshe
+      // e gjithë vlera i shkon monedhës+mënyrës së faturës.
+      const invSplits = splitsByInv.get(inv.id) || [];
+      if (invSplits.length > 0) {
+        for (const s of invSplits) {
+          const c = ensureCur(day, s.currency);
+          const method = s.method === 'bank' ? 'bank' : 'cash';
+          c[method] += s.amount;
+          const splitLek = s.amount * (+s.exchange_rate || 1);
+          if (method === 'bank') day.bank_eur += toEur(splitLek);
+          else day.cash_eur += toEur(splitLek);
+        }
+        // Pjesa e pa-paguar (borxhi) i mbetet monedhës së faturës.
+        const unpaid = inv.tot - (inv.init_paid || 0);
+        if (Math.abs(unpaid) > 0.005) {
+          const c = ensureCur(day, inv.currency);
+          c.debt += unpaid;
+          day.debt_eur += toEur(unpaid * rate);
+        }
+      } else {
+        const c = ensureCur(day, inv.currency);
+        if (inv.pm === 'cash')      { c.cash += inv.tot; day.cash_eur += toEur(totLek); }
+        else if (inv.pm === 'pos')  { c.pos  += inv.tot; day.pos_eur  += toEur(totLek); }
+        else if (inv.pm === 'bank') { c.bank += inv.tot; day.bank_eur += toEur(totLek); }
+        else if (inv.pm === 'debt') { c.debt += inv.tot; day.debt_eur += toEur(totLek); }
+        else                         { c.cash += inv.tot; day.cash_eur += toEur(totLek); }
+      }
     }
 
     const rows = Array.from(byDate.values())
       .map(d => {
-        // Cash total = Total − POS − Bankë − Pa Paguar (kapja e cash-it real:
-        // përfshin pjesën e paguar të borxhit te momenti i regjistrimit).
-        const total_cash_lek = +(d.tot_lek - d.pos_lek - d.bank_lek - d.due_lek).toFixed(2);
+        // Total Cash (EUR) = Total − POS − Bankë − Pa Paguar
+        const total_cash_eur = +(d.tot_eur - d.pos_eur - d.bank_eur - d.due_eur).toFixed(2);
         return {
-          ...d,
-          gross_lek: +d.gross_lek.toFixed(2),
-          disc_lek:  +d.disc_lek.toFixed(2),
-          sub_lek:   +d.sub_lek.toFixed(2),
-          vat_lek:   +d.vat_lek.toFixed(2),
-          tot_lek:   +d.tot_lek.toFixed(2),
-          paid_lek:  +d.paid_lek.toFixed(2),
-          due_lek:   +d.due_lek.toFixed(2),
-          cash_lek:  +d.cash_lek.toFixed(2),
-          pos_lek:   +d.pos_lek.toFixed(2),
-          bank_lek:  +d.bank_lek.toFixed(2),
-          debt_lek:  +d.debt_lek.toFixed(2),
-          total_cash_lek,
+          date: d.date,
+          count: d.count,
+          credit_count: d.credit_count,
+          gross_eur: +d.gross_eur.toFixed(2),
+          disc_eur:  +d.disc_eur.toFixed(2),
+          sub_eur:   +d.sub_eur.toFixed(2),
+          vat_eur:   +d.vat_eur.toFixed(2),
+          tot_eur:   +d.tot_eur.toFixed(2),
+          paid_eur:  +d.paid_eur.toFixed(2),
+          due_eur:   +d.due_eur.toFixed(2),
+          cash_eur:  +d.cash_eur.toFixed(2),
+          pos_eur:   +d.pos_eur.toFixed(2),
+          bank_eur:  +d.bank_eur.toFixed(2),
+          debt_eur:  +d.debt_eur.toFixed(2),
+          total_cash_eur,
+          by_currency: Array.from(d.by_currency.values())
+            .map(x => ({
+              currency: x.currency,
+              cash: +x.cash.toFixed(2),
+              pos:  +x.pos.toFixed(2),
+              bank: +x.bank.toFixed(2),
+              debt: +x.debt.toFixed(2),
+            }))
+            .filter(x =>
+              Math.abs(x.cash) > 0.005 || Math.abs(x.pos) > 0.005 ||
+              Math.abs(x.bank) > 0.005 || Math.abs(x.debt) > 0.005
+            )
+            .sort((a, b) => a.currency.localeCompare(b.currency)),
         };
       })
       .sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -5634,27 +5728,55 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
     const totals = rows.reduce((a, r) => ({
       count:     a.count     + r.count,
       credit_count: a.credit_count + r.credit_count,
-      gross_lek: a.gross_lek + r.gross_lek,
-      disc_lek:  a.disc_lek  + r.disc_lek,
-      sub_lek:   a.sub_lek   + r.sub_lek,
-      vat_lek:   a.vat_lek   + r.vat_lek,
-      tot_lek:   a.tot_lek   + r.tot_lek,
-      paid_lek:  a.paid_lek  + r.paid_lek,
-      due_lek:   a.due_lek   + r.due_lek,
-      cash_lek:  a.cash_lek  + r.cash_lek,
-      pos_lek:   a.pos_lek   + r.pos_lek,
-      bank_lek:  a.bank_lek  + r.bank_lek,
-      debt_lek:  a.debt_lek  + r.debt_lek,
-      total_cash_lek: a.total_cash_lek + r.total_cash_lek,
+      gross_eur: a.gross_eur + r.gross_eur,
+      disc_eur:  a.disc_eur  + r.disc_eur,
+      sub_eur:   a.sub_eur   + r.sub_eur,
+      vat_eur:   a.vat_eur   + r.vat_eur,
+      tot_eur:   a.tot_eur   + r.tot_eur,
+      paid_eur:  a.paid_eur  + r.paid_eur,
+      due_eur:   a.due_eur   + r.due_eur,
+      cash_eur:  a.cash_eur  + r.cash_eur,
+      pos_eur:   a.pos_eur   + r.pos_eur,
+      bank_eur:  a.bank_eur  + r.bank_eur,
+      debt_eur:  a.debt_eur  + r.debt_eur,
+      total_cash_eur: a.total_cash_eur + r.total_cash_eur,
     }), {
       count: 0, credit_count: 0,
-      gross_lek: 0, disc_lek: 0, sub_lek: 0, vat_lek: 0, tot_lek: 0,
-      paid_lek: 0, due_lek: 0,
-      cash_lek: 0, pos_lek: 0, bank_lek: 0, debt_lek: 0,
-      total_cash_lek: 0,
+      gross_eur: 0, disc_eur: 0, sub_eur: 0, vat_eur: 0, tot_eur: 0,
+      paid_eur: 0, due_eur: 0,
+      cash_eur: 0, pos_eur: 0, bank_eur: 0, debt_eur: 0,
+      total_cash_eur: 0,
     });
 
-    res.json({ rows, totals });
+    // Totale për periudhë sipas monedhës (native).
+    const perCurTotals = new Map();
+    for (const r of rows) {
+      for (const bc of r.by_currency) {
+        let t = perCurTotals.get(bc.currency);
+        if (!t) {
+          t = { currency: bc.currency, cash: 0, pos: 0, bank: 0, debt: 0 };
+          perCurTotals.set(bc.currency, t);
+        }
+        t.cash += bc.cash;
+        t.pos  += bc.pos;
+        t.bank += bc.bank;
+        t.debt += bc.debt;
+      }
+    }
+    const by_currency_totals = Array.from(perCurTotals.values())
+      .map(t => ({
+        currency: t.currency,
+        cash: +t.cash.toFixed(2),
+        pos:  +t.pos.toFixed(2),
+        bank: +t.bank.toFixed(2),
+        debt: +t.debt.toFixed(2),
+      }))
+      .sort((a, b) => a.currency.localeCompare(b.currency));
+
+    res.json({
+      rows, totals, by_currency_totals,
+      eur_rate: +eurRate.toFixed(4),
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
