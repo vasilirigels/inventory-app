@@ -161,19 +161,49 @@ function setupAutoUpdate() {
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
 }
 
+function showServerErrorInWindow(err) {
+  // Në vend të dialog-ut, hap një dritare me output-in e server-it dhe hap
+  // DevTools automatikisht që user-i të mund të kopjojë tekstin lehtë.
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Ari Shop — Server Error</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; background: #1e293b; color: #f1f5f9; padding: 24px; margin: 0; }
+  h1 { color: #f87171; margin: 0 0 16px; font-size: 20px; }
+  .meta { color: #94a3b8; font-size: 13px; margin-bottom: 16px; }
+  pre { background: #0f172a; padding: 16px; border-radius: 8px; overflow: auto; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+  .hint { margin-top: 20px; padding: 12px; background: #334155; border-left: 4px solid #60a5fa; font-size: 13px; border-radius: 4px; }
+</style></head>
+<body>
+  <h1>⚠️ Server-i i brendshëm nuk u nis</h1>
+  <div class="meta">Gabim: ${err.message.replace(/</g, '&lt;')} · Exit code: ${serverExitCode ?? 'ende po funksionon'}</div>
+  <pre id="log"></pre>
+  <div class="hint">Kopjo tekstin më sipër dhe dërgoja programuesit. DevTools është hapur automatikisht — mund të përdorësh Console për debug.</div>
+<script>
+  const log = ${JSON.stringify(serverOutput)};
+  document.getElementById('log').textContent = log;
+  console.log('===== SERVER OUTPUT =====\\n' + log);
+  console.error('Server failed to start: ${err.message.replace(/'/g, "\\'")}');
+</script>
+</body></html>`;
+  mainWindow = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    title: 'Ari Shop — Server Error',
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  mainWindow.webContents.openDevTools({ mode: 'bottom' });
+  mainWindow.on('closed', () => { mainWindow = null; });
+}
+
 app.whenReady().then(async () => {
   if (!isDev) {
     startServer();
     try { await waitForServer(); }
     catch (err) {
-      // Prit deri në 500ms që stdout/stderr të shterojë para se të tregohet dialogu.
+      // Prit deri në 500ms që stdout/stderr të shterojë para hapjes së dritares.
       await new Promise(r => setTimeout(r, 500));
-      const lastLines = serverOutput.split('\n').slice(-40).join('\n');
-      dialog.showErrorBox(
-        'Server-i nuk startohet',
-        `Server-i i brendshëm dështoi (${err.message}).\nExit code: ${serverExitCode ?? '(ende po funksionon)'}\n\n---- Output i server-it ----\n${lastLines}`
-      );
-      app.quit();
+      showServerErrorInWindow(err);
       return;
     }
   }
