@@ -54,13 +54,28 @@ function startServer() {
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
   };
+  // Log te skedar që kur aplikacioni dështon në PC të klientit, të mund të
+  // shohim gabimin real pa cmd. Skedari ndodhet te userData (per-user, i
+  // aksesueshëm nga %APPDATA%\Ari Shop\logs\server.log në Windows).
+  const logDir = path.join(app.getPath('userData'), 'logs');
+  try { fs.mkdirSync(logDir, { recursive: true }); } catch (_) {}
+  const logPath = path.join(logDir, 'server.log');
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  logStream.write(`\n\n===== ${new Date().toISOString()} startup =====\n`);
   serverProcess = spawn(process.execPath, [serverPath], {
     env,
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  serverProcess.stdout.on('data', d => logStream.write(d));
+  serverProcess.stderr.on('data', d => logStream.write(d));
   serverProcess.on('exit', (code) => {
-    console.log(`[server] exited with code ${code}`);
+    logStream.write(`[server] exited with code ${code}\n`);
+    console.log(`[server] exited with code ${code}. Log: ${logPath}`);
     serverProcess = null;
+  });
+  serverProcess.on('error', (err) => {
+    logStream.write(`[server] spawn error: ${err.message}\n`);
+    console.error('[server] spawn error:', err.message);
   });
 }
 
@@ -131,7 +146,15 @@ app.whenReady().then(async () => {
   if (!isDev) {
     startServer();
     try { await waitForServer(); }
-    catch (err) { console.error('[electron] server startup failed:', err.message); }
+    catch (err) {
+      const logPath = path.join(app.getPath('userData'), 'logs', 'server.log');
+      dialog.showErrorBox(
+        'Server-i nuk startohet',
+        `Aplikacioni s'mund të hapet sepse server-i i brendshëm dështoi.\n\nSheko log-un për detaje:\n${logPath}\n\nGabim: ${err.message}`
+      );
+      app.quit();
+      return;
+    }
   }
   createWindow();
   if (!isDev) setupAutoUpdate();
