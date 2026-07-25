@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Ari Shop",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -69,6 +69,16 @@
     "asarUnpack": [
       "node_modules/@libsql/**/*"
     ],
+    "electronFuses": {
+      "runAsNode": true,
+      "enableCookieEncryption": false,
+      "enableNodeOptionsEnvironmentVariable": true,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": false,
+      "onlyLoadAppFromAsar": false,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": false
+    },
     "win": {
       "target": [
         {
