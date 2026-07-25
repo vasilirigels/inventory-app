@@ -14,7 +14,9 @@
     "electron:dev": "concurrently -k \"node server/index.js\" \"vite\" \"wait-on http://localhost:5173 http-get://localhost:3001/api/products && electron .\"",
     "electron:build": "vite build && electron-builder",
     "electron:build:win": "vite build && electron-builder --win",
-    "electron:build:mac": "vite build && electron-builder --mac"
+    "electron:build:mac": "vite build && electron-builder --mac",
+    "release:win": "vite build && dotenv -e .env -- electron-builder --win --publish always",
+    "release:mac": "vite build && dotenv -e .env -- electron-builder --mac --publish always"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
@@ -35,6 +37,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.2.1",
+    "dotenv-cli": "^11.0.0",
     "electron": "^41.7.1",
     "electron-builder": "^26.15.3",
     "postcss": "^8.5.15",
