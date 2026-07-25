@@ -2509,7 +2509,9 @@ app.delete('/api/warehouses/:id', async (req, res) => {
 // ============================================================
 function computePurchaseLineTotals(it) {
   const qty   = parseFloat(it.qty) || 0;
-  const price = parseFloat(it.purchase_price_no_vat) || 0;
+  // "Cmimi PA" opsional — fallback te "Cmim Kosto" (jo Cmim Shitje) sepse
+  // totali i blerjes reflekton koston, jo çmimin e shitjes.
+  const price = (parseFloat(it.purchase_price_no_vat) || 0) || (parseFloat(it.cost_price) || 0);
   const disc  = parseFloat(it.discount_percent) || 0;
   const vatR  = parseFloat(it.vat_rate) || 0;
   const gross = qty * price;
@@ -2633,7 +2635,11 @@ app.get('/api/purchase-invoices/:id', async (req, res) => {
     );
     const paySum = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?', [req.params.id])?.s || 0;
     const initial_amount_paid = +Math.max(0, (inv.amount_paid || 0) - paySum).toFixed(2);
-    res.json({ ...inv, items, initial_amount_paid });
+    const payment_splits = await queryAll(
+      'SELECT id, method, currency, amount, exchange_rate FROM purchase_invoice_payment_splits WHERE purchase_id = ? ORDER BY id ASC',
+      [req.params.id]
+    );
+    res.json({ ...inv, items, initial_amount_paid, payment_splits });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2641,6 +2647,10 @@ app.post('/api/purchase-invoices', async (req, res) => {
   try {
     const d = req.body || {};
     if (!d.date) return res.status(400).json({ error: 'date required' });
+    // Backdate lejohet vetëm për admin (parallel me fatura shitje).
+    if (req.user?.role !== 'admin' && d.date !== new Date().toISOString().slice(0, 10)) {
+      return res.status(403).json({ error: 'only admin can set a non-today date' });
+    }
     const userProvidedNo = (d.invoice_no || '').trim();
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
@@ -2651,12 +2661,25 @@ app.post('/api/purchase-invoices', async (req, res) => {
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
 
-    const pmI = ['cash','bank','debt','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
-    let amountPaidI;
-    if (d.amount_paid != null && d.amount_paid !== '') {
-      amountPaidI = parseFloat(d.amount_paid) || 0;
+    // Splits janë burimi i së vërtetës kur jepen; përndryshe biem në fallback
+    // të legacy fushave (payment_method + amount_paid) për backwards-compat.
+    const splitsI = normalizeSplits(d.payment_splits);
+    let pmI, amountPaidI;
+    if (splitsI.length > 0) {
+      pmI = splitsI.length === 1 ? splitsI[0].method : 'mikse';
+      const agg = aggregateSplits(splitsI, d.exchange_rate);
+      amountPaidI = agg.amountPaid;
+    } else if (Array.isArray(d.payment_splits)) {
+      // Klienti dërgoi splits array por bosh → borxh i plotë.
+      pmI = 'debt';
+      amountPaidI = 0;
     } else {
-      amountPaidI = (pmI === 'cash' || pmI === 'pos') ? tot : 0;
+      pmI = ['cash','bank','debt','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+      if (d.amount_paid != null && d.amount_paid !== '') {
+        amountPaidI = parseFloat(d.amount_paid) || 0;
+      } else {
+        amountPaidI = (pmI === 'cash' || pmI === 'pos') ? tot : 0;
+      }
     }
     const amountDueI = Math.max(0, +(tot - amountPaidI).toFixed(2));
 
@@ -2677,6 +2700,13 @@ app.post('/api/purchase-invoices', async (req, res) => {
       : await retryOnUniqueNo(() => nextPurchaseNo(d.date), doInsertPurchase);
     const created = await queryOne('SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?', [d.date, invoice_no]);
     const newId = created?.id;
+    for (const s of splitsI) {
+      await run(
+        `INSERT INTO purchase_invoice_payment_splits (purchase_id, method, currency, amount, exchange_rate)
+         VALUES (?, ?, ?, ?, ?)`,
+        [newId, s.method, s.currency, s.amount, s.exchange_rate]
+      );
+    }
     for (const it of items) {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
@@ -2703,6 +2733,13 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     const d = req.body || {};
     const existing = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
+    // Sales nuk mund të ndryshojë datën në një ditë tjetër nga sot.
+    if (req.user?.role !== 'admin') {
+      const today = new Date().toISOString().slice(0, 10);
+      if (d.date && d.date !== today) {
+        return res.status(403).json({ error: 'only admin can set a non-today date' });
+      }
+    }
     const oldItems = await queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
@@ -2713,15 +2750,23 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
     }, 0).toFixed(2);
 
-    const pmU = ['cash','bank','debt','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
-    // The form value represents the INITIAL portion paid at purchase time. Any subsequent
-    // payments registered via the Detyrime Furnitor modal live in purchase_payments and
-    // must be preserved when the user re-saves the invoice from the editor.
-    let formInitialPaid;
-    if (d.amount_paid != null && d.amount_paid !== '') {
-      formInitialPaid = parseFloat(d.amount_paid) || 0;
+    // Splits janë burimi i së vërtetës kur jepen; përndryshe fallback legacy.
+    const splitsU = normalizeSplits(d.payment_splits);
+    let pmU, formInitialPaid;
+    if (splitsU.length > 0) {
+      pmU = splitsU.length === 1 ? splitsU[0].method : 'mikse';
+      const agg = aggregateSplits(splitsU, d.exchange_rate);
+      formInitialPaid = agg.amountPaid;
+    } else if (Array.isArray(d.payment_splits)) {
+      pmU = 'debt';
+      formInitialPaid = 0;
     } else {
-      formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? tot : 0;
+      pmU = ['cash','bank','debt','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+      if (d.amount_paid != null && d.amount_paid !== '') {
+        formInitialPaid = parseFloat(d.amount_paid) || 0;
+      } else {
+        formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? tot : 0;
+      }
     }
     const existingPaySum = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?',
@@ -2744,6 +2789,15 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         id,
       ]
     );
+    // Rifresko splits (delete + insert i thjeshtë, siç bën edhe FaturaShitje).
+    await run('DELETE FROM purchase_invoice_payment_splits WHERE purchase_id = ?', [id]);
+    for (const s of splitsU) {
+      await run(
+        `INSERT INTO purchase_invoice_payment_splits (purchase_id, method, currency, amount, exchange_rate)
+         VALUES (?, ?, ?, ?, ?)`,
+        [id, s.method, s.currency, s.amount, s.exchange_rate]
+      );
+    }
     await adjustPurchaseStock(oldItems, -1);
     await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
     for (const it of items) {

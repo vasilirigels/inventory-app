@@ -84,7 +84,9 @@ function rowToProduct(row, m) {
 
 function computeLine(it) {
   const qty   = n(it.qty)
-  const price = n(it.purchase_price_no_vat)
+  // "Cmimi PA" opsionale — fallback te "Cmim Kosto" (jo Cmim Shitje) sepse
+  // për blerje totali duhet të reflektojë sa ka kushtuar, jo sa do të shitet.
+  const price = n(it.purchase_price_no_vat) || n(it.cost_price)
   const disc  = n(it.discount_percent)
   const vatR  = n(it.vat_rate)
   const gross = qty * price
@@ -178,14 +180,18 @@ function SupplierPicker({ value, onChange }) {
 
 // ── Product picker for purchase rows ────────────────────────────────────────
 function ProductPickerCell({ value, onPick }) {
-  const [query, setQuery] = useState(value?.name || value?.barcode || '')
+  // Pershkrimi është i pavarur nga kolona e barkodit — mos ridiktoj vlerën nga
+  // barcode-i, sepse ndryshe kur user-i shkruan barkodin, ai duket edhe këtu.
+  // Emri vjen nga produkti i importuar (pickProduct → setItem({ name })) ose
+  // shkruhet me dorë.
+  const [query, setQuery] = useState(value?.name || '')
   const [results, setResults] = useState([])
   const [open, setOpen]       = useState(false)
   const [loading, setLoading] = useState(false)
   const timerRef = useRef(null)
   const boxRef   = useRef(null)
 
-  useEffect(() => { setQuery(value?.name || value?.barcode || '') }, [value?.name, value?.barcode])
+  useEffect(() => { setQuery(value?.name || '') }, [value?.name])
 
   useEffect(() => {
     function onDoc(e) {
@@ -378,7 +384,12 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                 // Snapshot from the invoice's creation moment — later payments via the
                 // Detyrime Furnitor modal are ignored here so daily totals stay stable.
                 const initPaid = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
-                const due = Math.max(0, n(inv.total_with_vat) - initPaid)
+                // Raw due (mund të jetë negativ nëse pagesa tepron totalin).
+                const dueRaw = +(n(inv.total_with_vat) - initPaid).toFixed(2)
+                const due = Math.max(0, dueRaw)
+                // Kur totali = 0 por është regjistruar pagesë ("Cmimi PA" opsional),
+                // trajto pagesën si totalin efektiv — s'ka borxh të pashfaqur.
+                const noTotalButPaid = n(inv.total_with_vat) <= 0.005 && initPaid > 0.005
                 const pm = inv.payment_method
                 const pmBadge = pm === 'debt'
                   ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
@@ -447,9 +458,9 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                     )}
                   </td>
                   <td className={`px-4 py-3 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    {due > 0.005 ? fmt(due) : '✓'}
+                    {due > 0.005 ? fmt(due) : '✓ Paguar'}
                     {isForeign && due > 0.005 && (
-                      <div className="text-[10px] font-normal text-red-500/80 italic">
+                      <div className="text-[10px] font-normal italic text-red-500/80">
                         = {fmt(due * rate)} LEK
                       </div>
                     )}
@@ -705,8 +716,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const [currency, setCurrency] = useState('EUR')
   const [exchangeRate, setExchangeRate] = useState(1)
   const [rateSource, setRateSource]   = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
-  const [amountPaid, setAmountPaid]   = useState('')
+  // Payment splits — pasqyrim i sistemit të FaturaShitje. Çdo split ka
+  // method (cash|bank), monedhë, shumë dhe kurs drejt LEK.
+  const [paymentSplits, setPaymentSplits] = useState([])
   const [notes, setNotes]       = useState('')
   const [category, setCategory] = useState('')
   const [items, setItems]       = useState([emptyItem()])
@@ -731,11 +743,28 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           setSupplierNipt(inv.supplier_nipt || '')
           setCurrency(inv.currency || 'LEK')
           setExchangeRate(inv.exchange_rate || 1)
-          setPaymentMethod(['cash','bank','debt','pos'].includes(inv.payment_method) ? inv.payment_method : 'cash')
-          // Show what was recorded at registration, not the current paid total —
-          // later payments from Detyrime Furnitor must not shift the editor either.
-          const initPaid = inv.initial_amount_paid != null ? inv.initial_amount_paid : inv.amount_paid
-          setAmountPaid(initPaid != null ? String(initPaid) : '')
+          // Rifresko splits — preferoj array-in e ruajtur; ndryshe krijoj një
+          // split nga fushat legacy (payment_method + initial_amount_paid).
+          const invCur = inv.currency || 'LEK'
+          const invR = inv.exchange_rate || 1
+          if (Array.isArray(inv.payment_splits) && inv.payment_splits.length > 0) {
+            setPaymentSplits(inv.payment_splits.map(s => ({
+              method: s.method === 'bank' ? 'bank' : 'cash',
+              currency: (s.currency || 'LEK').toUpperCase(),
+              amount: String(s.amount ?? ''),
+              exchange_rate: String(s.exchange_rate ?? 1),
+            })))
+          } else {
+            const rawPm = inv.payment_method === 'pos' ? 'bank' : inv.payment_method
+            const pm = ['cash','bank','debt'].includes(rawPm) ? rawPm : 'cash'
+            const initPaid = inv.initial_amount_paid != null ? inv.initial_amount_paid : inv.amount_paid
+            const paid = parseFloat(initPaid) || 0
+            if (pm === 'debt' || paid === 0) {
+              setPaymentSplits([])
+            } else {
+              setPaymentSplits([{ method: pm === 'bank' ? 'bank' : 'cash', currency: invCur, amount: String(paid), exchange_rate: String(invR) }])
+            }
+          }
           setNotes(inv.notes || '')
           const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
           const mats = invItems.map(it => it.material).filter(m => m === 'flori' || m === 'diamant' || m === 'ora')
@@ -807,6 +836,41 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
     }
   }
 
+  // Vazhdon sekuencën e barkodit duke marrë atë të rreshtit të parë të plotësuar
+  // si "seed" (p.sh. "PRE00001" → prefiks "PRE", numër fillestar 1, padding 5).
+  // Rreshtat pa barkod pas seed-it marrin automatikisht numrat pasues (PRE00002,
+  // PRE00003, ...). Rreshtat me barkod nuk preken.
+  const continueBarcodeSequence = () => {
+    const seedIdx = items.findIndex(it => it.barcode && String(it.barcode).trim())
+    if (seedIdx === -1) {
+      alert('Shkruaj një barkod si "PRE00001" te rreshti i parë, pastaj kliko përsëri.')
+      return
+    }
+    const seed = String(items[seedIdx].barcode).trim()
+    const m = seed.match(/^(.*?)(\d+)$/)
+    if (!m) {
+      alert(`Barkodi "${seed}" duhet të mbarojë me shifra (p.sh. PRE00001).`)
+      return
+    }
+    const prefix = m[1]
+    const padding = m[2].length
+    const start = parseInt(m[2], 10)
+    const targets = items
+      .map((it, i) => ({ it, i }))
+      .filter(({ it, i }) => i > seedIdx && (!it.barcode || !String(it.barcode).trim()))
+    if (targets.length === 0) {
+      alert('S\'ka rreshta bosh pas seed-it për të plotësuar.')
+      return
+    }
+    if (!confirm(`Plotëso ${targets.length} rreshta me sekuencën ${prefix}${String(start + 1).padStart(padding, '0')} … ${prefix}${String(start + targets.length).padStart(padding, '0')}?`)) return
+    setItems(prev => prev.map((it, i) => {
+      const t = targets.find(x => x.i === i)
+      if (!t) return it
+      const seq = start + (targets.indexOf(t) + 1)
+      return { ...it, barcode: `${prefix}${String(seq).padStart(padding, '0')}` }
+    }))
+  }
+
   const generateForEmptyRows = async () => {
     const targets = items
       .map((it, i) => ({ it, i }))
@@ -872,6 +936,65 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
     setCurrency(newCurrency)
   }
 
+  // ── Splits pagese ─────────────────────────────────────────────────────────
+  const addSplit = (method = 'cash') => {
+    const cur = currency
+    const rate = allRates[cur] != null ? String(allRates[cur]) : String(exchangeRate || 1)
+    setPaymentSplits(prev => [...prev, { method, currency: cur, amount: '', exchange_rate: rate }])
+  }
+
+  const updateSplit = (idx, patch) => {
+    setPaymentSplits(prev => {
+      const nextArr = prev.map((s, i) => {
+        if (i !== idx) return s
+        const next = { ...s, ...patch }
+        if (patch.currency && patch.currency !== s.currency) {
+          const r = allRates[patch.currency]
+          next.exchange_rate = r != null ? String(r) : '1'
+        }
+        return next
+      })
+      if (patch.currency && nextArr.length > 0) {
+        const first = nextArr[0].currency
+        const allSame = nextArr.every(s => s.currency === first)
+        if (allSame && first !== currency) changeCurrency(first)
+      }
+      return nextArr
+    })
+  }
+
+  const removeSplit = (idx) => setPaymentSplits(prev => prev.filter((_, i) => i !== idx))
+
+  // Kur user-i editon manualisht kursin e faturës, sinkronizo edhe kursin e
+  // çdo splits që është në monedhën e faturës — kështu "shuma e paguar në
+  // monedhën e faturës" mbetet e njëjtë (p.sh. 5000 EUR mbetet 5000 EUR,
+  // s'ndryshohet në 4200 EUR sepse kursi ndryshoi).
+  const changeExchangeRate = (newRate) => {
+    setExchangeRate(newRate)
+    const r = String(newRate)
+    setPaymentSplits(prev => prev.map(s => s.currency === currency ? { ...s, exchange_rate: r } : s))
+  }
+
+  // Total i paguar në monedhën e faturës — konverton çdo split → LEK → faturës.
+  const splitsPaidInInvoice = (() => {
+    const invR = parseFloat(exchangeRate) || 1
+    let lek = 0
+    for (const s of paymentSplits) {
+      const amt = parseFloat(s.amount) || 0
+      const r = parseFloat(s.exchange_rate) || 1
+      lek += amt * r
+    }
+    return invR > 0 ? +(lek / invR).toFixed(2) : 0
+  })()
+
+  const inferPaymentMethod = (splits, invoiceCurrency) => {
+    if (splits.length === 0) return 'debt'
+    if (splits.length === 1 && splits[0].currency === invoiceCurrency) {
+      return splits[0].method === 'bank' ? 'bank' : 'cash'
+    }
+    return 'mikse'
+  }
+
   // Map imported products → invoice items. Drop the leading empty placeholder
   // row if the user hasn't touched it, otherwise append.
   const handleImported = (products, ids) => {
@@ -925,14 +1048,26 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
     if (valid.length === 0) { alert('Shtoni të paktën një artikull.'); return }
     setSaving(true)
     try {
+      const splitsPayload = paymentSplits
+        .map(s => ({
+          method: s.method === 'bank' ? 'bank' : 'cash',
+          currency: (s.currency || 'LEK').toUpperCase(),
+          amount: parseFloat(s.amount) || 0,
+          exchange_rate: parseFloat(s.exchange_rate) || 1,
+        }))
+        .filter(s => s.amount !== 0)
+      const inferredPm = inferPaymentMethod(splitsPayload, currency)
       const payload = {
         date: invoiceDate, invoice_no: invoiceNo,
         supplier_name: supplierName,
         supplier_nipt: supplierNipt,
         currency,
         exchange_rate: parseFloat(exchangeRate) || 1,
-        payment_method: paymentMethod,
-        amount_paid: amountPaid === '' ? null : parseFloat(amountPaid),
+        payment_method: inferredPm,
+        payment_splits: splitsPayload,
+        // Fushat legacy — backend-i i injoron kur ka payment_splits, por i mbajmë
+        // për backward compat me çdo konsumator të vjetër që lexon nga payload-i.
+        amount_paid: 0,
         notes,
         items: valid,
       }
@@ -1005,7 +1140,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">(1 {currency} = ? LEK)</span>
           </label>
           <input type="number" step="0.0001" min="0"
-            value={exchangeRate} onChange={e => setExchangeRate(e.target.value)}
+            value={exchangeRate} onChange={e => changeExchangeRate(e.target.value)}
             disabled={currency === 'LEK'} className="input-field disabled:bg-slate-50" />
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
         </div>
@@ -1020,64 +1155,102 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Aplikohet për të gjithë artikujt e faturës</p>
         </div>
         <div className="col-span-2 md:col-span-4">
-          <label className="form-label">Lloji i Pagesës ndaj Furnitorit</label>
-          <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('cash'); setAmountPaid('') }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'cash' ? 'bg-white dark:bg-slate-800 shadow-sm text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-              }`}
-              title="E paguar plotësisht në Cash"
-            >💵 Cash</button>
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('pos'); setAmountPaid('') }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'pos' ? 'bg-white dark:bg-slate-800 shadow-sm text-purple-700 dark:text-purple-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-              }`}
-              title="POS / Kartë — e paguar plotësisht"
-            >💳 POS</button>
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('bank'); setAmountPaid('0') }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'bank' ? 'bg-white dark:bg-slate-800 shadow-sm text-blue-700 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-              }`}
-              title="Do paguhet me bankë — borxh i hapur"
-            >🏦 Bankë</button>
-            <button
-              type="button"
-              onClick={() => { setPaymentMethod('debt'); setAmountPaid('0') }}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'debt' ? 'bg-white dark:bg-slate-800 shadow-sm text-amber-700 dark:text-amber-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-              }`}
-              title="Borxh ndaj furnitorit — vendos manualisht sa është paguar"
-            >⚠️ Borxh</button>
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <label className="form-label !mb-0">Pagesa ndaj Furnitorit</label>
           </div>
           {(() => {
             const tot = totals.tot
-            const paidVal = amountPaid === '' ? tot : n(amountPaid)
-            const due = +(tot - paidVal).toFixed(2)
+            const sumPaid = splitsPaidInInvoice
+            const due = +(tot - sumPaid).toFixed(2)
+            const invR = parseFloat(exchangeRate) || 1
             return (
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali ({currency})</label>
-                  <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold">{fmt(tot)}</div>
+              <div className="mt-3 space-y-3">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
+                      <tr>
+                        <th className="px-2 py-2 text-left font-semibold w-28">Metoda</th>
+                        <th className="px-2 py-2 text-left font-semibold w-24">Monedha</th>
+                        <th className="px-2 py-2 text-right font-semibold">Shuma</th>
+                        <th className="px-2 py-2 text-right font-semibold w-32">= në {currency}</th>
+                        <th className="px-2 py-2 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentSplits.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-4 text-center text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 text-xs">
+                            ⚠️ Asnjë pagesë — fatura do të mbetet <span className="font-semibold">borxh i plotë ndaj furnitorit</span>. Përdor butonat më poshtë për të shtuar pagesë.
+                          </td>
+                        </tr>
+                      )}
+                      {paymentSplits.map((s, idx) => {
+                        const amt = parseFloat(s.amount) || 0
+                        const r = parseFloat(s.exchange_rate) || 1
+                        const inInv = invR > 0 ? +((amt * r) / invR).toFixed(2) : 0
+                        return (
+                          <tr key={idx} className="border-t border-slate-100 dark:border-slate-800">
+                            <td className="px-1 py-1">
+                              <select value={s.method} onChange={e => updateSplit(idx, { method: e.target.value })}
+                                className="input-field-sm">
+                                <option value="cash">💵 Cash</option>
+                                <option value="bank">💳 POS/Bankë</option>
+                              </select>
+                            </td>
+                            <td className="px-1 py-1">
+                              <select value={s.currency} onChange={e => updateSplit(idx, { currency: e.target.value })}
+                                className="input-field-sm">
+                                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-1 py-1">
+                              <MoneyInput value={s.amount}
+                                onChange={v => updateSplit(idx, { amount: v })}
+                                className="input-field-sm text-right tabular-nums" placeholder="0.00" />
+                            </td>
+                            <td className="px-2 py-1 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(inInv)}</td>
+                            <td className="px-1 py-1 text-center">
+                              <button type="button" onClick={() => removeSplit(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  <div className="p-2 border-t border-slate-100 dark:border-slate-800 flex gap-2">
+                    <button type="button" onClick={() => addSplit('cash')} className="btn-secondary text-xs">+ Shto Cash</button>
+                    <button type="button" onClick={() => addSplit('bank')} className="btn-secondary text-xs">+ Shto POS/Bankë</button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Shuma e Paguar ({currency})</label>
-                  <MoneyInput
-                    value={amountPaid}
-                    onChange={v => setAmountPaid(String(v))}
-                    className="input-field tabular-nums"
-                    placeholder={tot.toFixed(2)}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Borxh ndaj Furnitorit ({currency})</label>
-                  <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200'}`}>
-                    {due > 0.005 ? fmt(due) : '✓ Paguar plotësisht'}
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali ({currency})</label>
+                    <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold">{fmt(tot)}</div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Shuma e Paguar ({currency})</label>
+                    <div className="input-field bg-teal-50 text-teal-700 border-teal-200 tabular-nums font-bold">{fmt(sumPaid)}</div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Borxh ndaj Furnitorit ({currency})</label>
+                    {(() => {
+                      // Kur totali është 0 por s'ka pagesa, ekrani është ende bosh — mesazh i thjeshtë.
+                      // Kur totali është 0 por ka pagesa, ka gjasa që user-i s'ka vënë "Cmimi PA".
+                      const hasAnyItemContent = items.some(it => it.product_id || (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.purchase_price_no_vat) > 0)
+                      if (tot <= 0.005) {
+                        const msg = hasAnyItemContent
+                          ? '— vendos "Cmimi PA" tek artikujt'
+                          : '— shto artikuj së pari'
+                        return (
+                          <div className="input-field tabular-nums font-bold bg-slate-50 dark:bg-slate-900 text-slate-400 dark:text-slate-500 border-slate-200">{msg}</div>
+                        )
+                      }
+                      return (
+                        <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200' : due < -0.005 ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-purple-200' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200'}`}>
+                          {due > 0.005 ? fmt(due) : due < -0.005 ? `+${fmt(-due)} tepër` : '✓ Paguar plotësisht'}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1243,10 +1416,15 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               title="Gjenero barkod Code128 (GS-XXXXXXXX) për çdo rresht që s'ka ende barkod"
             >🔀 Gjenero Barkodet</button>
             <button
+              onClick={continueBarcodeSequence}
+              className="btn-secondary text-xs"
+              title="Shkruaj p.sh. PRE00001 te rreshti i parë, pastaj kliko këtu — rreshtat pa barkod plotësohen me PRE00002, PRE00003, ..."
+            >🔢 Numëro Barkod</button>
+            <button
               onClick={printAllLabels}
               className="text-xs bg-slate-900 dark:bg-slate-950 hover:bg-slate-800 text-white font-semibold px-2 py-1.5 rounded-lg"
               title="Printo etiketa (50×30mm) për të gjithë rreshtat me barkod"
-            >🖨️ Printo Etiketat</button>
+            >🖨️ Printo Barkod</button>
             <select
               value=""
               onChange={e => {

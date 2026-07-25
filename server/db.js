@@ -648,6 +648,22 @@ const MIGRATIONS = [
   "ALTER TABLE marketing_expenses ADD COLUMN currency TEXT DEFAULT 'LEK'",
   "ALTER TABLE marketing_expenses ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE marketing_expenses ADD COLUMN exchange_rate REAL DEFAULT 1",
+
+  // Splits pagese për Fatura Blerje — pasqyrim i invoice_payment_splits për
+  // shitje. Lejon që një blerje të paguhet me disa metoda (cash + bankë) dhe
+  // me monedha të ndryshme. Totali paguar në monedhën e faturës rillogaritet
+  // duke konvertuar çdo split → LEK → monedhën e faturës.
+  `CREATE TABLE IF NOT EXISTS purchase_invoice_payment_splits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL,
+    method TEXT NOT NULL CHECK(method IN ('cash', 'bank')),
+    currency TEXT NOT NULL DEFAULT 'LEK',
+    amount REAL NOT NULL DEFAULT 0,
+    exchange_rate REAL NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (purchase_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_purchase_invoice_payment_splits_purchase ON purchase_invoice_payment_splits(purchase_id)",
 ];
 
 async function initDB() {

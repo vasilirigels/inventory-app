@@ -212,7 +212,9 @@ function ClientPicker({ value, onChange }) {
 // ── Product picker for a single row (searches barcode/SKU/name) ─────────────
 function ProductPickerCell({ value, onPick }) {
   // value = { name, barcode }
-  const [query, setQuery] = useState(value?.name || value?.barcode || '')
+  // Pershkrimi është i pavarur nga barkodi — mos ridiktoj vlerën nga barcode-i,
+  // sepse ndryshe kur user-i shkruan barkodin, ai duket edhe këtu.
+  const [query, setQuery] = useState(value?.name || '')
   const [results, setResults] = useState([])
   const [open, setOpen]       = useState(false)
   const [loading, setLoading] = useState(false)
@@ -220,8 +222,8 @@ function ProductPickerCell({ value, onPick }) {
   const boxRef   = useRef(null)
 
   useEffect(() => {
-    setQuery(value?.name || value?.barcode || '')
-  }, [value?.name, value?.barcode])
+    setQuery(value?.name || '')
+  }, [value?.name])
 
   useEffect(() => {
     function onDoc(e) {
@@ -1384,6 +1386,15 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
 
   const removeSplit = (idx) => setPaymentSplits(prev => prev.filter((_, i) => i !== idx))
 
+  // Kur user-i editon manualisht kursin e faturës, sinkronizo edhe kursin e
+  // çdo splits që është në monedhën e faturës — kështu "shuma e paguar në
+  // monedhën e faturës" mbetet e njëjtë (p.sh. 5000 EUR mbetet 5000 EUR).
+  const changeExchangeRate = (newRate) => {
+    setExchangeRate(newRate)
+    const r = String(newRate)
+    setPaymentSplits(prev => prev.map(s => s.currency === currency ? { ...s, exchange_rate: r } : s))
+  }
+
   // Deduho metodën e pagesës nga splits për ruajtjen dhe për badge-t në listë:
   // 0 splits → borxh; 1 split në monedhën e faturës → cash/bank; ndryshe → mikse.
   const inferPaymentMethod = (splits, invoiceCurrency) => {
@@ -1543,7 +1554,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             <input
               type="number" step="0.0001" min="0"
               value={exchangeRate}
-              onChange={e => setExchangeRate(e.target.value)}
+              onChange={e => changeExchangeRate(e.target.value)}
               disabled={currency === 'LEK'}
               className="input-field flex-1 disabled:bg-slate-50"
             />
