@@ -44,6 +44,9 @@
     "vite": "^5.4.21",
     "wait-on": "^8.0.5"
   },
+  "overrides": {
+    "@noble/hashes": "^1.4.0"
+  },
   "build": {
     "appId": "com.arishop.inventory",
     "productName": "Ari Shop",
