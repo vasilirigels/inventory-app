@@ -41,8 +41,8 @@ export default function AuthGate({ children }) {
 
   if (phase === 'boot') {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-center text-slate-400">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+        <div className="text-center text-slate-400 dark:text-slate-500">
           <div className="text-3xl mb-2 animate-pulse">💍</div>
           <p className="text-sm">Duke ngarkuar...</p>
         </div>

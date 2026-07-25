@@ -103,25 +103,25 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
   return (
     <div className="space-y-4">
       {/* ── Header / controls ── */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-3">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-slate-800">Përmbledhëse</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{rangeLabel}{data && <span className="ml-2 text-slate-400">({data.days_with_data || 0} ditë me të dhëna)</span>}</p>
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Përmbledhëse</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{rangeLabel}{data && <span className="ml-2 text-slate-400 dark:text-slate-500">({data.days_with_data || 0} ditë me të dhëna)</span>}</p>
           </div>
           <div className="flex items-end gap-2 flex-wrap">
             <div>
-              <label className="block text-[10px] text-slate-500 mb-0.5 uppercase font-semibold">Nga</label>
+              <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 uppercase font-semibold">Nga</label>
               <input
                 type="date" value={from} onChange={e => setFrom(e.target.value)}
-                className={`px-2 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${invalid ? 'border-rose-400 bg-rose-50' : 'border-slate-200'}`}
+                className={`px-2 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${invalid ? 'border-rose-400 bg-rose-50' : 'border-slate-200 dark:border-slate-700'}`}
               />
             </div>
             <div>
-              <label className="block text-[10px] text-slate-500 mb-0.5 uppercase font-semibold">Deri</label>
+              <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 uppercase font-semibold">Deri</label>
               <input
                 type="date" value={to} onChange={e => setTo(e.target.value)}
-                className={`px-2 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${invalid ? 'border-rose-400 bg-rose-50' : 'border-slate-200'}`}
+                className={`px-2 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${invalid ? 'border-rose-400 bg-rose-50' : 'border-slate-200 dark:border-slate-700'}`}
               />
             </div>
           </div>
@@ -142,14 +142,14 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
             ['lastYear',  'Viti i kaluar'],
           ].map(([k, lbl]) => (
             <button key={k} onClick={() => applyPreset(k)}
-              className="px-2.5 py-1 text-xs rounded-md bg-slate-100 hover:bg-blue-100 hover:text-blue-700 text-slate-600 border border-slate-200">
+              className="px-2.5 py-1 text-xs rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-blue-100 hover:text-blue-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
               {lbl}
             </button>
           ))}
         </div>
 
         {/* Bucket mode (advanced) */}
-        <div className="flex items-center gap-2 text-xs text-slate-600">
+        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
           <span className="text-[10px] uppercase font-semibold tracking-wider">Ndarja:</span>
           {[
             ['auto',  'Auto'],
@@ -157,7 +157,7 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
             ['month', 'Mujore'],
           ].map(([k, lbl]) => (
             <button key={k} onClick={() => setBucketMode(k)}
-              className={`px-2 py-1 rounded-md border ${bucketMode === k ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+              className={`px-2 py-1 rounded-md border ${bucketMode === k ? 'bg-slate-800 dark:bg-slate-900 text-white border-slate-800' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
               {lbl}
             </button>
           ))}
@@ -170,7 +170,7 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
         </div>
       )}
 
-      {loading && !invalid && <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">Duke ngarkuar…</div>}
+      {loading && !invalid && <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center text-slate-500 dark:text-slate-400">Duke ngarkuar…</div>}
 
       {!loading && !invalid && data && (
         <>
@@ -183,34 +183,34 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
           </div>
 
           {/* By type */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-            <h4 className="text-sm font-bold text-slate-800 mb-3">Shitje sipas kategorisë</h4>
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4">
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-3">Shitje sipas kategorisë</h4>
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">Kategoria</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">Copë</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">Gram</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">LEK</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">EUR</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">USD</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">GBP</th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">CHF</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                  <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">Kategoria</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">Copë</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">Gram</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">LEK</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">EUR</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">USD</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">GBP</th>
+                  <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">CHF</th>
                 </tr>
               </thead>
               <tbody>
                 <TypeRow label="FLORI"          t={bt.flori} />
                 <TypeRow label="DIAMANT"        t={bt.diamant} />
                 <TypeRow label="ONLINE & STAFI" t={bt.online} />
-                <tr className="bg-emerald-50 font-bold border-t-2 border-emerald-200">
-                  <td className="px-3 py-2 text-slate-800">TOTAL</td>
+                <tr className="bg-emerald-50 dark:bg-emerald-900/30 font-bold border-t-2 border-emerald-200">
+                  <td className="px-3 py-2 text-slate-800 dark:text-slate-100">TOTAL</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt(n(bt.flori.cope) + n(bt.diamant.cope) + n(bt.online.cope))}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt(n(bt.flori.gram) + n(bt.diamant.gram) + n(bt.online.gram))}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmt(x.lek)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmt(x.eur)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmt(x.usd)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmt(x.gbp)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmt(x.chf)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(x.lek)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(x.eur)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(x.usd)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(x.gbp)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(x.chf)}</td>
                 </tr>
               </tbody>
             </table>
@@ -234,14 +234,14 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
 
           {/* Per-bucket breakdown (skip when single day) */}
           {from !== to && displayBuckets.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 overflow-x-auto">
-              <h4 className="text-sm font-bold text-slate-800 mb-3">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 overflow-x-auto">
+              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-3">
                 Ndarja {effectiveBucket === 'month' ? 'mujore' : 'ditore'}
               </h4>
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-slate-900 text-white">
-                    <th className="px-2 py-2 sticky left-0 bg-slate-900 text-left">{effectiveBucket === 'month' ? 'Muaji' : 'Data'}</th>
+                  <tr className="bg-slate-900 dark:bg-slate-950 text-white">
+                    <th className="px-2 py-2 sticky left-0 bg-slate-900 dark:bg-slate-950 text-left">{effectiveBucket === 'month' ? 'Muaji' : 'Data'}</th>
                     <th className="px-2 py-2 bg-emerald-800">Xhiro LEK</th>
                     <th className="px-2 py-2 bg-emerald-800">Xhiro EUR</th>
                     <th className="px-2 py-2 bg-emerald-800">Xhiro USD</th>
@@ -262,16 +262,16 @@ export default function UnifiedReport({ initialDate, onNavigate }) {
                   {displayBuckets.map((b, i) => (
                     <tr
                       key={b.key}
-                      className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}`}
+                      className={`border-b border-slate-100 dark:border-slate-800 ${i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/60'}`}
                     >
-                      <td className="px-2 py-1.5 sticky left-0 bg-inherit font-medium text-slate-800 whitespace-nowrap">{b.label}</td>
-                      <Td value={b.xhiro_lek} className="text-emerald-700" />
-                      <Td value={b.xhiro_eur} className="text-emerald-700" />
-                      <Td value={b.xhiro_usd} className="text-emerald-700" />
+                      <td className="px-2 py-1.5 sticky left-0 bg-inherit font-medium text-slate-800 dark:text-slate-100 whitespace-nowrap">{b.label}</td>
+                      <Td value={b.xhiro_lek} className="text-emerald-700 dark:text-emerald-300" />
+                      <Td value={b.xhiro_eur} className="text-emerald-700 dark:text-emerald-300" />
+                      <Td value={b.xhiro_usd} className="text-emerald-700 dark:text-emerald-300" />
                       <Td value={b.shpenzime_lek} className="text-rose-600" />
                       <Td value={b.shpenzime_eur} className="text-rose-600" />
-                      <Td value={b.biba_lek}  className="text-purple-700" />
-                      <Td value={b.diana_lek} className="text-purple-700" />
+                      <Td value={b.biba_lek}  className="text-purple-700 dark:text-purple-300" />
+                      <Td value={b.diana_lek} className="text-purple-700 dark:text-purple-300" />
                       <Td value={b.bank_withdraw_lek} className="text-blue-600" />
                       <Td value={b.bank_deposit_lek}  className="text-blue-600" />
                       <Td value={b.flori_cope} />
@@ -297,9 +297,9 @@ function zeroBucket() {
 
 function Kpi({ label, value, color }) {
   const colorMap = {
-    emerald: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+    emerald: 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200',
     rose:    'text-rose-700    bg-rose-50    border-rose-200',
-    blue:    'text-blue-700    bg-blue-50    border-blue-200',
+    blue:    'text-blue-700 dark:text-blue-300    bg-blue-50 dark:bg-blue-900/30    border-blue-200',
   }
   return (
     <div className={`rounded-xl border p-4 ${colorMap[color] || colorMap.blue}`}>
@@ -311,8 +311,8 @@ function Kpi({ label, value, color }) {
 
 function TypeRow({ label, t }) {
   return (
-    <tr className="border-b border-slate-100">
-      <td className="px-3 py-2 text-slate-700 font-medium">{label}</td>
+    <tr className="border-b border-slate-100 dark:border-slate-800">
+      <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium">{label}</td>
       <Td value={n(t.cope)} />
       <Td value={n(t.gram)} />
       <Td value={n(t.lek_cash) + n(t.lek_pb)} />
@@ -329,19 +329,19 @@ const CUR_LABELS = { lek: 'LEK', eur: 'EUR', usd: 'USD', gbp: 'GBP', chf: 'CHF',
 function Sector({ title, cols, row, rows }) {
   const data = rows || [{ label: 'Total', vals: row }]
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-      <h4 className="text-sm font-bold text-slate-800 mb-2">{title}</h4>
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4">
+      <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">{title}</h4>
       <table className="w-full text-xs">
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50">
-            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-slate-600">Zëri</th>
-            {cols.map(c => <th key={c} className="text-right px-2 py-1.5 text-[10px] font-semibold text-slate-600">{CUR_LABELS[c]}</th>)}
+          <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300">Zëri</th>
+            {cols.map(c => <th key={c} className="text-right px-2 py-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300">{CUR_LABELS[c]}</th>)}
           </tr>
         </thead>
         <tbody>
           {data.map((r, i) => (
-            <tr key={i} className="border-b border-slate-100">
-              <td className="px-2 py-1.5 text-slate-700">{r.label}</td>
+            <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+              <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">{r.label}</td>
               {cols.map(c => <Td key={c} value={r.vals[c]} />)}
             </tr>
           ))}

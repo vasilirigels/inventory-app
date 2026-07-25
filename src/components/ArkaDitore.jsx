@@ -125,7 +125,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     } finally { setClosingOut(false) }
   }
 
-  if (loading) return <div className="card p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+  if (loading) return <div className="card p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
   if (error)   return <div className="card p-8 text-center text-red-500 text-sm">⚠ {error}</div>
   if (!data)   return null
 
@@ -148,27 +148,27 @@ export default function ArkaDitore({ date, onNavigate }) {
   const inputCurs = CURS
 
   const rows = [
-    { label: 'Gjendje Fillestare (mbartje)',   src: 'opening_cash',      sign: '+', color: 'text-slate-700',   bg: 'bg-slate-50',   detail: 'nga dita e mëparshme' },
-    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700', bg: 'bg-emerald-50', detail: `${data.counts.invoices} fatura` },
-    { label: 'Pagesa me Bankë',                 src: 'paid_bank',         sign: '−', color: 'text-blue-700',    bg: 'bg-blue-50',    detail: 'paid_bank' },
-    { label: 'Pagesa me POS',                   src: 'paid_pos',          sign: '−', color: 'text-indigo-700',  bg: 'bg-indigo-50',  detail: 'paid_pos' },
+    { label: 'Gjendje Fillestare (mbartje)',   src: 'opening_cash',      sign: '+', color: 'text-slate-700 dark:text-slate-200',   bg: 'bg-slate-50 dark:bg-slate-900',   detail: 'nga dita e mëparshme' },
+    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura` },
+    { label: 'Pagesa me Bankë',                 src: 'paid_bank',         sign: '−', color: 'text-blue-700 dark:text-blue-300',    bg: 'bg-blue-50 dark:bg-blue-900/30',    detail: 'paid_bank' },
+    { label: 'Pagesa me POS',                   src: 'paid_pos',          sign: '−', color: 'text-indigo-700',  bg: 'bg-indigo-50 dark:bg-indigo-900/30',  detail: 'paid_pos' },
     { label: 'Borxh i Papaguar',                src: 'amount_due',        sign: '−', color: 'text-rose-700',    bg: 'bg-rose-50',    detail: 'mbetja e papaguar' },
-    { label: 'Kesh nga Shitjet',                src: 'cash_from_sales',   sign: '=', color: 'text-emerald-800', bg: 'bg-emerald-50/60', detail: 'Xhiro − Bankë − POS − Borxh (përfshin parapagimin nga borxhet)' },
+    { label: 'Kesh nga Shitjet',                src: 'cash_from_sales',   sign: '=', color: 'text-emerald-800 dark:text-emerald-200', bg: 'bg-emerald-50/60', detail: 'Xhiro − Bankë − POS − Borxh (përfshin parapagimin nga borxhet)' },
     { label: 'Pagesë Borxhi',                   src: 'debt_repayments',   sign: '+', color: 'text-teal-700',    bg: 'bg-teal-50',    detail: `${data.counts.debt_repayments || 0} pagesa kesh nga fatura të vjetra (jo pjesë e xhiros)` },
   ]
   const outRows = [
-    { label: 'Shpenzime (Arkë)',                src: 'expenses',          sign: '−', color: 'text-orange-700',  bg: 'bg-orange-50',  detail: `${data.counts.expenses} regjistrime` },
-    { label: 'Fatura Blerje Kesh',              src: 'purchase_cash',     sign: '−', color: 'text-amber-700',   bg: 'bg-amber-50',   detail: `${data.counts.purchases_cash} fatura` },
-    { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700',  bg: 'bg-yellow-50',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
-    { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800',   bg: 'bg-amber-50',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },
+    { label: 'Shpenzime (Arkë)',                src: 'expenses',          sign: '−', color: 'text-orange-700 dark:text-orange-300',  bg: 'bg-orange-50 dark:bg-orange-900/30',  detail: `${data.counts.expenses} regjistrime` },
+    { label: 'Fatura Blerje Kesh',              src: 'purchase_cash',     sign: '−', color: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.purchases_cash} fatura` },
+    { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
+    { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800 dark:text-amber-200',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },
   ]
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <div className="card flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-lg font-bold text-slate-800">Arka Ditore</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Arka Ditore</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Bilanc i ditës për çdo monedhë, bazuar tek Fatura Shitje, Fatura Blerje (kesh) dhe Shpenzimet.
           </p>
         </div>
@@ -181,24 +181,24 @@ export default function ArkaDitore({ date, onNavigate }) {
       </div>
 
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Të Ardhura nga Shitja</h4>
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Të Ardhura nga Shitja</h4>
         </div>
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-100">
+          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
             <tr>
-              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Zëri</th>
+              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Zëri</th>
               {shownCurs.map(c => (
-                <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c}</th>
+                <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{c}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map(r => (
-              <tr key={r.label} className={`border-b border-slate-100 ${r.bg}`}>
-                <td className="px-4 py-2.5 text-slate-700">
+              <tr key={r.label} className={`border-b border-slate-100 dark:border-slate-800 ${r.bg}`}>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-200">
                   {r.label}
-                  <span className="ml-2 text-xs text-slate-400">{r.detail}</span>
+                  <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{r.detail}</span>
                 </td>
                 {shownCurs.map(c => (
                   <td key={c} className={`px-3 py-2.5 text-right tabular-nums font-semibold ${r.color}`}>
@@ -207,13 +207,13 @@ export default function ArkaDitore({ date, onNavigate }) {
                 ))}
               </tr>
             ))}
-            <tr className="border-t-2 border-slate-300 bg-emerald-100">
-              <td className="px-4 py-3 font-bold text-slate-800">
+            <tr className="border-t-2 border-slate-300 dark:border-slate-700 bg-emerald-100">
+              <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">
                 = Kesh në Dispozicion
-                <span className="ml-2 text-xs text-slate-500">Mbartje + Xhiro − Bankë − POS − Borxh</span>
+                <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">Mbartje + Xhiro − Bankë − POS − Borxh</span>
               </td>
               {shownCurs.map(c => (
-                <td key={c} className="px-3 py-3 text-right tabular-nums font-bold text-emerald-800 text-base">
+                <td key={c} className="px-3 py-3 text-right tabular-nums font-bold text-emerald-800 dark:text-emerald-200 text-base">
                   {fmt((data.opening_cash?.[c] || 0) + (data.cash_from_sales?.[c] || 0))}
                 </td>
               ))}
@@ -223,24 +223,24 @@ export default function ArkaDitore({ date, onNavigate }) {
       </div>
 
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Dalje nga Arka</h4>
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Dalje nga Arka</h4>
         </div>
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-100">
+          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
             <tr>
-              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Zëri</th>
+              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Zëri</th>
               {shownCurs.map(c => (
-                <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c}</th>
+                <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{c}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {outRows.map(r => (
-              <tr key={r.label} className={`border-b border-slate-100 ${r.bg}`}>
-                <td className="px-4 py-2.5 text-slate-700">
+              <tr key={r.label} className={`border-b border-slate-100 dark:border-slate-800 ${r.bg}`}>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-200">
                   {r.label}
-                  <span className="ml-2 text-xs text-slate-400">{r.detail}</span>
+                  <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{r.detail}</span>
                 </td>
                 {shownCurs.map(c => (
                   <td key={c} className={`px-3 py-2.5 text-right tabular-nums font-semibold ${r.color}`}>
@@ -253,10 +253,10 @@ export default function ArkaDitore({ date, onNavigate }) {
         </table>
       </div>
 
-      <div className="card bg-slate-900 text-white">
+      <div className="card bg-slate-900 dark:bg-slate-950 text-white">
         <div className="mb-2">
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold">Gjendja e Arkës në Fund të Ditës (Teorike)</p>
-          <p className="text-[10px] text-slate-500 mt-0.5">
+          <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold">Gjendja e Arkës në Fund të Ditës (Teorike)</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
             Mbartje + Kesh nga shitjet − Shpenzime − Blerje kesh
           </p>
         </div>
@@ -264,9 +264,9 @@ export default function ArkaDitore({ date, onNavigate }) {
           {CURS.map(c => {
             const v = data.cash_balance?.[c] || 0
             return (
-              <div key={c} className="bg-slate-800 rounded-lg px-3 py-2">
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">{c}</div>
-                <div className={`text-lg font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+              <div key={c} className="bg-slate-800 dark:bg-slate-900 rounded-lg px-3 py-2">
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">{c}</div>
+                <div className={`text-lg font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
                   {fmt(v)}
                 </div>
               </div>
@@ -279,7 +279,7 @@ export default function ArkaDitore({ date, onNavigate }) {
           const eurRate = parseFloat(rates?.EUR) || 0
           if (eurRate <= 0) {
             return (
-              <div className="mt-3 rounded-lg bg-slate-800/60 border border-slate-700 px-3 py-2 text-[11px] text-slate-400">
+              <div className="mt-3 rounded-lg bg-slate-800/60 border border-slate-700 px-3 py-2 text-[11px] text-slate-400 dark:text-slate-500">
                 Nuk u gjet kursi i EUR për këtë datë — nuk mund të llogaritet totali.
               </div>
             )
@@ -292,12 +292,12 @@ export default function ArkaDitore({ date, onNavigate }) {
             lekTotal += v * r
           }
           const eurTotal = lekTotal / eurRate
-          const totalCls = eurTotal < 0 ? 'text-rose-400' : eurTotal > 0 ? 'text-emerald-300' : 'text-slate-500'
+          const totalCls = eurTotal < 0 ? 'text-rose-400' : eurTotal > 0 ? 'text-emerald-300' : 'text-slate-500 dark:text-slate-400'
           return (
             <div className="mt-3 rounded-lg bg-gradient-to-r from-emerald-900/40 to-slate-800 border border-emerald-800/50 px-4 py-3 flex items-baseline justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-[10px] text-emerald-300/80 uppercase tracking-wide font-semibold">Total i Konvertuar</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                   me kursin e datës · 1 EUR = {fmt(eurRate)} LEK
                 </div>
               </div>
@@ -309,20 +309,20 @@ export default function ArkaDitore({ date, onNavigate }) {
         })()}
       </div>
 
-      <div className="card border-2 border-amber-200 bg-amber-50">
+      <div className="card border-2 border-amber-200 bg-amber-50 dark:bg-amber-900/30">
         <div className="mb-3">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-amber-800">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
             Gjendja Fizike e Arkës (e Numëruar Dorazi)
           </label>
-          <p className="text-[10px] text-amber-700 mt-0.5">
+          <p className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">
             Vendos shumën e numëruar fizikisht për çdo monedhë. Ruajtja është automatike.
           </p>
-          {savedMsg && <span className="text-xs text-emerald-700 font-medium mt-1 inline-block">{savedMsg}</span>}
+          {savedMsg && <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium mt-1 inline-block">{savedMsg}</span>}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {inputCurs.map(c => (
             <div key={c}>
-              <label className="text-[10px] text-amber-800 font-semibold uppercase">{c}</label>
+              <label className="text-[10px] text-amber-800 dark:text-amber-200 font-semibold uppercase">{c}</label>
               <MoneyInput
                 value={physInput[c] ?? ''}
                 onChange={v => handlePhysChange(c, String(v))}
@@ -334,14 +334,14 @@ export default function ArkaDitore({ date, onNavigate }) {
         </div>
       </div>
 
-      <div className="card p-0 overflow-hidden border-2 border-slate-200">
-        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Diferenca (Fizike − Teorike)</h4>
+      <div className="card p-0 overflow-hidden border-2 border-slate-200 dark:border-slate-700">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Diferenca (Fizike − Teorike)</h4>
         </div>
         <table className="w-full text-sm">
           <tbody>
             <tr>
-              <td className="px-4 py-3 text-slate-700 font-medium">Diferenca</td>
+              <td className="px-4 py-3 text-slate-700 dark:text-slate-200 font-medium">Diferenca</td>
               {inputCurs.map(c => {
                 const v = data.difference?.[c] || 0
                 // v > 0 → fizike > teorike (teprica) — jo krizë, por çudi
@@ -363,31 +363,31 @@ export default function ArkaDitore({ date, onNavigate }) {
         </table>
       </div>
 
-      <div className="card border-2 border-slate-300 bg-slate-50">
+      <div className="card border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
         <div className="mb-3">
-          <h4 className="text-sm font-bold text-slate-800">🔒 Mbyllje Dite — Ndaj Gjendjen Fizike</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">🔒 Mbyllje Dite — Ndaj Gjendjen Fizike</h4>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Vendos sasinë që do të kalojë në kasafortë për çdo monedhë. Pjesa tjetër mbartet automatikisht si gjendje fillestare për ditën pasardhëse.
           </p>
         </div>
         <table className="w-full text-sm mb-3">
           <thead>
-            <tr className="border-b border-slate-200">
-              <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500">Zëri</th>
+            <tr className="border-b border-slate-200 dark:border-slate-700">
+              <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Zëri</th>
               {inputCurs.map(c => (
-                <th key={c} className="text-right px-3 py-2 text-xs font-semibold text-slate-500 w-28">{c}</th>
+                <th key={c} className="text-right px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 w-28">{c}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-slate-100">
-              <td className="px-3 py-2 text-slate-700">Gjendja fizike</td>
+            <tr className="border-b border-slate-100 dark:border-slate-800">
+              <td className="px-3 py-2 text-slate-700 dark:text-slate-200">Gjendja fizike</td>
               {inputCurs.map(c => (
-                <td key={c} className="px-3 py-2 text-right tabular-nums text-slate-600">{fmt(parseFloat(physInput[c]) || 0)}</td>
+                <td key={c} className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{fmt(parseFloat(physInput[c]) || 0)}</td>
               ))}
             </tr>
-            <tr className="border-b border-slate-100 bg-amber-50/50">
-              <td className="px-3 py-2 font-semibold text-amber-800">Kalo në Kasafortë</td>
+            <tr className="border-b border-slate-100 dark:border-slate-800 bg-amber-50/50">
+              <td className="px-3 py-2 font-semibold text-amber-800 dark:text-amber-200">Kalo në Kasafortë</td>
               {inputCurs.map(c => (
                 <td key={c} className="px-2 py-1">
                   <MoneyInput
@@ -400,12 +400,12 @@ export default function ArkaDitore({ date, onNavigate }) {
               ))}
             </tr>
             <tr className="bg-emerald-50/50">
-              <td className="px-3 py-2 font-semibold text-emerald-800">Mbart për ditën pasardhëse</td>
+              <td className="px-3 py-2 font-semibold text-emerald-800 dark:text-emerald-200">Mbart për ditën pasardhëse</td>
               {inputCurs.map(c => {
                 const phys = parseFloat(physInput[c]) || 0
                 const safe = parseFloat(toSafeInput[c]) || 0
                 return (
-                  <td key={c} className="px-3 py-2 text-right tabular-nums font-bold text-emerald-800">
+                  <td key={c} className="px-3 py-2 text-right tabular-nums font-bold text-emerald-800 dark:text-emerald-200">
                     {fmt(Math.max(0, phys - safe))}
                   </td>
                 )
@@ -422,7 +422,7 @@ export default function ArkaDitore({ date, onNavigate }) {
             {closingOut ? '⏳ Duke mbyllur...' : '🔒 Mbyll Ditën'}
           </button>
           {closeoutMsg && (
-            <span className={`text-sm ${closeoutMsg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700'}`}>
+            <span className={`text-sm ${closeoutMsg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
               {closeoutMsg}
             </span>
           )}

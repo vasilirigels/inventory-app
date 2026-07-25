@@ -41,7 +41,7 @@ export default function Kasaforta() {
     return () => { cancel = true }
   }, [refreshKey])
 
-  if (loading) return <div className="card p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+  if (loading) return <div className="card p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
   if (error)   return <div className="card p-8 text-center text-red-500 text-sm">⚠ {error}</div>
   if (!data)   return null
 
@@ -64,14 +64,14 @@ export default function Kasaforta() {
       <div className="card bg-gradient-to-r from-slate-900 to-slate-800 text-white">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold">Gjendja e Kasafortës</p>
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold">Gjendja e Kasafortës</p>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
               Derdhje + Mbyllje Ditore − Tërheqje ± Konvertime (kumulative)
             </p>
           </div>
           <button
             onClick={() => setShowConvert(true)}
-            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-bold shadow-sm"
+            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 dark:text-white text-xs font-bold shadow-sm"
             title="Konverto valutë brenda kasafortës (p.sh. EUR → LEK)"
           >💱 Konverto Monedhë</button>
         </div>
@@ -79,9 +79,9 @@ export default function Kasaforta() {
           {CURS.map(c => {
             const v = balance[c] || 0
             return (
-              <div key={c} className="bg-slate-800 rounded-lg px-3 py-2.5">
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">{c}</div>
-                <div className={`text-xl font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-amber-300' : 'text-slate-500'}`}>
+              <div key={c} className="bg-slate-800 dark:bg-slate-900 rounded-lg px-3 py-2.5">
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">{c}</div>
+                <div className={`text-xl font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-amber-300' : 'text-slate-500 dark:text-slate-400'}`}>
                   🔒 {fmt(v)}
                 </div>
               </div>
@@ -108,17 +108,17 @@ export default function Kasaforta() {
       />
 
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Historiku i Lëvizjeve</h4>
-          <span className="text-xs text-slate-400">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Historiku i Lëvizjeve</h4>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
             {history.length} ditë me lëvizje
             {(dateRange.from || dateRange.to) && rawHistory.length !== history.length && (
-              <span className="ml-1 text-slate-500">(nga {rawHistory.length})</span>
+              <span className="ml-1 text-slate-500 dark:text-slate-400">(nga {rawHistory.length})</span>
             )}
           </span>
         </div>
         {history.length === 0 ? (
-          <div className="p-10 text-center text-slate-400">
+          <div className="p-10 text-center text-slate-400 dark:text-slate-500">
             <div className="text-4xl mb-2">🔒</div>
             <p className="text-sm">Asnjë lëvizje në kasafortë.</p>
             <p className="text-xs mt-1">Përdor "Mbyllje Dite" tek Arka Ditore për të derdhur kesh në kasafortë.</p>
@@ -126,17 +126,17 @@ export default function Kasaforta() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase" title="Gjendja e kasafortës në fillim të kësaj date">Bilanci Fillestar</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Derdhje</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Mbyllje Dite</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase" title="Konvertim monedhe brenda kasafortës (shtim / heqje)">Konvertim</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Tërheqje</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Neto</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase" title="Gjendja e kasafortës në fund të kësaj date (fillestar + neto)">Bilanci Final</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase" title="Gjendja e kasafortës në fillim të kësaj date">Bilanci Fillestar</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Derdhje</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Mbyllje Dite</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase" title="Konvertim monedhe brenda kasafortës (shtim / heqje)">Konvertim</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Tërheqje</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Neto</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase" title="Gjendja e kasafortës në fund të kësaj date (fillestar + neto)">Bilanci Final</th>
                 </tr>
               </thead>
               <tbody>
@@ -153,18 +153,18 @@ export default function Kasaforta() {
                         : `🔄 −${fmt(ev.amount)} ${c} → ${fmt(ev.other_amount)} ${ev.other_cur} (1 ${c} = ${ev.rate} ${ev.other_cur})${ev.note ? ' · ' + ev.note : ''}`
                       ).join('\n')
                     return (
-                      <tr key={`${r.date}-${c}`} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="px-3 py-2 text-slate-700 font-mono text-xs">
+                      <tr key={`${r.date}-${c}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-mono text-xs">
                           {idx === 0 ? fmtDate(r.date) : ''}
                         </td>
-                        <td className="px-3 py-2 text-xs font-semibold text-slate-600">{c}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-500" title="Gjendja në fillim të ditës">
+                        <td className="px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">{c}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400" title="Gjendja në fillim të ditës">
                           {fmt(cur.balance_before)}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">
                           {cur.deposit > 0 ? `+${fmt(cur.deposit)}` : '—'}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-amber-700">
+                        <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
                           {cur.closeout_in > 0 ? `+${fmt(cur.closeout_in)}` : '—'}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums" title={convTitle}>
@@ -177,7 +177,7 @@ export default function Kasaforta() {
                           )}
                           {cur.conv_in === 0 && cur.conv_out === 0 && <span className="text-slate-300">—</span>}
                           {convEvents.length > 0 && (
-                            <div className="text-[10px] text-slate-500 mt-0.5 space-y-0.5">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 space-y-0.5">
                               {convEvents.map((ev, i) => (
                                 <div key={i} className="truncate max-w-[240px]" title={convTitle}>
                                   {ev.direction === 'in'
@@ -192,10 +192,10 @@ export default function Kasaforta() {
                         <td className="px-3 py-2 text-right tabular-nums text-rose-700">
                           {cur.withdraw > 0 ? `−${fmt(cur.withdraw)}` : '—'}
                         </td>
-                        <td className={`px-3 py-2 text-right tabular-nums font-semibold ${cur.net > 0 ? 'text-emerald-700' : cur.net < 0 ? 'text-rose-700' : 'text-slate-400'}`}>
+                        <td className={`px-3 py-2 text-right tabular-nums font-semibold ${cur.net > 0 ? 'text-emerald-700 dark:text-emerald-300' : cur.net < 0 ? 'text-rose-700' : 'text-slate-400 dark:text-slate-500'}`}>
                           {cur.net > 0 ? '+' : ''}{fmt(cur.net)}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-900" title={`${fmt(cur.balance_before)} + ${cur.net > 0 ? '+' : ''}${fmt(cur.net)} = ${fmt(cur.balance)}`}>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-900 dark:text-white" title={`${fmt(cur.balance_before)} + ${cur.net > 0 ? '+' : ''}${fmt(cur.net)} = ${fmt(cur.balance)}`}>
                           {fmt(cur.balance)}
                         </td>
                       </tr>
@@ -303,13 +303,13 @@ function ConvertModal({ balance, onClose, onSaved }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">💱 Konverto Monedhë</h3>
-            <p className="text-xs text-slate-500">Zbrit nga një monedhë, derdh në një tjetër (brenda kasafortës)</p>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">💱 Konverto Monedhë</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Zbrit nga një monedhë, derdh në një tjetër (brenda kasafortës)</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <div className="p-6 space-y-4">
           <div>
@@ -323,14 +323,14 @@ function ConvertModal({ balance, onClose, onSaved }) {
               <select value={fromCur} onChange={e => setFromCur(e.target.value)} className="input-field">
                 {CURS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <p className="text-[10px] text-slate-500 mt-1">Gjendja: <span className="font-bold text-slate-700 tabular-nums">{fmt(balance[fromCur] || 0)}</span></p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Gjendja: <span className="font-bold text-slate-700 dark:text-slate-200 tabular-nums">{fmt(balance[fromCur] || 0)}</span></p>
             </div>
             <div>
               <label className="form-label">Në (monedha)</label>
               <select value={toCur} onChange={e => setToCur(e.target.value)} className="input-field">
                 {CURS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <p className="text-[10px] text-slate-500 mt-1">Gjendja: <span className="font-bold text-slate-700 tabular-nums">{fmt(balance[toCur] || 0)}</span></p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Gjendja: <span className="font-bold text-slate-700 dark:text-slate-200 tabular-nums">{fmt(balance[toCur] || 0)}</span></p>
             </div>
           </div>
 
@@ -357,7 +357,7 @@ function ConvertModal({ balance, onClose, onSaved }) {
 
           <div>
             <label className="form-label">
-              Kursi i Këmbimit <span className="text-[10px] text-slate-400">(1 {fromCur} = X {toCur})</span>
+              Kursi i Këmbimit <span className="text-[10px] text-slate-400 dark:text-slate-500">(1 {fromCur} = X {toCur})</span>
             </label>
             <div className="flex gap-2 items-center">
               <input
@@ -377,7 +377,7 @@ function ConvertModal({ balance, onClose, onSaved }) {
               )}
             </div>
             {suggestedRate != null && (
-              <p className="text-[10px] text-slate-500 italic mt-1">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-1">
                 Kursi i sugjeruar për datën {date}: 1 {fromCur} = {suggestedRate} {toCur}
               </p>
             )}
@@ -391,12 +391,12 @@ function ConvertModal({ balance, onClose, onSaved }) {
 
           {err && <p className="text-sm text-red-600">{err}</p>}
 
-          <div className="card bg-amber-50 border-amber-200 !p-3">
-            <p className="text-xs font-semibold text-amber-800 mb-1">📋 Përmbledhje</p>
+          <div className="card bg-amber-50 dark:bg-amber-900/30 border-amber-200 !p-3">
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 mb-1">📋 Përmbledhje</p>
             <div className="text-[11px] text-amber-900 space-y-0.5">
               <div>🔻 Zbritet nga kasaforta: <span className="font-bold tabular-nums">{fmt(parseFloat(fromAmt) || 0)} {fromCur}</span></div>
               <div>🔺 Shtohet në kasafortë: <span className="font-bold tabular-nums">{fmt(parseFloat(toAmt) || 0)} {toCur}</span></div>
-              <div className="text-slate-600">Kursi i regjistruar: 1 {fromCur} = {effectiveRate ? effectiveRate : '—'} {toCur}</div>
+              <div className="text-slate-600 dark:text-slate-300">Kursi i regjistruar: 1 {fromCur} = {effectiveRate ? effectiveRate : '—'} {toCur}</div>
             </div>
           </div>
         </div>

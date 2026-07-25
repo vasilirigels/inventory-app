@@ -4,10 +4,10 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import MoneyInput from './MoneyInput.jsx'
 
 const STATUS_META = {
-  pranuar:  { label: 'Pranuar',     cls: 'bg-slate-100 text-slate-700',    dot: 'bg-slate-400' },
-  ne_pune:  { label: 'Në punë',     cls: 'bg-amber-100 text-amber-700',    dot: 'bg-amber-500' },
-  gati:     { label: 'Gati',        cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
-  dorezuar: { label: 'Dorëzuar',    cls: 'bg-blue-100 text-blue-700',      dot: 'bg-blue-500' },
+  pranuar:  { label: 'Pranuar',     cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200',    dot: 'bg-slate-400' },
+  ne_pune:  { label: 'Në punë',     cls: 'bg-amber-100 text-amber-700 dark:text-amber-300',    dot: 'bg-amber-500' },
+  gati:     { label: 'Gati',        cls: 'bg-emerald-100 text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
+  dorezuar: { label: 'Dorëzuar',    cls: 'bg-blue-100 text-blue-700 dark:text-blue-300',      dot: 'bg-blue-500' },
 }
 const STATUS_ORDER = ['pranuar', 'ne_pune', 'gati', 'dorezuar']
 
@@ -53,10 +53,10 @@ function RepairModal({ repair, onClose, onSave }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal-box max-w-2xl">
         <div className="modal-header">
-          <h3 className="font-bold text-slate-800 text-lg">
+          <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
             {repair?.id ? `Edito Riparimin #${repair.id}` : 'Riparim i Ri'}
           </h3>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <form onSubmit={submit}>
           <div className="modal-body">
@@ -124,7 +124,7 @@ function RepairModal({ repair, onClose, onSave }) {
                   className="input-field" />
               </div>
               <div className="flex items-end pb-2">
-                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
                   <input type="checkbox" checked={!!form.paid}
                     onChange={e => set('paid', e.target.checked ? 1 : 0)}
                     className="w-4 h-4" />
@@ -250,8 +250,8 @@ export default function Riparimet() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Riparimet</h2>
-          <p className="text-xs text-slate-500">Regjistri i sendeve që klientët sjellin për riparim</p>
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Riparimet</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Regjistri i sendeve që klientët sjellin për riparim</p>
         </div>
         <button onClick={() => setModal('add')} className="btn-primary">+ Riparim i Ri</button>
       </div>
@@ -259,7 +259,7 @@ export default function Riparimet() {
       {/* Filtra: status */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {[
-          { id: 'all',       label: 'Të gjitha', cls: 'bg-slate-100 text-slate-700' },
+          { id: 'all',       label: 'Të gjitha', cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200' },
           { id: 'pranuar',   label: STATUS_META.pranuar.label,   cls: STATUS_META.pranuar.cls },
           { id: 'ne_pune',   label: STATUS_META.ne_pune.label,   cls: STATUS_META.ne_pune.cls },
           { id: 'gati',      label: STATUS_META.gati.label,      cls: STATUS_META.gati.cls },
@@ -270,7 +270,7 @@ export default function Riparimet() {
             <button key={t.id} onClick={() => setStatusFilter(t.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
                 active ? 'ring-2 ring-blue-400 border-transparent ' + t.cls
-                       : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                       : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'
               }`}>
               {t.label}
               <span className="ml-1.5 text-[10px] opacity-70">{counts[t.id] ?? 0}</span>
@@ -286,11 +286,11 @@ export default function Riparimet() {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar…</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar…</div>
         ) : filtered.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">🛠️</div>
-            <p className="text-slate-500 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               {items.length === 0 ? 'Nuk ka riparime të regjistruara.' : 'Asnjë riparim s\'përputhet me filtrin.'}
             </p>
             {items.length === 0 && (
@@ -300,34 +300,34 @@ export default function Riparimet() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Sendi</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Problemi</th>
-                  <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Çmimi</th>
-                  <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Status</th>
-                  <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Pagesa</th>
-                  <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sendi</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Problemi</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çmimi</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Status</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(r => {
                   const meta = STATUS_META[r.status] || STATUS_META.pranuar
                   return (
-                    <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="px-3 py-3 text-slate-600 text-xs whitespace-nowrap">{r.date_received}</td>
+                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs whitespace-nowrap">{r.date_received}</td>
                       <td className="px-3 py-3">
-                        <div className="font-semibold text-slate-800">{r.customer_name}</div>
-                        {r.customer_phone && <div className="text-[11px] text-slate-500">{r.customer_phone}</div>}
+                        <div className="font-semibold text-slate-800 dark:text-slate-100">{r.customer_name}</div>
+                        {r.customer_phone && <div className="text-[11px] text-slate-500 dark:text-slate-400">{r.customer_phone}</div>}
                       </td>
-                      <td className="px-3 py-3 text-slate-700">{r.item_description}</td>
-                      <td className="px-3 py-3 text-slate-600 text-xs max-w-xs">
-                        {r.issue_description || <span className="italic text-slate-400">—</span>}
+                      <td className="px-3 py-3 text-slate-700 dark:text-slate-200">{r.item_description}</td>
+                      <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs max-w-xs">
+                        {r.issue_description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
                       </td>
-                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">
-                        {r.price > 0 ? `${fmtNum(r.price)} ${r.currency}` : <span className="text-slate-400">—</span>}
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">
+                        {r.price > 0 ? `${fmtNum(r.price)} ${r.currency}` : <span className="text-slate-400 dark:text-slate-500">—</span>}
                       </td>
                       <td className="px-3 py-3 text-center">
                         <span className={`badge inline-flex items-center gap-1.5 ${meta.cls}`}>
@@ -337,31 +337,31 @@ export default function Riparimet() {
                       </td>
                       <td className="px-3 py-3 text-center">
                         {r.paid
-                          ? <span className="badge bg-emerald-100 text-emerald-700">✓ Paguar</span>
-                          : <span className="badge bg-slate-100 text-slate-500">— </span>}
+                          ? <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">✓ Paguar</span>
+                          : <span className="badge bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">— </span>}
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-center gap-1 flex-wrap">
                           {r.status !== 'ne_pune' && r.status !== 'dorezuar' && (
                             <button onClick={() => quickStatus(r, 'ne_pune')}
-                              className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-[10px] font-semibold whitespace-nowrap"
+                              className="px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 text-amber-700 dark:text-amber-300 text-[10px] font-semibold whitespace-nowrap"
                               title="Shëno në punë">▶ Në punë</button>
                           )}
                           {r.status !== 'gati' && r.status !== 'dorezuar' && (
                             <button onClick={() => quickStatus(r, 'gati')}
-                              className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-semibold whitespace-nowrap"
+                              className="px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold whitespace-nowrap"
                               title="Shëno gati">✓ Gati</button>
                           )}
                           {r.status !== 'dorezuar' && (
                             <button onClick={() => quickStatus(r, 'dorezuar')}
-                              className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-semibold whitespace-nowrap"
+                              className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-[10px] font-semibold whitespace-nowrap"
                               title="Dorëzoje">📤 Dorëzo</button>
                           )}
                           <button onClick={() => setModal(r)}
-                            className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold">Edito</button>
+                            className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-semibold">Edito</button>
                           {isAdmin && (
                             <button onClick={() => setConfirmDel(r)}
-                              className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-semibold">Fshi</button>
+                              className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-[10px] font-semibold">Fshi</button>
                           )}
                         </div>
                       </td>
@@ -378,16 +378,16 @@ export default function Riparimet() {
         <div className="card">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div>
-              <h3 className="text-sm font-bold text-slate-800">📊 Përmbledhje</h3>
-              <p className="text-[11px] text-slate-500">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">📊 Përmbledhje</h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {statusFilter === 'all' && !search.trim()
                   ? 'Për të gjitha riparimet'
                   : `Për ${filtered.length} riparimet e filtruara`}
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
-              <span className="text-slate-600">Total riparime:</span>
-              <span className="text-2xl font-extrabold text-blue-700 tabular-nums">{summary.count}</span>
+              <span className="text-slate-600 dark:text-slate-300">Total riparime:</span>
+              <span className="text-2xl font-extrabold text-blue-700 dark:text-blue-300 tabular-nums">{summary.count}</span>
             </div>
           </div>
 
@@ -397,12 +397,12 @@ export default function Riparimet() {
               const meta = STATUS_META[s]
               const n = summary.statusCount[s] || 0
               return (
-                <div key={s} className={`rounded-lg p-2.5 border border-slate-200 flex items-center justify-between`}>
+                <div key={s} className={`rounded-lg p-2.5 border border-slate-200 dark:border-slate-700 flex items-center justify-between`}>
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${meta.dot}`} />
-                    <span className="text-xs font-semibold text-slate-700 truncate">{meta.label}</span>
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{meta.label}</span>
                   </div>
-                  <span className="text-lg font-bold text-slate-800 tabular-nums">{n}</span>
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{n}</span>
                 </div>
               )
             })}
@@ -410,12 +410,12 @@ export default function Riparimet() {
 
           {/* Totalet sipas monedhës */}
           {Object.keys(summary.byCur).length === 0 ? (
-            <p className="text-xs text-slate-400 italic">Asnjë çmim i vendosur për këto riparime.</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 italic">Asnjë çmim i vendosur për këto riparime.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="bg-slate-50">
-                  <tr className="text-slate-500 uppercase text-[10px]">
+                <thead className="bg-slate-50 dark:bg-slate-900">
+                  <tr className="text-slate-500 dark:text-slate-400 uppercase text-[10px]">
                     <th className="px-3 py-2 text-left font-semibold">Monedha</th>
                     <th className="px-3 py-2 text-right font-semibold">Total</th>
                     <th className="px-3 py-2 text-right font-semibold">✓ Paguar</th>
@@ -424,18 +424,18 @@ export default function Riparimet() {
                 </thead>
                 <tbody>
                   {Object.entries(summary.byCur).sort(([a],[b]) => a.localeCompare(b)).map(([cur, s]) => (
-                    <tr key={cur} className="border-t border-slate-100">
+                    <tr key={cur} className="border-t border-slate-100 dark:border-slate-800">
                       <td className="px-3 py-2">
-                        <span className="badge bg-blue-100 text-blue-700">{cur}</span>
+                        <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{cur}</span>
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-800">{fmtNum(s.total)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                      <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-800 dark:text-slate-100">{fmtNum(s.total)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">
                         {fmtNum(s.paid)}
-                        <span className="ml-1 text-[10px] text-slate-400">({s.paidCount})</span>
+                        <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">({s.paidCount})</span>
                       </td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${s.unpaid > 0.005 ? 'text-red-700 font-semibold' : 'text-slate-400'}`}>
+                      <td className={`px-3 py-2 text-right tabular-nums ${s.unpaid > 0.005 ? 'text-red-700 dark:text-red-300 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                         {s.unpaid > 0.005 ? fmtNum(s.unpaid) : '—'}
-                        {s.unpaidCount > 0 && <span className="ml-1 text-[10px] text-slate-400">({s.unpaidCount})</span>}
+                        {s.unpaidCount > 0 && <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">({s.unpaidCount})</span>}
                       </td>
                     </tr>
                   ))}
@@ -457,9 +457,9 @@ export default function Riparimet() {
       {confirmDel && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setConfirmDel(null)}>
           <div className="modal-box max-w-md">
-            <div className="modal-header"><h3 className="font-bold text-slate-800">Konfirmo fshirjen</h3></div>
+            <div className="modal-header"><h3 className="font-bold text-slate-800 dark:text-slate-100">Konfirmo fshirjen</h3></div>
             <div className="modal-body">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
                 Fshi riparimin e <span className="font-semibold">{confirmDel.customer_name}</span>
                 {' '}— {confirmDel.item_description}?
               </p>

@@ -26,7 +26,7 @@ export default function CommentToast({ onOpenKomentet }) {
       {toasts.slice(-3).map(t => (
         <div
           key={t.id}
-          className="bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden animate-slide-in-right"
+          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-slide-in-right"
           role="alert"
         >
           <div className="flex items-start gap-2 p-3">
@@ -35,16 +35,16 @@ export default function CommentToast({ onOpenKomentet }) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-slate-800 truncate">
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
                   {t.username}
                 </p>
                 <button
                   onClick={() => dismissCommentToast(t.id)}
-                  className="text-slate-400 hover:text-slate-600 text-sm leading-none"
+                  className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-sm leading-none"
                   aria-label="Mbyll"
                 >✕</button>
               </div>
-              <p className="text-xs text-slate-600 mt-0.5 break-words line-clamp-2">
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 break-words line-clamp-2">
                 {t.body}
               </p>
               <button

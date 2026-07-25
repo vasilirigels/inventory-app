@@ -116,23 +116,23 @@ export default function MonthlyReport({ month: initialMonth, onNavigate }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-bold text-slate-800">Përmbledhëse Mujore — {monthLabel}</h3>
-          <p className="text-xs text-slate-500 mt-1">Agregim i të gjithë sektorëve të arkës + ndarje ditore e shitjeve sipas kategorisë.</p>
+          <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Përmbledhëse Mujore — {monthLabel}</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Agregim i të gjithë sektorëve të arkës + ndarje ditore e shitjeve sipas kategorisë.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setMonth(prevMonth(month))} className="w-8 h-8 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700">‹</button>
+          <button onClick={() => setMonth(prevMonth(month))} className="w-8 h-8 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200">‹</button>
           <input
             type="month" value={month}
             onChange={e => setMonth(e.target.value)}
-            className="px-2 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-2 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button onClick={() => setMonth(nextMonth(month))} className="w-8 h-8 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700">›</button>
+          <button onClick={() => setMonth(nextMonth(month))} className="w-8 h-8 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200">›</button>
         </div>
       </div>
 
-      {loading && <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">Duke ngarkuar…</div>}
+      {loading && <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center text-slate-500 dark:text-slate-400">Duke ngarkuar…</div>}
 
       {!loading && (
         <>
@@ -168,12 +168,12 @@ export default function MonthlyReport({ month: initialMonth, onNavigate }) {
           </div>
 
           {/* ── Per-day sales breakdown ── */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 overflow-x-auto">
-            <h4 className="text-sm font-bold text-slate-800 mb-3">Shitjet ditore sipas kategorisë</h4>
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 overflow-x-auto">
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-3">Shitjet ditore sipas kategorisë</h4>
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-slate-900 text-white">
-                  <th className="px-2 py-2 sticky left-0 bg-slate-900 text-left">Data</th>
+                <tr className="bg-slate-900 dark:bg-slate-950 text-white">
+                  <th className="px-2 py-2 sticky left-0 bg-slate-900 dark:bg-slate-950 text-left">Data</th>
                   <th className="px-2 py-2 bg-yellow-800" colSpan={5}>FLORI</th>
                   <th className="px-2 py-2 bg-blue-800" colSpan={5}>DIAMANT</th>
                   <th className="px-2 py-2 bg-purple-800" colSpan={5}>ONLINE & STAFI</th>
@@ -187,11 +187,11 @@ export default function MonthlyReport({ month: initialMonth, onNavigate }) {
               </thead>
               <tbody>
                 {perDay.length === 0 && (
-                  <tr><td colSpan={16} className="text-center text-slate-400 py-6">Nuk ka të dhëna për këtë muaj.</td></tr>
+                  <tr><td colSpan={16} className="text-center text-slate-400 dark:text-slate-500 py-6">Nuk ka të dhëna për këtë muaj.</td></tr>
                 )}
                 {perDay.map((d, i) => (
-                  <tr key={d.date} className={`border-b border-slate-100 hover:bg-yellow-50 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}`}>
-                    <td className="px-2 py-1.5 sticky left-0 bg-inherit text-slate-700 font-medium whitespace-nowrap">
+                  <tr key={d.date} className={`border-b border-slate-100 dark:border-slate-800 hover:bg-yellow-50 ${i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/60'}`}>
+                    <td className="px-2 py-1.5 sticky left-0 bg-inherit text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
                       {formatDate(d.date)}
                     </td>
                     <Td value={d.byType.flori.cope} />
@@ -243,19 +243,19 @@ export default function MonthlyReport({ month: initialMonth, onNavigate }) {
 function AggSection({ title, rows, cols }) {
   const CUR_LABELS = { lek: 'LEK', eur: 'EUR', usd: 'USD', gbp: 'GBP', chf: 'CHF', gram: 'Gram', hurda: 'Hurda', has: 'HAS' }
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-      <h4 className="text-sm font-bold text-slate-800 mb-2">{title}</h4>
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4">
+      <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">{title}</h4>
       <table className="w-full text-xs">
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50">
-            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-slate-600">Zëri</th>
-            {cols.map(c => <th key={c} className="text-right px-2 py-1.5 text-[10px] font-semibold text-slate-600">{CUR_LABELS[c]}</th>)}
+          <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+            <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300">Zëri</th>
+            {cols.map(c => <th key={c} className="text-right px-2 py-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300">{CUR_LABELS[c]}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="border-b border-slate-100">
-              <td className="px-2 py-1.5 text-slate-700">{r.label}</td>
+            <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+              <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">{r.label}</td>
               {cols.map(c => <Td key={c} value={r[c]} />)}
             </tr>
           ))}

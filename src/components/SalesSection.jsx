@@ -120,7 +120,7 @@ function SaleRow({ sale, editingId, editRow, setEditRow, saveEdit, cancelEdit, s
   const isEditing = editingId === sale.id
   if (isEditing) {
     return (
-      <tr className="bg-blue-50">
+      <tr className="bg-blue-50 dark:bg-blue-900/30">
         <InputCell field="barcode" obj={editRow} setObj={setEditRow} type="text" />
         <InputCell field="cope" obj={editRow} setObj={setEditRow} />
         <InputCell field="gram" obj={editRow} setObj={setEditRow} />
@@ -144,7 +144,7 @@ function SaleRow({ sale, editingId, editRow, setEditRow, saveEdit, cancelEdit, s
     )
   }
   return (
-    <tr className={`border-b hover:bg-gray-50 ${sale.is_return ? 'bg-red-50' : ''}`}>
+    <tr className={`border-b hover:bg-gray-50 ${sale.is_return ? 'bg-red-50 dark:bg-red-900/30' : ''}`}>
       <td className="px-2 py-1.5 text-xs text-gray-600 max-w-[140px]">
         <div className="truncate">{sale.barcode || '-'}</div>
       </td>
@@ -491,11 +491,11 @@ export default function SalesSection({ date, type, onSaleChange }) {
 
       {/* ── Add Form ── */}
       {showAddForm && (
-        <div className={`card mb-4 border-2 ${newRow.is_return ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
-          <div className="section-title text-blue-700 mb-3">
+        <div className={`card mb-4 border-2 ${newRow.is_return ? 'bg-red-50 dark:bg-red-900/30 border-red-200' : 'bg-blue-50 dark:bg-blue-900/30 border-blue-200'}`}>
+          <div className="section-title text-blue-700 dark:text-blue-300 mb-3">
             {newRow.is_return ? '↩ Shto Kthim' : '+ Shto Shitje të Re'}
           </div>
-          <div className="flex items-center gap-2 mb-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2 mb-3 text-xs text-slate-500 dark:text-slate-400">
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0"></span>
             Skanues i gatshëm — vendosni barkodin ose skanoni
           </div>
@@ -514,13 +514,13 @@ export default function SalesSection({ date, type, onSaleChange }) {
                       placeholder="Barcode..."
                       autoFocus
                     />
-                    {lookupState === 'loading' && <div className="text-xs text-slate-400 mt-0.5">🔍 Duke kërkuar...</div>}
+                    {lookupState === 'loading' && <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">🔍 Duke kërkuar...</div>}
                     {lookupState === 'found' && foundProduct && (
-                      <div className="text-xs text-emerald-700 mt-0.5 font-medium truncate" title={foundProduct.name}>
+                      <div className="text-xs text-emerald-700 dark:text-emerald-300 mt-0.5 font-medium truncate" title={foundProduct.name}>
                         ✓ {foundProduct.name}{foundProduct.sell_price ? ` · €${foundProduct.sell_price}` : ''}
                       </div>
                     )}
-                    {lookupState === 'notfound' && <div className="text-xs text-slate-400 mt-0.5">Produkt i pagjetur</div>}
+                    {lookupState === 'notfound' && <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Produkt i pagjetur</div>}
                   </td>
                   <InputCell field="cope" obj={newRow} setObj={setNewRow} />
                   <InputCell field="gram" obj={newRow} setObj={setNewRow} />
@@ -548,19 +548,19 @@ export default function SalesSection({ date, type, onSaleChange }) {
             </table>
           </div>
           {foundProduct && (
-            <div className="mt-3 flex items-center gap-3 p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs">
+            <div className="mt-3 flex items-center gap-3 p-2.5 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl border border-emerald-200 text-xs">
               <span className="text-2xl">
                 {{'Unazë':'💍','Vathë':'✨','Byzylyk':'📿','Diamant':'💎','Ora':'⌚'}[foundProduct.category] || '📦'}
               </span>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-emerald-800 truncate">{foundProduct.name}</p>
+                <p className="font-semibold text-emerald-800 dark:text-emerald-200 truncate">{foundProduct.name}</p>
                 <p className="text-emerald-600">{foundProduct.category}{foundProduct.brand ? ` · ${foundProduct.brand}` : ''}</p>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className="font-bold text-emerald-800">€{foundProduct.sell_price}</p>
+                <p className="font-bold text-emerald-800 dark:text-emerald-200">€{foundProduct.sell_price}</p>
                 <p className="text-emerald-600">Stok: {foundProduct.stock}</p>
               </div>
-              <div className="text-xs text-slate-500 bg-white px-2 py-1 rounded-lg border">
+              <div className="text-xs text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border">
                 {newRow.is_return ? '+' : '−'}{parseInt(newRow.cope) || 1} cope pas ruajtjes
               </div>
             </div>
@@ -586,17 +586,17 @@ export default function SalesSection({ date, type, onSaleChange }) {
             </tbody>
             {normalSales.length > 0 && (
               <tfoot>
-                <tr className="bg-blue-50 font-semibold text-xs border-t-2 border-blue-200">
+                <tr className="bg-blue-50 dark:bg-blue-900/30 font-semibold text-xs border-t-2 border-blue-200">
                   <td className="px-2 py-1.5 text-gray-600">TOTAL</td>
                   <td className="px-2 py-1.5 text-right">{totals.cope || '-'}</td>
                   <td className="px-2 py-1.5 text-right">{totals.gram ? totals.gram.toFixed(2) : '-'}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.lek_cash)}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.lek_pb)}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.eur_cash)}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.eur_pb)}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.usd_cash)}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.gbp_cash)}</td>
-                  <td className="px-2 py-1.5 text-right text-blue-700">{fmt(totals.chf_cash)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.lek_cash)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.lek_pb)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.eur_cash)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.eur_pb)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.usd_cash)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.gbp_cash)}</td>
+                  <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">{fmt(totals.chf_cash)}</td>
                   <td></td>
                   {showDiamondCols && <td></td>}
                   {showDiamondCols && <td></td>}
@@ -629,7 +629,7 @@ export default function SalesSection({ date, type, onSaleChange }) {
 
       {/* ── Summary Bar ── */}
       {normalSales.length > 0 && (
-        <div className="mt-4 p-3 bg-slate-900 text-white rounded-xl">
+        <div className="mt-4 p-3 bg-slate-900 dark:bg-slate-950 text-white rounded-xl">
           <div className="text-xs text-blue-400 mb-2 font-semibold uppercase tracking-wide">Permbledhje Shitjet</div>
           <div className="grid grid-cols-5 gap-3">
             {[['LEK', totals.lek_cash + totals.lek_pb],['EUR', totals.eur_cash + totals.eur_pb],['USD', totals.usd_cash],['GBP', totals.gbp_cash],['CHF', totals.chf_cash]].map(([cur, val]) => (
@@ -650,14 +650,14 @@ export default function SalesSection({ date, type, onSaleChange }) {
       {/* ── Import Modal ── */}
       {showImport && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
               <div>
-                <h3 className="text-base font-bold text-slate-800">📂 Import Excel — {title}</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Data: {date}</p>
+                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">📂 Import Excel — {title}</h3>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Data: {date}</p>
               </div>
-              <button onClick={closeImport} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+              <button onClick={closeImport} className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xl leading-none">✕</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -666,10 +666,10 @@ export default function SalesSection({ date, type, onSaleChange }) {
                   {/* File input row */}
                   <div className="flex gap-3">
                     <label className="flex-1 cursor-pointer">
-                      <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                      <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-4 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors">
                         <div className="text-2xl mb-1">📁</div>
-                        <p className="text-sm font-medium text-slate-700">Zgjidh file Excel (.xlsx)</p>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                        <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Zgjidh file Excel (.xlsx)</p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                           {importWb ? `✓ File u ngjark (${importAllRows.length} rreshta)` : 'Inventory.xlsx ose template'}
                         </p>
                       </div>
@@ -686,11 +686,11 @@ export default function SalesSection({ date, type, onSaleChange }) {
 
                   {/* Inventory.xlsx format detected */}
                   {importWb && importIsInv && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                      <p className="text-sm font-semibold text-emerald-700 mb-3">✓ Formati Inventar Excel u detektua</p>
+                    <div className="bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-3">✓ Formati Inventar Excel u detektua</p>
                       <div className="flex items-center gap-3 flex-wrap">
                         <div className="flex items-center gap-2">
-                          <label className="text-sm text-slate-600 font-medium">Dita (sheet):</label>
+                          <label className="text-sm text-slate-600 dark:text-slate-300 font-medium">Dita (sheet):</label>
                           <select
                             value={importSheetName}
                             onChange={e => handleInvSheetChange(e.target.value)}
@@ -701,7 +701,7 @@ export default function SalesSection({ date, type, onSaleChange }) {
                               .map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </div>
-                        <span className="text-xs text-slate-500 bg-white px-2 py-1 rounded-lg border">
+                        <span className="text-xs text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border">
                           Seksioni: <strong>{title}</strong>
                         </span>
                       </div>
@@ -710,12 +710,12 @@ export default function SalesSection({ date, type, onSaleChange }) {
 
                   {/* Flat format mapping info */}
                   {importWb && !importIsInv && Object.keys(importFlatMapping).length > 0 && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                      <p className="text-sm font-medium text-blue-700 mb-2">Kolonat e detektuara automatikisht:</p>
+                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 rounded-xl p-4">
+                      <p className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">Kolonat e detektuara automatikisht:</p>
                       <div className="flex flex-wrap gap-1.5">
                         {Object.entries(importFlatMapping).map(([field, ci]) => (
-                          <span key={field} className="text-xs bg-white px-2 py-1 rounded-lg border border-blue-200 text-slate-600">
-                            <span className="text-slate-400">{field}</span> → <span className="font-medium text-blue-700">{importFlatHeaders[ci]}</span>
+                          <span key={field} className="text-xs bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border border-blue-200 text-slate-600 dark:text-slate-300">
+                            <span className="text-slate-400 dark:text-slate-500">{field}</span> → <span className="font-medium text-blue-700 dark:text-blue-300">{importFlatHeaders[ci]}</span>
                           </span>
                         ))}
                       </div>
@@ -725,33 +725,33 @@ export default function SalesSection({ date, type, onSaleChange }) {
                   {/* Preview table */}
                   {importPreview.length > 0 && (
                     <div>
-                      <p className="text-sm font-semibold text-slate-700 mb-2">
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">
                         Parapamje — {importAllRows.length} rreshta ({importAllRows.filter(r => r.is_return).length} kthime)
                       </p>
-                      <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
                         <table className="w-full text-xs">
-                          <thead className="bg-slate-50 border-b border-slate-200">
+                          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                             <tr>
-                              <th className="px-3 py-2 text-left font-medium text-slate-500">Barkodi</th>
-                              <th className="px-2 py-2 text-right font-medium text-slate-500">Copë</th>
-                              <th className="px-2 py-2 text-right font-medium text-slate-500">Gram</th>
-                              <th className="px-2 py-2 text-right font-medium text-slate-500">LEK</th>
-                              <th className="px-2 py-2 text-right font-medium text-slate-500">EUR</th>
-                              <th className="px-2 py-2 text-right font-medium text-slate-500">USD</th>
-                              <th className="px-2 py-2 text-center font-medium text-slate-500">Lloji</th>
+                              <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Barkodi</th>
+                              <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Copë</th>
+                              <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Gram</th>
+                              <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">LEK</th>
+                              <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">EUR</th>
+                              <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">USD</th>
+                              <th className="px-2 py-2 text-center font-medium text-slate-500 dark:text-slate-400">Lloji</th>
                             </tr>
                           </thead>
                           <tbody>
                             {importPreview.map((row, i) => (
-                              <tr key={i} className={`border-t border-slate-100 ${row.is_return ? 'bg-red-50' : ''}`}>
-                                <td className="px-3 py-1.5 text-slate-600 font-mono">{row.barcode || '—'}</td>
+                              <tr key={i} className={`border-t border-slate-100 dark:border-slate-800 ${row.is_return ? 'bg-red-50 dark:bg-red-900/30' : ''}`}>
+                                <td className="px-3 py-1.5 text-slate-600 dark:text-slate-300 font-mono">{row.barcode || '—'}</td>
                                 <td className="px-2 py-1.5 text-right">{row.cope || '—'}</td>
                                 <td className="px-2 py-1.5 text-right">{row.gram ? parseFloat(row.gram).toFixed(2) : '—'}</td>
                                 <td className="px-2 py-1.5 text-right">
                                   {(n(row.lek_cash) + n(row.lek_pb)) > 0
                                     ? (n(row.lek_cash) + n(row.lek_pb)).toLocaleString('sq-AL') : '—'}
                                 </td>
-                                <td className="px-2 py-1.5 text-right text-blue-700">
+                                <td className="px-2 py-1.5 text-right text-blue-700 dark:text-blue-300">
                                   {(n(row.eur_cash) + n(row.eur_pb)) > 0
                                     ? `€${(n(row.eur_cash) + n(row.eur_pb)).toFixed(2)}` : '—'}
                                 </td>
@@ -761,13 +761,13 @@ export default function SalesSection({ date, type, onSaleChange }) {
                                 <td className="px-2 py-1.5 text-center">
                                   {row.is_return
                                     ? <span className="badge badge-red text-xs">Kthim</span>
-                                    : <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">Shitje</span>}
+                                    : <span className="text-xs bg-green-100 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full">Shitje</span>}
                                 </td>
                               </tr>
                             ))}
                             {importAllRows.length > 10 && (
-                              <tr className="border-t border-slate-100 bg-slate-50">
-                                <td colSpan={7} className="px-3 py-2 text-center text-xs text-slate-400">
+                              <tr className="border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+                                <td colSpan={7} className="px-3 py-2 text-center text-xs text-slate-400 dark:text-slate-500">
                                   + {importAllRows.length - 10} rreshta të tjerë
                                 </td>
                               </tr>
@@ -779,7 +779,7 @@ export default function SalesSection({ date, type, onSaleChange }) {
                   )}
 
                   {importWb && importAllRows.length === 0 && (
-                    <div className="text-center py-8 text-slate-400">
+                    <div className="text-center py-8 text-slate-400 dark:text-slate-500">
                       <div className="text-3xl mb-2">📭</div>
                       <p className="text-sm">Nuk u gjetën të dhëna në këtë sheet</p>
                       <p className="text-xs mt-1">Provoni sheet tjetër ose shkarkoni template</p>
@@ -789,16 +789,16 @@ export default function SalesSection({ date, type, onSaleChange }) {
               ) : (
                 <div className="text-center py-10">
                   <div className="text-5xl mb-4">✅</div>
-                  <p className="text-2xl font-bold text-slate-800">{importDone.ok} rreshta u importuan</p>
+                  <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">{importDone.ok} rreshta u importuan</p>
                   {importDone.skip > 0 && (
-                    <p className="text-sm text-slate-400 mt-2">{importDone.skip} u kaluan (bosh ose gabim)</p>
+                    <p className="text-sm text-slate-400 dark:text-slate-500 mt-2">{importDone.skip} u kaluan (bosh ose gabim)</p>
                   )}
                 </div>
               )}
             </div>
 
             {/* Modal footer */}
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700">
               <button onClick={closeImport} className="btn-secondary">
                 {importDone ? 'Mbyll' : 'Anulo'}
               </button>

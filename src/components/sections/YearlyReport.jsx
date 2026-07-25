@@ -54,31 +54,31 @@ export default function YearlyReport({ initialYear }) {
 
   return (
     <div className="max-w-full">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-3 flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 mb-3 flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-bold text-slate-800">Përmbledhëse Vjetore</h3>
-          <p className="text-xs text-slate-500 mt-1">Një rresht për çdo muaj me agregimin e arkës, shpenzimeve, BIBA/DIANA, bankës dhe llogaritjes së Arka neto.</p>
+          <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Përmbledhëse Vjetore</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Një rresht për çdo muaj me agregimin e arkës, shpenzimeve, BIBA/DIANA, bankës dhe llogaritjes së Arka neto.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setYear(y => y - 1)} className="w-8 h-8 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700">‹</button>
+          <button onClick={() => setYear(y => y - 1)} className="w-8 h-8 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200">‹</button>
           <input
             type="number" value={year}
             onChange={e => setYear(parseInt(e.target.value) || now.getFullYear())}
-            className="w-24 text-center px-2 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-24 text-center px-2 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button onClick={() => setYear(y => y + 1)} className="w-8 h-8 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700">›</button>
+          <button onClick={() => setYear(y => y + 1)} className="w-8 h-8 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200">›</button>
         </div>
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">Duke ngarkuar…</div>
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center text-slate-500 dark:text-slate-400">Duke ngarkuar…</div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="bg-slate-900 text-white">
-                <th className="px-2 py-2 sticky left-0 bg-slate-900 z-10 text-left">#</th>
-                <th className="px-2 py-2 sticky left-8 bg-slate-900 z-10 text-left">Muaji</th>
+              <tr className="bg-slate-900 dark:bg-slate-950 text-white">
+                <th className="px-2 py-2 sticky left-0 bg-slate-900 dark:bg-slate-950 z-10 text-left">#</th>
+                <th className="px-2 py-2 sticky left-8 bg-slate-900 dark:bg-slate-950 z-10 text-left">Muaji</th>
                 <th className="px-2 py-2 bg-emerald-800">Xhiro LEK</th>
                 <th className="px-2 py-2 bg-emerald-800">Xhiro EUR</th>
                 <th className="px-2 py-2 bg-emerald-800">Xhiro USD</th>
@@ -107,22 +107,22 @@ export default function YearlyReport({ initialYear }) {
             </thead>
             <tbody>
               {data.map((r, i) => (
-                <tr key={r.month} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'} ${r.days_with_data === 0 ? 'opacity-50' : ''}`}>
-                  <td className="px-2 py-2 sticky left-0 bg-inherit z-10 font-medium text-slate-600">{r.month}</td>
-                  <td className="px-2 py-2 sticky left-8 bg-inherit z-10 font-semibold text-slate-800 whitespace-nowrap">{ALBANIAN_MONTHS[r.month]}</td>
-                  <Td value={r.xhiro_lek}     className="text-emerald-700" />
-                  <Td value={r.xhiro_eur}     className="text-emerald-700" />
-                  <Td value={r.xhiro_usd}     className="text-emerald-700" />
+                <tr key={r.month} className={`border-b border-slate-100 dark:border-slate-800 ${i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/60'} ${r.days_with_data === 0 ? 'opacity-50' : ''}`}>
+                  <td className="px-2 py-2 sticky left-0 bg-inherit z-10 font-medium text-slate-600 dark:text-slate-300">{r.month}</td>
+                  <td className="px-2 py-2 sticky left-8 bg-inherit z-10 font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{ALBANIAN_MONTHS[r.month]}</td>
+                  <Td value={r.xhiro_lek}     className="text-emerald-700 dark:text-emerald-300" />
+                  <Td value={r.xhiro_eur}     className="text-emerald-700 dark:text-emerald-300" />
+                  <Td value={r.xhiro_usd}     className="text-emerald-700 dark:text-emerald-300" />
                   <Td value={r.shpenzime_lek} className="text-rose-600" />
                   <Td value={r.shpenzime_eur} className="text-rose-600" />
-                  <Td value={r.borxhe_lek}    className="text-amber-700" />
-                  <Td value={r.borxhe_eur}    className="text-amber-700" />
+                  <Td value={r.borxhe_lek}    className="text-amber-700 dark:text-amber-300" />
+                  <Td value={r.borxhe_eur}    className="text-amber-700 dark:text-amber-300" />
                   <Td value={r.kthim_borxhi_lek} />
                   <Td value={r.kthim_borxhi_eur} />
-                  <Td value={r.biba_lek}      className="text-purple-700" />
-                  <Td value={r.biba_eur}      className="text-purple-700" />
-                  <Td value={r.diana_lek}     className="text-purple-700" />
-                  <Td value={r.diana_eur}     className="text-purple-700" />
+                  <Td value={r.biba_lek}      className="text-purple-700 dark:text-purple-300" />
+                  <Td value={r.biba_eur}      className="text-purple-700 dark:text-purple-300" />
+                  <Td value={r.diana_lek}     className="text-purple-700 dark:text-purple-300" />
+                  <Td value={r.diana_eur}     className="text-purple-700 dark:text-purple-300" />
                   <Td value={r.shlyerje_eur}  className="text-pink-700" />
                   <Td value={r.shlyerje_usd}  className="text-pink-700" />
                   <Td value={r.konv_eur} />
@@ -138,11 +138,11 @@ export default function YearlyReport({ initialYear }) {
               ))}
             </tbody>
             <tfoot>
-              <tr className="bg-slate-100 font-bold border-t-2 border-slate-300">
-                <td colSpan={2} className="px-2 py-2 sticky left-0 bg-slate-100">TOTAL</td>
-                <Td value={total.xhiro_lek} className="text-emerald-700" />
-                <Td value={total.xhiro_eur} className="text-emerald-700" />
-                <Td value={total.xhiro_usd} className="text-emerald-700" />
+              <tr className="bg-slate-100 dark:bg-slate-800 font-bold border-t-2 border-slate-300 dark:border-slate-700">
+                <td colSpan={2} className="px-2 py-2 sticky left-0 bg-slate-100 dark:bg-slate-800">TOTAL</td>
+                <Td value={total.xhiro_lek} className="text-emerald-700 dark:text-emerald-300" />
+                <Td value={total.xhiro_eur} className="text-emerald-700 dark:text-emerald-300" />
+                <Td value={total.xhiro_usd} className="text-emerald-700 dark:text-emerald-300" />
                 <Td value={total.shpenzime_lek} className="text-rose-600" />
                 <Td value={total.shpenzime_eur} className="text-rose-600" />
                 <Td value={total.borxhe_lek} />

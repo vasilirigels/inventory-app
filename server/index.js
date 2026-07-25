@@ -1729,6 +1729,11 @@ app.post('/api/invoices', async (req, res) => {
     const d = req.body || {};
     const date = d.date;
     if (!date) return res.status(400).json({ error: 'date required' });
+    // Backdating (data më e vjetër se sot) lejohet vetëm për admin. Sales lejohet
+    // vetëm data e sotme — përndryshe do të kalonin shitje ditore në ditë të gabuara.
+    if (req.user?.role !== 'admin' && date !== new Date().toISOString().slice(0, 10)) {
+      return res.status(403).json({ error: 'only admin can set a non-today date' });
+    }
     const userProvidedNo = (d.invoice_no || '').trim();
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
@@ -1829,6 +1834,14 @@ app.put('/api/invoices/:id', async (req, res) => {
     const d = req.body || {};
     const existing = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
+    // Sales nuk mund ta ndryshojë datën e faturës (nga sot në një ditë tjetër),
+    // dhe as të mbajë të vjetër një datë të vjetër. Vetëm admin ka të drejtë.
+    if (req.user?.role !== 'admin') {
+      const today = new Date().toISOString().slice(0, 10);
+      if (d.date && d.date !== today) {
+        return res.status(403).json({ error: 'only admin can set a non-today date' });
+      }
+    }
     const oldItems = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));

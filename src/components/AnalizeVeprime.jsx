@@ -110,10 +110,10 @@ function exportActivityPdf(enriched, totals, client, dateRange, currencyByInvoic
 }
 
 function pmBadge(pm) {
-  if (pm === 'debt') return <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
-  if (pm === 'bank') return <span className="badge bg-blue-100 text-blue-700">🏦 Bankë</span>
-  if (pm === 'pos')  return <span className="badge bg-purple-100 text-purple-700">💳 POS</span>
-  return <span className="badge bg-emerald-100 text-emerald-700">💵 Cash</span>
+  if (pm === 'debt') return <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
+  if (pm === 'bank') return <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
+  if (pm === 'pos')  return <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
+  return <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
 }
 
 
@@ -135,21 +135,21 @@ function ClientsList({ selected, onPick, dateRange }) {
   }, [dateRange?.from, dateRange?.to])
 
   if (loading) {
-    return <div className="card p-6 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+    return <div className="card p-6 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
   }
 
   return (
     <div className="card p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
-        <h3 className="text-sm font-bold text-slate-800">Klientët (A → Z)</h3>
-        <p className="text-[10px] text-slate-500">{rows.length} klientë me fatura</p>
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Klientët (A → Z)</h3>
+        <p className="text-[10px] text-slate-500 dark:text-slate-400">{rows.length} klientë me fatura</p>
       </div>
       {rows.length === 0 ? (
-        <div className="p-8 text-center text-slate-400 text-sm">
+        <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">
           Asnjë klient i regjistruar në fatura
         </div>
       ) : (
-        <ul className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[65vh] overflow-y-auto">
           {rows.map((r, i) => {
             const isSel = selected && (
               (selected.nipt && r.customer_nipt && selected.nipt === r.customer_nipt) ||
@@ -160,17 +160,17 @@ function ClientsList({ selected, onPick, dateRange }) {
               <li key={i}>
                 <button
                   onClick={() => onPick({ name: r.customer_name, nipt: r.customer_nipt })}
-                  className={`w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors ${isSel ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
+                  className={`w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors ${isSel ? 'bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500' : ''}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-slate-800 truncate">
-                        {r.customer_name || <span className="italic text-slate-400">— pa emër —</span>}
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                        {r.customer_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
                       </p>
-                      <p className="text-[10px] text-slate-500 font-mono truncate">{r.customer_nipt || '—'}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono truncate">{r.customer_nipt || '—'}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] text-slate-500">{r.invoice_count}f.</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">{r.invoice_count}f.</p>
                       {due > 0.005 && <p className="text-xs font-bold text-red-600 tabular-nums">{fmt(due)}</p>}
                     </div>
                   </div>
@@ -220,7 +220,7 @@ function ClientSearch({ value, onPick, onClear }) {
     <div ref={boxRef} className="relative">
       <div className="flex gap-2">
         <div className="flex-1 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text" value={query}
             placeholder="Kërko klient — emër, NIPT, telefon..."
@@ -232,18 +232,18 @@ function ClientSearch({ value, onPick, onClear }) {
         {value && <button onClick={onClear} className="btn-secondary">Pastro</button>}
       </div>
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-72 overflow-y-auto">
-          {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-72 overflow-y-auto">
+          {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(c => (
             <button
               key={c.id}
               onClick={() => { onPick({ name: clientFullName(c) || c.nipt, nipt: c.nipt }); setOpen(false) }}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-sm font-medium text-slate-800">
-                {clientFullName(c) || <span className="italic text-slate-400">— pa emër —</span>}
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                {clientFullName(c) || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
               </div>
-              <div className="text-[11px] text-slate-500 font-mono">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                 {c.nipt || '—'}{c.phone ? ` · ${c.phone}` : ''}
               </div>
             </button>
@@ -276,16 +276,16 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
     return (
       <div className="card text-center py-16">
         <div className="text-5xl mb-3">👈</div>
-        <p className="text-slate-500">Zgjidh një klient nga lista majtas, ose kërko sipër.</p>
+        <p className="text-slate-500 dark:text-slate-400">Zgjidh një klient nga lista majtas, ose kërko sipër.</p>
       </div>
     )
   }
-  if (loading) return <div className="card text-center py-12 text-slate-400">Duke ngarkuar veprimet...</div>
+  if (loading) return <div className="card text-center py-12 text-slate-400 dark:text-slate-500">Duke ngarkuar veprimet...</div>
   if (!data || data.invoices.length === 0) {
     return (
       <div className="card text-center py-12">
         <div className="text-4xl mb-3">📭</div>
-        <p className="text-slate-500">Nuk ka asnjë faturë për këtë klient.</p>
+        <p className="text-slate-500 dark:text-slate-400">Nuk ka asnjë faturë për këtë klient.</p>
       </div>
     )
   }
@@ -411,14 +411,14 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
     <div className="space-y-4">
       {/* Chronological timeline */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-bold text-slate-800">Veprimet sipas Datës (Kronologjike)</h3>
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Veprimet sipas Datës (Kronologjike)</h3>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
               {enriched.length} veprime · Faturat dhe pagesat e mbyllura në regjistrim nga
-              <span className="ml-1 mr-1 badge bg-blue-100 text-blue-700">📄 FATURA SHITJE</span>
+              <span className="ml-1 mr-1 badge bg-blue-100 text-blue-700 dark:text-blue-300">📄 FATURA SHITJE</span>
               · Pagesat e mëvonshme nga
-              <span className="ml-1 badge bg-emerald-100 text-emerald-700">💰 Detyrime Klienti</span>
+              <span className="ml-1 badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💰 Detyrime Klienti</span>
             </p>
           </div>
           <div className="flex gap-2 flex-shrink-0">
@@ -435,15 +435,15 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
           </div>
         </div>
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
+          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Lloji & Burimi</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Detaje</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Debitim (+)</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Kreditim (−)</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Balanca</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Lloji & Burimi</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Detaje</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Debitim (+)</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kreditim (−)</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Balanca</th>
             </tr>
           </thead>
           <tbody>
@@ -456,38 +456,38 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                 const rate = n(inv.exchange_rate) || 1
                 const isForeign = (inv.currency || 'LEK') !== 'LEK'
                 return (
-                  <tr key={i} className={`border-b border-slate-100 ${isCredit ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50'}`}>
-                    <td className="px-4 py-2 text-slate-700 font-semibold">{ev.date}</td>
+                  <tr key={i} className={`border-b border-slate-100 dark:border-slate-800 ${isCredit ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                    <td className="px-4 py-2 text-slate-700 dark:text-slate-200 font-semibold">{ev.date}</td>
                     <td className="px-4 py-2">
                       {isCredit
-                        ? <span className="badge bg-red-100 text-red-700">↩️ Kreditore</span>
-                        : <span className="badge bg-blue-100 text-blue-700">📄 Faturë Shitje</span>}
-                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        ? <span className="badge bg-red-100 text-red-700 dark:text-red-300">↩️ Kreditore</span>
+                        : <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">📄 Faturë Shitje</span>}
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                         {isInstantClose
                           ? 'mbyllur në moment (Cash/POS)'
                           : 'do mbyllet nga Detyrime Klienti'}
                       </div>
                     </td>
-                    <td className="px-4 py-2 text-xs text-slate-600">
+                    <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">
                       <button
                         onClick={() => onNavigate?.('fatura-shitje', { date: inv.date, invoiceId: inv.id })}
                         className="font-mono font-semibold text-blue-600 hover:text-blue-800 hover:underline"
                         title="Hap këtë faturë"
                       >{inv.invoice_no}</button>
-                      <div className="text-[11px] text-slate-500">{pm === 'debt' ? '⚠️ Borxh' : pm === 'bank' ? '🏦 Bankë' : pm === 'pos' ? '💳 POS' : '💵 Cash'}</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">{pm === 'debt' ? '⚠️ Borxh' : pm === 'bank' ? '🏦 Bankë' : pm === 'pos' ? '💳 POS' : '💵 Cash'}</div>
                     </td>
                     <td className="px-4 py-2 text-center">
-                      <span className="badge bg-blue-100 text-blue-700">{inv.currency}</span>
+                      <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800">
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                       {fmt(inv.total_with_vat)}
                       {isForeign && (
-                        <div className="text-[10px] font-normal text-slate-500 italic">
+                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                           = {fmt(n(inv.total_with_vat) * rate)} LEK
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700">
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                       {ev.initialPaid > 0.005 ? fmt(ev.initialPaid) : '—'}
                       {isForeign && ev.initialPaid > 0.005 && (
                         <div className="text-[10px] font-normal text-emerald-600/70 italic">
@@ -495,7 +495,7 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                         </div>
                       )}
                     </td>
-                    <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                    <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                       {fmt(ev.balance)}
                     </td>
                   </tr>
@@ -507,16 +507,16 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
               const payCurrency = data.invoices.find(i => i.id === p.invoice_id)?.currency || 'LEK'
               const isForeign = payCurrency !== 'LEK'
               return (
-                <tr key={i} className="border-b border-slate-100 hover:bg-slate-50 bg-emerald-50/30">
-                  <td className="px-4 py-2 text-slate-700 font-semibold">{ev.date}</td>
+                <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 bg-emerald-50/30">
+                  <td className="px-4 py-2 text-slate-700 dark:text-slate-200 font-semibold">{ev.date}</td>
                   <td className="px-4 py-2">
-                    <span className="badge bg-emerald-100 text-emerald-700">💰 Pagesë</span>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
+                    <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💰 Pagesë</span>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                       {isInitBank ? 'pagesë në regjistrim (Bankë)' : 'nga Detyrime Klienti'}
                     </div>
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-600">
-                    <div className="text-slate-700">
+                  <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">
+                    <div className="text-slate-700 dark:text-slate-200">
                       për fat.{' '}
                       <button
                         onClick={() => onNavigate?.('fatura-shitje', { date: p.invoice_date, invoiceId: p.invoice_id })}
@@ -524,15 +524,15 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                         title="Hap këtë faturë"
                       >{p.invoice_no}</button>
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
                       {p.payment_method === 'bank' ? '🏦 Bankë' : p.payment_method === 'pos' ? '💳 POS' : '💵 Cash'}{p.notes ? ` · ${p.notes}` : ''}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-center">
-                    <span className="badge bg-blue-100 text-blue-700">{payCurrency}</span>
+                    <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{payCurrency}</span>
                   </td>
                   <td className="px-4 py-2"></td>
-                  <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700">
+                  <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(p.amount)}
                     {isForeign && (
                       <div className="text-[10px] font-normal text-emerald-600/70 italic">
@@ -540,27 +540,27 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                       </div>
                     )}
                   </td>
-                  <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                  <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                     {fmt(ev.balance)}
                   </td>
                 </tr>
               )
             })}
           </tbody>
-          <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+          <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-700">
             {currenciesInList.map((cur, idx) => {
               const t = totalsByCur[cur]
               return (
-                <tr key={cur} className={`bg-blue-50 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
-                  <td colSpan={3} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
+                <tr key={cur} className={`bg-blue-50 dark:bg-blue-900/30 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
+                  <td colSpan={3} className="px-4 py-3 text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
                     💱 TOTAL ({cur})
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className="badge bg-blue-200 text-blue-800">{cur}</span>
+                    <span className="badge bg-blue-200 text-blue-800 dark:text-blue-200">{cur}</span>
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.invoiced)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(t.paid)}</td>
-                  <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.invoiced)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(t.paid)}</td>
+                  <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                     {fmt(t.due)}
                   </td>
                 </tr>

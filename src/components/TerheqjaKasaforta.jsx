@@ -90,9 +90,9 @@ export default function TerheqjaKasaforta({ date }) {
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-lg font-bold text-slate-800">Tërheqje nga Kasaforta</h3>
-        <p className="text-xs text-slate-500 mt-1">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Tërheqje nga Kasaforta</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Regjistro çdo tërheqje me shumat për çdo monedhë, personin që i mori dhe një shënim opsional.
           Klik butonin "Regjistro Tërheqjen" për ta ruajtur.
         </p>
@@ -140,12 +140,12 @@ export default function TerheqjaKasaforta({ date }) {
               {saving ? '⏳ Duke ruajtur...' : '💾 Regjistro Tërheqjen'}
             </button>
             {msg && (
-              <span className={`text-sm font-medium ${msg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700'}`}>
+              <span className={`text-sm font-medium ${msg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                 {msg}
               </span>
             )}
-            <span className="ml-auto text-xs text-slate-500">
-              Data: <strong className="text-slate-700">{date}</strong>
+            <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
+              Data: <strong className="text-slate-700 dark:text-slate-200">{date}</strong>
             </span>
           </div>
         </form>
@@ -161,50 +161,50 @@ export default function TerheqjaKasaforta({ date }) {
         hint="Filtron historikun e tërheqjeve"
       />
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-0 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
-          <h4 className="text-sm font-bold text-slate-800">Historik i Tërheqjeve</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-0 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">Historik i Tërheqjeve</h4>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             {history.length} regjistrime · Totale:
             {CURS.filter(c => totals[c] > 0).map(c => (
-              <span key={c}> · <strong className="text-slate-700">{fmt(totals[c])} {c}</strong></span>
+              <span key={c}> · <strong className="text-slate-700 dark:text-slate-200">{fmt(totals[c])} {c}</strong></span>
             ))}
             {CURS.every(c => totals[c] === 0) && <span> —</span>}
           </p>
         </div>
 
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : history.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">
             Ende pa tërheqje të regjistruara.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Data</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Ora</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Ora</th>
                   {CURS.map(c => (
-                    <th key={c} className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">{c}</th>
+                    <th key={c} className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{c}</th>
                   ))}
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Personi</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Shënim</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Personi</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënim</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map(r => (
-                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2.5 text-slate-700 font-medium">{r.date}</td>
-                    <td className="px-3 py-2.5 text-slate-500 text-xs">{fmtDateTime(r.created_at)}</td>
+                  <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200 font-medium">{r.date}</td>
+                    <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400 text-xs">{fmtDateTime(r.created_at)}</td>
                     {CURS.map(c => (
-                      <td key={c} className="px-3 py-2.5 text-right tabular-nums font-semibold text-slate-800">
+                      <td key={c} className="px-3 py-2.5 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                         {fmt(r[`amount_${c.toLowerCase()}`])}
                       </td>
                     ))}
-                    <td className="px-3 py-2.5 text-slate-700">{r.person || <span className="text-slate-400 italic">—</span>}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.note || <span className="text-slate-400 italic">—</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">{r.person || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300">{r.note || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
                   </tr>
                 ))}
               </tbody>

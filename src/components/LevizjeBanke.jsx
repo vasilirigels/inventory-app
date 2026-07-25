@@ -106,8 +106,8 @@ export default function LevizjeBanke({ date }) {
 
       {/* Forma e re */}
       <div className="card">
-        <h3 className="text-lg font-bold text-slate-800">Lëvizje e Re Banke</h3>
-        <p className="text-xs text-slate-500 mt-1">
+        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Lëvizje e Re Banke</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Regjistro depozitim kesh në bankë, ose tërheqje nga banka për kasafortë.
         </p>
 
@@ -120,19 +120,19 @@ export default function LevizjeBanke({ date }) {
                 type="button"
                 onClick={() => setDirection('to_bank')}
                 className={`px-4 py-2 rounded-xl border font-semibold text-sm flex items-center gap-2 transition
-                  ${direction === 'to_bank' ? 'bg-emerald-100 border-emerald-400 text-emerald-800 ring-2 ring-emerald-200' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  ${direction === 'to_bank' ? 'bg-emerald-100 border-emerald-400 text-emerald-800 dark:text-emerald-200 ring-2 ring-emerald-200' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
               >
                 💵 <span>Arka → Bankë</span>
-                <span className="text-[10px] font-normal text-slate-500">(depozito)</span>
+                <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">(depozito)</span>
               </button>
               <button
                 type="button"
                 onClick={() => setDirection('to_safe')}
                 className={`px-4 py-2 rounded-xl border font-semibold text-sm flex items-center gap-2 transition
-                  ${direction === 'to_safe' ? 'bg-amber-100 border-amber-400 text-amber-800 ring-2 ring-amber-200' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  ${direction === 'to_safe' ? 'bg-amber-100 border-amber-400 text-amber-800 dark:text-amber-200 ring-2 ring-amber-200' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
               >
                 🏦 <span>Bankë → Kasafortë</span>
-                <span className="text-[10px] font-normal text-slate-500">(tërheqje)</span>
+                <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">(tërheqje)</span>
               </button>
             </div>
           </div>
@@ -177,12 +177,12 @@ export default function LevizjeBanke({ date }) {
               {saving ? '⏳ Duke ruajtur...' : (isToSafe ? '🏦 Regjistro Transferin në Kasafortë' : '💵 Regjistro Depozitën')}
             </button>
             {msg && (
-              <span className={`text-sm font-medium ${msg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700'}`}>
+              <span className={`text-sm font-medium ${msg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                 {msg}
               </span>
             )}
-            <span className="ml-auto text-xs text-slate-500">
-              Data: <strong className="text-slate-700">{date}</strong>
+            <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
+              Data: <strong className="text-slate-700 dark:text-slate-200">{date}</strong>
             </span>
           </div>
         </form>
@@ -201,9 +201,9 @@ export default function LevizjeBanke({ date }) {
 
       {/* Historik */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
-          <h4 className="text-sm font-bold text-slate-800">Historik i Lëvizjeve</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">Historik i Lëvizjeve</h4>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             {history.length} regjistrime
             {CURS.some(c => totals.to_bank[c] > 0 || totals.to_safe[c] > 0) && (
               <span>
@@ -211,13 +211,13 @@ export default function LevizjeBanke({ date }) {
                 {CURS.filter(c => totals.to_bank[c] > 0).map(c => (
                   <span key={'b'+c} className="mr-2">
                     <span className="text-emerald-600 font-semibold">→Bankë</span>{' '}
-                    <strong className="text-slate-700">{fmt(totals.to_bank[c])} {c}</strong>
+                    <strong className="text-slate-700 dark:text-slate-200">{fmt(totals.to_bank[c])} {c}</strong>
                   </span>
                 ))}
                 {CURS.filter(c => totals.to_safe[c] > 0).map(c => (
                   <span key={'s'+c} className="mr-2">
                     <span className="text-amber-600 font-semibold">→Kasafortë</span>{' '}
-                    <strong className="text-slate-700">{fmt(totals.to_safe[c])} {c}</strong>
+                    <strong className="text-slate-700 dark:text-slate-200">{fmt(totals.to_safe[c])} {c}</strong>
                   </span>
                 ))}
               </span>
@@ -226,48 +226,48 @@ export default function LevizjeBanke({ date }) {
         </div>
 
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : history.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Ende pa lëvizje të regjistruara.</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Ende pa lëvizje të regjistruara.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Data</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Drejtimi</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Drejtimi</th>
                   {CURS.map(c => (
-                    <th key={c} className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">{c}</th>
+                    <th key={c} className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{c}</th>
                   ))}
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Personi</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Shënim</th>
-                  <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase">Kohë</th>
-                  <th className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase"></th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Personi</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënim</th>
+                  <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kohë</th>
+                  <th className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase"></th>
                 </tr>
               </thead>
               <tbody>
                 {history.map(r => (
-                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2.5 text-slate-700 font-medium">{r.date}</td>
+                  <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200 font-medium">{r.date}</td>
                     <td className="px-3 py-2.5">
                       {r.direction === 'to_bank'
-                        ? <span className="badge bg-emerald-100 text-emerald-800 text-[10px]">💵 → Bankë</span>
-                        : <span className="badge bg-amber-100 text-amber-800 text-[10px]">🏦 → Kasafortë</span>}
+                        ? <span className="badge bg-emerald-100 text-emerald-800 dark:text-emerald-200 text-[10px]">💵 → Bankë</span>
+                        : <span className="badge bg-amber-100 text-amber-800 dark:text-amber-200 text-[10px]">🏦 → Kasafortë</span>}
                     </td>
                     {CURS.map(c => {
                       const v = r[`amount_${c.toLowerCase()}`] || 0
                       const cls = v > 0
-                        ? (r.direction === 'to_bank' ? 'text-emerald-700' : 'text-amber-700')
-                        : 'text-slate-400'
+                        ? (r.direction === 'to_bank' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')
+                        : 'text-slate-400 dark:text-slate-500'
                       return (
                         <td key={c} className={`px-3 py-2.5 text-right tabular-nums font-semibold ${cls}`}>
                           {fmt(v)}
                         </td>
                       )
                     })}
-                    <td className="px-3 py-2.5 text-slate-700">{r.person || <span className="text-slate-400 italic">—</span>}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.note || <span className="text-slate-400 italic">—</span>}</td>
-                    <td className="px-3 py-2.5 text-slate-500 text-xs text-center">{fmtDateTime(r.created_at)}</td>
+                    <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">{r.person || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300">{r.note || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400 text-xs text-center">{fmtDateTime(r.created_at)}</td>
                     <td className="px-3 py-2.5 text-right">
                       <button onClick={() => setConfirmDel(r)}
                         className="text-xs text-rose-600 hover:bg-rose-50 rounded-lg px-2 py-1 font-medium">
@@ -285,11 +285,11 @@ export default function LevizjeBanke({ date }) {
       {/* Konfirm Fshirje */}
       {confirmDel && (
         <div className="modal-overlay">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
             <div className="text-center">
               <div className="w-16 h-16 bg-rose-100 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🗑️</div>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Fshi Lëvizjen?</h3>
-              <p className="text-slate-500 text-sm mb-6">
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Fshi Lëvizjen?</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
                 Kjo lëvizje bankë ({confirmDel.date} · {confirmDel.direction === 'to_bank' ? 'Arka → Bankë' : 'Bankë → Kasafortë'}) do të hiqet përgjithmonë.
               </p>
               <div className="flex gap-3">

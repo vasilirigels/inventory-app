@@ -59,8 +59,8 @@ export default function DateRangeFilter({ from, to, onChange, loading, emptyForA
       <div className="flex items-center gap-2">
         <span className="text-2xl">📅</span>
         <div>
-          <p className="text-sm font-semibold text-slate-700 leading-none">Filtër Periudhe</p>
-          {hint && <p className="text-[10px] text-slate-500 mt-0.5">{hint}</p>}
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 leading-none">Filtër Periudhe</p>
+          {hint && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{hint}</p>}
         </div>
       </div>
       <div>
@@ -85,7 +85,7 @@ export default function DateRangeFilter({ from, to, onChange, loading, emptyForA
         <button type="button" onClick={() => setRange('all')}       disabled={longPresetsDisabled} title={disabledTitle} className="btn-secondary text-xs disabled:opacity-40 disabled:cursor-not-allowed">Të gjitha</button>
       </div>
       {loading && (
-        <span className="text-[11px] text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200">
+        <span className="text-[11px] text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg border border-blue-200">
           ⏳ Duke ngarkuar...
         </span>
       )}

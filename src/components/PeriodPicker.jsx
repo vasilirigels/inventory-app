@@ -45,16 +45,16 @@ export default function PeriodPicker({
 }) {
   return (
     <div className="flex items-end gap-2 flex-wrap">
-      <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+      <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
         <button
           type="button"
           onClick={() => onModeChange('month')}
-          className={`px-3 py-1.5 text-xs font-semibold ${mode === 'month' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+          className={`px-3 py-1.5 text-xs font-semibold ${mode === 'month' ? 'bg-slate-800 dark:bg-slate-900 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
         >Mujor</button>
         <button
           type="button"
           onClick={() => onModeChange('year')}
-          className={`px-3 py-1.5 text-xs font-semibold border-l border-slate-200 ${mode === 'year' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+          className={`px-3 py-1.5 text-xs font-semibold border-l border-slate-200 dark:border-slate-700 ${mode === 'year' ? 'bg-slate-800 dark:bg-slate-900 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
         >Vjetor</button>
       </div>
       {mode === 'month' ? (

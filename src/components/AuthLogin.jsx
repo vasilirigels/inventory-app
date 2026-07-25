@@ -30,12 +30,12 @@ export default function AuthLogin({ onLoggedIn }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center p-4">
       <div className="card w-full max-w-sm">
         <div className="text-center mb-6">
           <div className="text-4xl mb-2">💍</div>
-          <h1 className="text-xl font-bold text-slate-800">Gold Shop</h1>
-          <p className="text-xs text-slate-500 mt-1">Hyr në llogari</p>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Gold Shop</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Hyr në llogari</p>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div>

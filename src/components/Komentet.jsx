@@ -148,8 +148,8 @@ export default function Komentet() {
   return (
     <div className="flex flex-col h-full max-h-full">
       <div className="mb-3">
-        <h2 className="text-lg font-bold text-slate-800">Komentet</h2>
-        <p className="text-xs text-slate-500">
+        <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Komentet</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Chat i brendshëm midis përdoruesve — të gjithë e shikojnë e mund të shkruajnë.
         </p>
       </div>
@@ -158,14 +158,14 @@ export default function Komentet() {
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50"
+          className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 dark:bg-slate-900"
         >
           {loading ? (
-            <div className="text-center text-slate-400 text-sm py-8">Duke ngarkuar…</div>
+            <div className="text-center text-slate-400 dark:text-slate-500 text-sm py-8">Duke ngarkuar…</div>
           ) : messages.length === 0 ? (
             <div className="text-center py-16">
               <div className="text-5xl mb-3">💬</div>
-              <p className="text-slate-500 text-sm">
+              <p className="text-slate-500 dark:text-slate-400 text-sm">
                 Ende s'ka komente. Shkruaj i pari!
               </p>
             </div>
@@ -179,24 +179,24 @@ export default function Komentet() {
                 </div>
                 <div className={`max-w-[75%] ${mine ? 'items-end' : 'items-start'} flex flex-col`}>
                   <div className={`flex items-baseline gap-2 text-xs mb-0.5 ${mine ? 'flex-row-reverse' : ''}`}>
-                    <span className="font-semibold text-slate-700">{m.username}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${m.role === 'admin' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-200 text-slate-600'}`}>
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">{m.username}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${m.role === 'admin' ? 'bg-yellow-100 text-yellow-700 dark:text-yellow-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
                       {m.role === 'admin' ? 'Admin' : 'Shitës'}
                     </span>
-                    <span className="text-slate-400">{formatTs(m.created_at)}</span>
+                    <span className="text-slate-400 dark:text-slate-500">{formatTs(m.created_at)}</span>
                   </div>
                   <div className={`
                     px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words shadow-sm
                     ${mine
                       ? 'bg-blue-600 text-white rounded-br-sm'
-                      : 'bg-white text-slate-800 rounded-bl-sm border border-slate-200'}
+                      : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-sm border border-slate-200 dark:border-slate-700'}
                   `}>
                     {m.body}
                   </div>
                   {canDelete && (
                     <button
                       onClick={() => setConfirmDel(m)}
-                      className="text-[10px] text-slate-400 hover:text-red-600 mt-1 px-1"
+                      className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-red-600 mt-1 px-1"
                     >Fshi</button>
                   )}
                 </div>
@@ -205,7 +205,7 @@ export default function Komentet() {
           })}
         </div>
 
-        <form onSubmit={send} className="border-t border-slate-200 p-3 bg-white flex items-end gap-2 flex-shrink-0">
+        <form onSubmit={send} className="border-t border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 flex items-end gap-2 flex-shrink-0">
           <textarea
             value={text}
             onChange={e => setText(e.target.value)}
@@ -228,12 +228,12 @@ export default function Komentet() {
       {confirmDel && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setConfirmDel(null)}>
           <div className="modal-box max-w-md">
-            <div className="modal-header"><h3 className="font-bold text-slate-800">Fshi komentin?</h3></div>
+            <div className="modal-header"><h3 className="font-bold text-slate-800 dark:text-slate-100">Fshi komentin?</h3></div>
             <div className="modal-body">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
                 Do të fshihet komenti i <span className="font-semibold">{confirmDel.username}</span>. Ky veprim nuk kthehet.
               </p>
-              <div className="mt-2 p-2 bg-slate-50 rounded text-xs text-slate-600 whitespace-pre-wrap max-h-32 overflow-auto">
+              <div className="mt-2 p-2 bg-slate-50 dark:bg-slate-900 rounded text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap max-h-32 overflow-auto">
                 {confirmDel.body}
               </div>
             </div>

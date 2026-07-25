@@ -95,8 +95,8 @@ export default function RaportShpenzime() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Raport Shpenzime</h2>
-          <p className="text-xs text-slate-500">Shpenzime sipas datës, zërit dhe monedhës · Totali i konvertuar në LEK me kursin e secilit shpenzim</p>
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Raport Shpenzime</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Shpenzime sipas datës, zërit dhe monedhës · Totali i konvertuar në LEK me kursin e secilit shpenzim</p>
         </div>
         <button onClick={exportXlsx} disabled={!data.rows.length} className="btn-secondary disabled:opacity-40">
           📥 Eksporto Excel
@@ -145,13 +145,13 @@ export default function RaportShpenzime() {
       {/* Summary by category */}
       {data.by_category.length > 0 && (
         <div className="card">
-          <h3 className="text-sm font-semibold text-slate-700 mb-2">Përmbledhje sipas Zërit</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Përmbledhje sipas Zërit</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {data.by_category.map(c => (
-              <div key={c.category_id || 0} className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-xs text-slate-500">{c.category_name}</div>
-                <div className="text-lg font-bold text-blue-700 tabular-nums">{fmt(c.total_lek)} LEK</div>
-                <div className="text-[10px] text-slate-400">{c.count} regjistrime</div>
+              <div key={c.category_id || 0} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 dark:text-slate-400">{c.category_name}</div>
+                <div className="text-lg font-bold text-blue-700 dark:text-blue-300 tabular-nums">{fmt(c.total_lek)} LEK</div>
+                <div className="text-[10px] text-slate-400 dark:text-slate-500">{c.count} regjistrime</div>
               </div>
             ))}
           </div>
@@ -160,59 +160,59 @@ export default function RaportShpenzime() {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : !searched ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Vendos filtrat dhe kliko Kërko.</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Vendos filtrat dhe kliko Kërko.</div>
         ) : data.rows.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">🧾</div>
-            <p className="text-slate-500">Nuk u gjetën shpenzime në këtë periudhë.</p>
+            <p className="text-slate-500 dark:text-slate-400">Nuk u gjetën shpenzime në këtë periudhë.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Zëri</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Përshkrimi</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Vlera</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Kursi</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase bg-blue-50">Total LEK</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zëri</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Përshkrimi</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kursi</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase bg-blue-50 dark:bg-blue-900/30">Total LEK</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map(r => (
-                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2 text-xs text-slate-600">{r.date}</td>
-                    <td className="px-3 py-2 font-medium text-slate-800">
-                      {r.category_name || <span className="italic text-slate-400">(pa zër)</span>}
+                  <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300">{r.date}</td>
+                    <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">
+                      {r.category_name || <span className="italic text-slate-400 dark:text-slate-500">(pa zër)</span>}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{r.description || '—'}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{r.description || '—'}</td>
                     <td className="px-3 py-2 text-center">
                       <span className="badge badge-blue text-[10px]">{r.currency || 'LEK'}</span>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800">{fmt(r.amount)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">{fmt(r.amount)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
                       {(r.currency || 'LEK') === 'LEK' ? '1' : fmt(r.exchange_rate)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 bg-blue-50/40">
+                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300 bg-blue-50/40">
                       {fmt(r.total_lek)}
                     </td>
                   </tr>
                 ))}
               </tbody>
               {data.totals && (
-                <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+                <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
                   <tr className="font-bold text-xs">
-                    <td colSpan={4} className="px-3 py-3 text-right text-slate-700 uppercase tracking-wide">TOTALI:</td>
-                    <td colSpan={2} className="px-3 py-3 text-right text-slate-600 text-[11px]">
+                    <td colSpan={4} className="px-3 py-3 text-right text-slate-700 dark:text-slate-200 uppercase tracking-wide">TOTALI:</td>
+                    <td colSpan={2} className="px-3 py-3 text-right text-slate-600 dark:text-slate-300 text-[11px]">
                       {byCurrencyList.length === 0
                         ? '—'
                         : byCurrencyList.map(([c, v]) => `${fmt(v)} ${c}`).join(' · ')}
                     </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-blue-800 text-base bg-blue-100/60">
+                    <td className="px-3 py-3 text-right tabular-nums text-blue-800 dark:text-blue-200 text-base bg-blue-100/60">
                       {fmt(data.totals.total_lek)} LEK
                     </td>
                   </tr>
@@ -223,7 +223,7 @@ export default function RaportShpenzime() {
         )}
       </div>
 
-      <p className="text-[11px] text-slate-400 italic px-1">
+      <p className="text-[11px] text-slate-400 dark:text-slate-500 italic px-1">
         Konvertimi në LEK bëhet me kursin e secilit shpenzim (i ruajtur në momentin e regjistrimit).
       </p>
     </div>

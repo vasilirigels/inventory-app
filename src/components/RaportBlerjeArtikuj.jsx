@@ -65,21 +65,21 @@ function ProductFilterPicker({ value, onChange }) {
         />
         {query && (
           <button type="button" onClick={() => { setQuery(''); onChange(''); setOpen(false) }}
-            className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs" title="Pastro">✕</button>
+            className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs" title="Pastro">✕</button>
         )}
       </div>
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
-          {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+          {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(p => (
             <button
               key={p.id}
               type="button"
               onClick={() => { onChange(p.barcode || p.name); setQuery(p.barcode || p.name); setOpen(false) }}
-              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-xs font-medium text-slate-800 truncate">{p.name}</div>
-              <div className="text-[10px] text-slate-500 font-mono">{p.barcode || p.sku || '—'}</div>
+              <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.barcode || p.sku || '—'}</div>
             </button>
           ))}
         </div>
@@ -117,58 +117,58 @@ function DocsModal({ row, from, to, onClose, onNavigate }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">Dokumentat e Blerjes</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">Dokumentat e Blerjes</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Artikulli: <span className="font-medium">{row.name || '—'}</span>
               {row.barcode && <> · <span className="font-mono">{row.barcode}</span></>}
               <> · periudha {from} → {to}</>
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+            <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
           ) : docs.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-sm">S'ka dokumente për këtë artikull në periudhë.</div>
+            <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm">S'ka dokumente për këtë artikull në periudhë.</div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Burimi</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr.</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Furnitor / Magazinë</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Sasia</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Çm. Blerje (LEK)</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Pa TVSH (LEK)</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Me TVSH (LEK)</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Burimi</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitor / Magazinë</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Blerje (LEK)</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH (LEK)</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Me TVSH (LEK)</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
                 </tr>
               </thead>
               <tbody>
                 {docs.map(d => (
-                  <tr key={`${d.source}-${d.doc_id}`} className="border-b border-slate-100 hover:bg-blue-50 cursor-pointer"
+                  <tr key={`${d.source}-${d.doc_id}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-blue-50 cursor-pointer"
                       onClick={() => openDoc(d)}>
                     <td className="px-3 py-2">
                       {d.source === 'purchase'
-                        ? <span className="badge bg-blue-100 text-blue-700 text-[10px]">🧾 Fatura</span>
-                        : <span className="badge bg-amber-100 text-amber-700 text-[10px]">🏬 Magazina</span>}
+                        ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300 text-[10px]">🧾 Fatura</span>
+                        : <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300 text-[10px]">🏬 Magazina</span>}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-600">{d.date}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-700">{d.doc_no}</td>
-                    <td className="px-3 py-2 text-slate-800">{d.party_name || <span className="italic text-slate-400">— —</span>}</td>
+                    <td className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300">{d.date}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">{d.doc_no}</td>
+                    <td className="px-3 py-2 text-slate-800 dark:text-slate-100">{d.party_name || <span className="italic text-slate-400 dark:text-slate-500">— —</span>}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold">{fmtQty(d.qty)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(d.unit_price_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(d.unit_price_lek)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmt(d.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700">{fmt(d.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(d.value_with_vat_lek)}</td>
                     <td className="px-3 py-2 text-center">
                       <button
                         onClick={e => { e.stopPropagation(); openDoc(d) }}
-                        className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-[11px] font-medium"
+                        className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-[11px] font-medium"
                       >Hap</button>
                     </td>
                   </tr>
@@ -269,8 +269,8 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Raport Blerje — Artikuj</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Raport Blerje — Artikuj</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Burimet: Fatura Blerje + Magazina Hyrje · Të gjitha vlerat janë në LEK (Magazina Hyrje është pa TVSH)
           </p>
         </div>
@@ -312,47 +312,47 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : !searched ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Vendos filtrat dhe kliko Kërko.</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Vendos filtrat dhe kliko Kërko.</div>
         ) : rows.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">📦</div>
-            <p className="text-slate-500">Nuk u gjetën artikuj të blerë në këtë periudhë.</p>
+            <p className="text-slate-500 dark:text-slate-400">Nuk u gjetën artikuj të blerë në këtë periudhë.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Barkodi</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Artikulli</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Kategoria</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Sasia</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Çm. Blerje</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Zbritje</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Vlera pa TVSH</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">TVSH</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Vlera me TVSH</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Dokumente</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Artikulli</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Blerje</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritje</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera pa TVSH</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera me TVSH</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Dokumente</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, idx) => (
-                  <tr key={`${r.product_id}-${r.barcode}-${idx}`} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2 font-mono text-xs text-slate-600">{r.barcode || '—'}</td>
-                    <td className="px-3 py-2 text-slate-800">{r.name || <span className="italic text-slate-400">— pa emër —</span>}</td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{r.category || '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800">
-                      {fmtQty(r.qty)} <span className="text-[10px] text-slate-400">{r.unit}</span>
+                  <tr key={`${r.product_id}-${r.barcode}-${idx}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{r.barcode || '—'}</td>
+                    <td className="px-3 py-2 text-slate-800 dark:text-slate-100">{r.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{r.category || '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
+                      {fmtQty(r.qty)} <span className="text-[10px] text-slate-400 dark:text-slate-500">{r.unit}</span>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(r.unit_price_lek)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${r.discount_lek > 0.005 ? 'text-orange-600' : 'text-slate-400'}`}>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.unit_price_lek)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${r.discount_lek > 0.005 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
                       {r.discount_lek > 0.005 ? `-${fmt(r.discount_lek)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(r.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-500">{fmt(r.vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700">{fmt(r.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.value_no_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt(r.vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(r.value_with_vat_lek)}</td>
                     <td className="px-3 py-2 text-center">
                       <button
                         type="button"
@@ -366,17 +366,17 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
                 ))}
               </tbody>
               {totals && (
-                <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+                <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
                   <tr className="font-bold text-xs">
-                    <td colSpan={3} className="px-3 py-2 text-right text-slate-700 uppercase tracking-wide">TOTALI (LEK):</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtQty(totals.qty)}</td>
+                    <td colSpan={3} className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 uppercase tracking-wide">TOTALI (LEK):</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(totals.qty)}</td>
                     <td></td>
-                    <td className="px-3 py-2 text-right tabular-nums text-orange-700">
+                    <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
                       {totals.discount_lek > 0.005 ? `-${fmt(totals.discount_lek)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmt(totals.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt(totals.vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-blue-800 text-sm">{fmt(totals.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmt(totals.value_no_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(totals.vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200 text-sm">{fmt(totals.value_with_vat_lek)}</td>
                     <td></td>
                   </tr>
                 </tfoot>

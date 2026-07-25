@@ -25,10 +25,10 @@ function WarehouseModal({ warehouse, onClose, onSave }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal-box">
         <div className="modal-header">
-          <h3 className="font-bold text-slate-800 text-lg">
+          <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
             {warehouse?.id ? 'Edito Magazinën' : 'Magazinë e Re'}
           </h3>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <form onSubmit={submit}>
           <div className="modal-body">
@@ -52,7 +52,7 @@ function WarehouseModal({ warehouse, onClose, onSave }) {
                 />
               </div>
               <div className="col-span-2">
-                <label className="form-label">Adresa <span className="text-[10px] text-slate-400">(opsional)</span></label>
+                <label className="form-label">Adresa <span className="text-[10px] text-slate-400 dark:text-slate-500">(opsional)</span></label>
                 <input
                   type="text" value={form.address}
                   onChange={e => set('address', e.target.value)}
@@ -60,14 +60,14 @@ function WarehouseModal({ warehouse, onClose, onSave }) {
                 />
               </div>
               <div className="col-span-2">
-                <label className="form-label">Shënime <span className="text-[10px] text-slate-400">(opsional)</span></label>
+                <label className="form-label">Shënime <span className="text-[10px] text-slate-400 dark:text-slate-500">(opsional)</span></label>
                 <textarea
                   value={form.notes} onChange={e => set('notes', e.target.value)}
                   className="input-field resize-none" rows={2}
                 />
               </div>
               {error && (
-                <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <div className="col-span-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/30 border border-red-200 rounded-lg px-3 py-2">
                   {error}
                 </div>
               )}
@@ -131,14 +131,14 @@ export default function Magazinat() {
   })
 
   if (loading) {
-    return <div className="card text-center py-16 text-slate-400">Duke ngarkuar magazinat...</div>
+    return <div className="card text-center py-16 text-slate-400 dark:text-slate-500">Duke ngarkuar magazinat...</div>
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text" placeholder="Kërko sipas kodit ose emrit..."
             value={search} onChange={e => setSearch(e.target.value)}
@@ -152,7 +152,7 @@ export default function Magazinat() {
         {filtered.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">🏬</div>
-            <p className="text-slate-500 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               {warehouses.length === 0 ? 'Nuk ka magazina të regjistruara.' : 'Asnjë magazinë nuk përputhet me kërkimin.'}
             </p>
             {warehouses.length === 0 && (
@@ -161,26 +161,26 @@ export default function Magazinat() {
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Kodi</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Emri</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Adresa</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Shënime</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kodi</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Emri</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Adresa</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënime</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(w => (
-                <tr key={w.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs font-bold text-slate-800">{w.code}</td>
-                  <td className="px-4 py-3 text-slate-800">{w.name || <span className="italic text-slate-400">—</span>}</td>
-                  <td className="px-4 py-3 text-slate-600">{w.address || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600 text-xs">{w.notes || '—'}</td>
+                <tr key={w.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="px-4 py-3 font-mono text-xs font-bold text-slate-800 dark:text-slate-100">{w.code}</td>
+                  <td className="px-4 py-3 text-slate-800 dark:text-slate-100">{w.name || <span className="italic text-slate-400 dark:text-slate-500">—</span>}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{w.address || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs">{w.notes || '—'}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
-                      <button onClick={() => setModal(w)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Edito</button>
-                      <button onClick={() => setConfirmDel(w)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                      <button onClick={() => setModal(w)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Edito</button>
+                      <button onClick={() => setConfirmDel(w)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
                 </tr>
@@ -200,12 +200,12 @@ export default function Magazinat() {
 
       {confirmDel && (
         <div className="modal-overlay">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
             <div className="text-center">
               <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🗑️</div>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Fshi Magazinën?</h3>
-              <p className="text-slate-500 text-sm mb-6">
-                <strong className="text-slate-700">{confirmDel.code}</strong>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Fshi Magazinën?</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
+                <strong className="text-slate-700 dark:text-slate-200">{confirmDel.code}</strong>
                 {confirmDel.name && <> — {confirmDel.name}</>}
               </p>
               <div className="flex gap-3">

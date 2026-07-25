@@ -19,10 +19,10 @@ function SupplierModal({ supplier, onClose, onSave }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal-box">
         <div className="modal-header">
-          <h3 className="font-bold text-slate-800 text-lg">
+          <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
             {supplier?.id ? 'Edito Furnitorin' : 'Furnitor i Ri'}
           </h3>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <form onSubmit={submit}>
           <div className="modal-body">
@@ -43,12 +43,12 @@ function SupplierModal({ supplier, onClose, onSave }) {
                   className="input-field" placeholder="p.sh. +355 69 xxx xxxx" />
               </div>
               <div className="col-span-2">
-                <label className="form-label">Adresa <span className="text-[10px] text-slate-400">(opsional)</span></label>
+                <label className="form-label">Adresa <span className="text-[10px] text-slate-400 dark:text-slate-500">(opsional)</span></label>
                 <input type="text" value={form.address} onChange={e => set('address', e.target.value)}
                   className="input-field" placeholder="Rr., Nr., Qyteti" />
               </div>
               <div className="col-span-2">
-                <label className="form-label">Shënime <span className="text-[10px] text-slate-400">(opsional)</span></label>
+                <label className="form-label">Shënime <span className="text-[10px] text-slate-400 dark:text-slate-500">(opsional)</span></label>
                 <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
                   className="input-field resize-none" rows={2} />
               </div>
@@ -108,14 +108,14 @@ export default function Furnitor() {
   })
 
   if (loading) {
-    return <div className="card text-center py-16 text-slate-400">Duke ngarkuar furnitorët...</div>
+    return <div className="card text-center py-16 text-slate-400 dark:text-slate-500">Duke ngarkuar furnitorët...</div>
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text" placeholder="Kërko sipas NIPT, emër, tel..."
             value={search} onChange={e => setSearch(e.target.value)}
@@ -129,7 +129,7 @@ export default function Furnitor() {
         {filtered.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">🏭</div>
-            <p className="text-slate-500 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               {suppliers.length === 0 ? 'Nuk ka furnitorë akoma.' : 'Asnjë furnitor nuk përputhet me kërkimin.'}
             </p>
             {suppliers.length === 0 && (
@@ -138,26 +138,26 @@ export default function Furnitor() {
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">NIPT</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Emri i Subjektit</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Telefoni</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Adresa</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Emri i Subjektit</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Telefoni</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Adresa</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(s => (
-                <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs text-slate-700">{s.nipt || '—'}</td>
-                  <td className="px-4 py-3 font-medium text-slate-800">{s.name || <span className="italic text-slate-400">—</span>}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-600">{s.phone || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{s.address || '—'}</td>
+                <tr key={s.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">{s.nipt || '—'}</td>
+                  <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-100">{s.name || <span className="italic text-slate-400 dark:text-slate-500">—</span>}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">{s.phone || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{s.address || '—'}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
-                      <button onClick={() => setModal(s)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Edito</button>
-                      <button onClick={() => setConfirmDel(s)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                      <button onClick={() => setModal(s)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Edito</button>
+                      <button onClick={() => setConfirmDel(s)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
                 </tr>
@@ -177,12 +177,12 @@ export default function Furnitor() {
 
       {confirmDel && (
         <div className="modal-overlay">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
             <div className="text-center">
               <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🗑️</div>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Fshi Furnitorin?</h3>
-              <p className="text-slate-500 text-sm mb-6">
-                <strong className="text-slate-700">{confirmDel.name || confirmDel.nipt}</strong>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Fshi Furnitorin?</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
+                <strong className="text-slate-700 dark:text-slate-200">{confirmDel.name || confirmDel.nipt}</strong>
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setConfirmDel(null)} className="btn-secondary flex-1 justify-center">Anulo</button>

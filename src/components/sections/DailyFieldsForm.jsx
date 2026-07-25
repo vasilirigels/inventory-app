@@ -84,14 +84,14 @@ export default function DailyFieldsForm({ date, title, description, rows, readOn
 
   return (
     <div className="max-w-5xl mx-auto">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-            {description && <p className="text-xs text-slate-500 mt-1">{description}</p>}
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{title}</h3>
+            {description && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{description}</p>}
           </div>
           {!readOnly && (
-            <span className={`text-xs px-2 py-1 rounded-md ${savedMsg ? 'bg-emerald-100 text-emerald-700' : isDirty ? 'bg-amber-100 text-amber-700' : 'text-slate-400'}`}>
+            <span className={`text-xs px-2 py-1 rounded-md ${savedMsg ? 'bg-emerald-100 text-emerald-700 dark:text-emerald-300' : isDirty ? 'bg-amber-100 text-amber-700 dark:text-amber-300' : 'text-slate-400 dark:text-slate-500'}`}>
               {savedMsg || (isDirty ? 'Duke ruajtur…' : '')}
             </span>
           )}
@@ -99,22 +99,22 @@ export default function DailyFieldsForm({ date, title, description, rows, readOn
 
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200">
-              <th className="text-left px-2 py-2 text-xs font-semibold text-slate-600">Zëri</th>
+            <tr className="border-b border-slate-200 dark:border-slate-700">
+              <th className="text-left px-2 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">Zëri</th>
               {usedCurrencies.map(c => (
-                <th key={c} className="text-right px-2 py-2 text-xs font-semibold text-slate-600 w-32">{CUR_LABELS[c]}</th>
+                <th key={c} className="text-right px-2 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 w-32">{CUR_LABELS[c]}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={i} className="border-b border-slate-100">
-                <td className="px-2 py-2 text-slate-700 font-medium">{r.label}</td>
+              <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+                <td className="px-2 py-2 text-slate-700 dark:text-slate-200 font-medium">{r.label}</td>
                 {usedCurrencies.map(c => {
                   const key = r.fields[c]
                   if (!key) return <td key={c} className="px-2 py-1 bg-slate-50/40" />
                   if (readOnly) {
-                    return <td key={c} className="px-2 py-2 text-right tabular-nums text-slate-700">{fmt(form[key])}</td>
+                    return <td key={c} className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(form[key])}</td>
                   }
                   return (
                     <td key={c} className="px-1 py-1">
@@ -122,7 +122,7 @@ export default function DailyFieldsForm({ date, title, description, rows, readOn
                         type="number" step="any" placeholder="0"
                         value={form[key] ?? ''}
                         onChange={e => handleChange(key, e.target.value)}
-                        className="w-full text-right border border-slate-200 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full text-right border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </td>
                   )
@@ -130,10 +130,10 @@ export default function DailyFieldsForm({ date, title, description, rows, readOn
               </tr>
             ))}
             {rows.length > 1 && (
-              <tr className="bg-slate-50 font-semibold">
-                <td className="px-2 py-2 text-slate-700">Total</td>
+              <tr className="bg-slate-50 dark:bg-slate-900 font-semibold">
+                <td className="px-2 py-2 text-slate-700 dark:text-slate-200">Total</td>
                 {usedCurrencies.map(c => (
-                  <td key={c} className="px-2 py-2 text-right tabular-nums text-slate-800">{fmt(totals[c])}</td>
+                  <td key={c} className="px-2 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals[c])}</td>
                 ))}
               </tr>
             )}
@@ -141,13 +141,13 @@ export default function DailyFieldsForm({ date, title, description, rows, readOn
         </table>
 
         {computed && computed.length > 0 && (
-          <div className="mt-6 pt-4 border-t border-slate-200">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{computed[0].sectionTitle || 'Llogaritje'}</p>
+          <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">{computed[0].sectionTitle || 'Llogaritje'}</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {computed.map((c, i) => (
-                <div key={i} className="flex justify-between bg-slate-50 px-3 py-2 rounded-md">
-                  <span className="text-sm text-slate-600">{c.label}</span>
-                  <span className="text-sm font-semibold text-slate-800 tabular-nums">{fmt(c.compute(form))}</span>
+                <div key={i} className="flex justify-between bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-md">
+                  <span className="text-sm text-slate-600 dark:text-slate-300">{c.label}</span>
+                  <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 tabular-nums">{fmt(c.compute(form))}</span>
                 </div>
               ))}
             </div>

@@ -41,16 +41,16 @@ export default function AuthSetup({ onDone }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center p-4">
       <div className="card w-full max-w-lg">
         <div className="text-center mb-6">
           <div className="text-4xl mb-2">💍</div>
-          <h1 className="text-xl font-bold text-slate-800">Gold Shop — Konfigurim Fillestar</h1>
-          <p className="text-xs text-slate-500 mt-1">Krijo dy përdorues: admin dhe shitës. Ky ekran shfaqet vetëm një herë.</p>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Gold Shop — Konfigurim Fillestar</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Krijo dy përdorues: admin dhe shitës. Ky ekran shfaqet vetëm një herë.</p>
         </div>
         <form onSubmit={submit} className="space-y-6">
-          <fieldset className="border border-slate-200 rounded-xl p-4">
-            <legend className="px-2 text-sm font-semibold text-slate-700">🔐 Admin (akses i plotë)</legend>
+          <fieldset className="border border-slate-200 dark:border-slate-700 rounded-xl p-4">
+            <legend className="px-2 text-sm font-semibold text-slate-700 dark:text-slate-200">🔐 Admin (akses i plotë)</legend>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="form-label">Username</label>
@@ -67,8 +67,8 @@ export default function AuthSetup({ onDone }) {
               </div>
             </div>
           </fieldset>
-          <fieldset className="border border-slate-200 rounded-xl p-4">
-            <legend className="px-2 text-sm font-semibold text-slate-700">🧾 Shitës (akses i kufizuar)</legend>
+          <fieldset className="border border-slate-200 dark:border-slate-700 rounded-xl p-4">
+            <legend className="px-2 text-sm font-semibold text-slate-700 dark:text-slate-200">🧾 Shitës (akses i kufizuar)</legend>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="form-label">Username</label>

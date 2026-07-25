@@ -352,8 +352,8 @@ export default function CashRegister({ date }) {
           </div>
 
           {/* Sales Summary (read-only) */}
-          <div className="card bg-blue-50">
-            <div className="section-title text-blue-700">Shitje të Ditës (nga tab Shitjet)</div>
+          <div className="card bg-blue-50 dark:bg-blue-900/30">
+            <div className="section-title text-blue-700 dark:text-blue-300">Shitje të Ditës (nga tab Shitjet)</div>
             <div className="space-y-1 text-sm">
               {[
                 ['LEK', totalSalesLek, totalRetLek],
@@ -364,7 +364,7 @@ export default function CashRegister({ date }) {
               ].map(([cur, sale, ret]) => (
                 <div key={cur} className="flex justify-between items-center text-xs">
                   <span className="text-gray-600">{cur}</span>
-                  <span className="text-green-700">+{fmt(sale)}</span>
+                  <span className="text-green-700 dark:text-green-300">+{fmt(sale)}</span>
                   {ret > 0 && <span className="text-red-500">-{fmt(ret)}</span>}
                   <span className="font-medium">{fmt(sale - ret)}</span>
                 </div>
@@ -625,10 +625,10 @@ export default function CashRegister({ date }) {
             </thead>
             <tbody>
               {debts.map(d => (
-                <tr key={d.id} className={`border-b ${d.type === 'repayment' ? 'bg-green-50' : 'bg-red-50'}`}>
+                <tr key={d.id} className={`border-b ${d.type === 'repayment' ? 'bg-green-50 dark:bg-green-900/30' : 'bg-red-50 dark:bg-red-900/30'}`}>
                   <td className="p-1 font-medium">{d.name}</td>
                   <td className="p-1">
-                    <span className={`px-1 py-0.5 rounded text-xs ${d.type === 'repayment' ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
+                    <span className={`px-1 py-0.5 rounded text-xs ${d.type === 'repayment' ? 'bg-green-200 text-green-800 dark:text-green-200' : 'bg-red-200 text-red-800 dark:text-red-200'}`}>
                       {d.type === 'repayment' ? 'Kthim' : 'Borxh'}
                     </span>
                   </td>
@@ -649,13 +649,13 @@ export default function CashRegister({ date }) {
     {/* ── Import Modal (rendered outside scroll container) ── */}
     {showImport && (
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
             <div>
-              <h3 className="text-base font-bold text-slate-800">📂 Import Excel — ARKA</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Data: {date}</p>
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">📂 Import Excel — ARKA</h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Data: {date}</p>
             </div>
-            <button onClick={closeImport} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+            <button onClick={closeImport} className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xl leading-none">✕</button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -663,10 +663,10 @@ export default function CashRegister({ date }) {
               <>
                 <div className="flex gap-3">
                   <label className="flex-1 cursor-pointer">
-                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                    <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-4 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors">
                       <div className="text-2xl mb-1">📁</div>
-                      <p className="text-sm font-medium text-slate-700">Zgjidh file Excel (.xlsx)</p>
-                      <p className="text-xs text-slate-400 mt-0.5">
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Zgjidh file Excel (.xlsx)</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                         {Object.keys(importPreview).length > 0
                           ? `✓ ${Object.keys(importPreview).length} fusha u detektuan`
                           : 'Format: Fusha | Vlera'}
@@ -681,22 +681,22 @@ export default function CashRegister({ date }) {
 
                 {Object.keys(importPreview).length > 0 && (
                   <div>
-                    <p className="text-sm font-semibold text-slate-700 mb-2">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">
                       Vlerat e detektuara ({Object.keys(importPreview).length} fusha):
                     </p>
-                    <div className="rounded-xl border border-slate-200 overflow-hidden max-h-64 overflow-y-auto">
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-64 overflow-y-auto">
                       <table className="w-full text-xs">
-                        <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+                        <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0">
                           <tr>
-                            <th className="px-3 py-2 text-left font-medium text-slate-500">Fusha</th>
-                            <th className="px-3 py-2 text-right font-medium text-slate-500">Vlera</th>
+                            <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Fusha</th>
+                            <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Vlera</th>
                           </tr>
                         </thead>
                         <tbody>
                           {Object.entries(importPreview).map(([k, v]) => (
-                            <tr key={k} className="border-t border-slate-100">
-                              <td className="px-3 py-1.5 text-slate-500">{k}</td>
-                              <td className="px-3 py-1.5 text-right font-medium text-slate-800">{String(v)}</td>
+                            <tr key={k} className="border-t border-slate-100 dark:border-slate-800">
+                              <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400">{k}</td>
+                              <td className="px-3 py-1.5 text-right font-medium text-slate-800 dark:text-slate-100">{String(v)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -708,13 +708,13 @@ export default function CashRegister({ date }) {
             ) : (
               <div className="text-center py-10">
                 <div className="text-5xl mb-4">✅</div>
-                <p className="text-xl font-bold text-slate-800">ARKA u importua</p>
-                <p className="text-sm text-slate-400 mt-1">{Object.keys(importPreview).length} fusha u vendosën</p>
+                <p className="text-xl font-bold text-slate-800 dark:text-slate-100">ARKA u importua</p>
+                <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">{Object.keys(importPreview).length} fusha u vendosën</p>
               </div>
             )}
           </div>
 
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700">
             <button onClick={closeImport} className="btn-secondary">
               {importDone ? 'Mbyll' : 'Anulo'}
             </button>

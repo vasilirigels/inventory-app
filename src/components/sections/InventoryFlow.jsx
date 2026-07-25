@@ -79,36 +79,36 @@ export default function InventoryFlow({ date, type, kind }) {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-            <p className="text-xs text-slate-500 mt-1">{description}</p>
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{title}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{description}</p>
           </div>
-          {msg && <span className="text-xs px-2 py-1 rounded-md bg-emerald-100 text-emerald-700">{msg}</span>}
+          {msg && <span className="text-xs px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 dark:text-emerald-300">{msg}</span>}
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div>
-            <label className="block text-xs text-slate-600 mb-1">Gram</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Gram</label>
             <input
               type="number" step="any" placeholder="0"
               value={form.gram} onChange={e => handleChange('gram', e.target.value)}
-              className="w-full text-right border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-right border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-600 mb-1">Copë</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Copë</label>
             <input
               type="number" step="any" placeholder="0"
               value={form.cope} onChange={e => handleChange('cope', e.target.value)}
-              className="w-full text-right border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-right border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-200">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Inventari sot</p>
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Inventari sot</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
             <Stat label="Fillim gr"  value={rec.gram_start} />
             <Stat label="Fillim cp"  value={rec.cope_start} />
@@ -128,9 +128,9 @@ export default function InventoryFlow({ date, type, kind }) {
 function Stat({ label, value }) {
   const v = n(value)
   return (
-    <div className="bg-slate-50 rounded-md px-3 py-2">
-      <p className="text-[10px] text-slate-500 uppercase">{label}</p>
-      <p className="text-sm font-semibold text-slate-700 tabular-nums">{v || '-'}</p>
+    <div className="bg-slate-50 dark:bg-slate-900 rounded-md px-3 py-2">
+      <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">{label}</p>
+      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{v || '-'}</p>
     </div>
   )
 }

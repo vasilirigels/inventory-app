@@ -56,15 +56,15 @@ function ProductPickerCell({ value, onPick }) {
         className="input-field-sm"
       />
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
-          {loading && <div className="p-2 text-[11px] text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
+          {loading && <div className="p-2 text-[11px] text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(p => (
             <button
               key={p.id} type="button" onClick={() => pick(p)}
-              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-xs font-medium text-slate-800 truncate">{p.name}</div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                 <span className="font-mono">{p.barcode || p.sku || '—'}</span>
                 <span>stok: {p.stock}</span>
               </div>
@@ -105,8 +105,8 @@ function FleteList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">{icon} {title}</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">{icon} {title}</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             {fromDate === toDate
               ? `Lista e fletëve të ${verb} për këtë datë`
               : `Lista e fletëve të ${verb} nga ${fromDate} në ${toDate}`}
@@ -118,7 +118,7 @@ function FleteList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">📅</span>
-          <span className="text-sm font-semibold text-slate-700">Filtër data</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
         </div>
         <div>
           <label className="form-label">Nga data</label>
@@ -139,41 +139,41 @@ function FleteList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : list.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">{icon}</div>
-            <p className="text-slate-500 mb-4">Nuk ka fletë për këtë periudhë.</p>
+            <p className="text-slate-500 dark:text-slate-400 mb-4">Nuk ka fletë për këtë periudhë.</p>
             <button onClick={onCreate} className="btn-primary mx-auto">+ Krijo Fletën e Parë</button>
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fletë</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Shënime</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Artikuj</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Sasi Totale</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fletë</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënime</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Artikuj</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi Totale</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
               {list.map(f => (
-                <tr key={f.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-700">{f.date}</td>
+                <tr key={f.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{f.date}</td>
                   <td className="px-4 py-3 font-mono text-xs">
                     <button onClick={() => onOpen(f.id)} className="text-blue-600 hover:underline font-semibold">
                       {f.ref_no}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-slate-600 text-xs">{f.notes || '—'}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">{f.item_count}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-800">{n(f.total_qty).toLocaleString('sq-AL')}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs">{f.notes || '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">{f.item_count}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">{n(f.total_qty).toLocaleString('sq-AL')}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
-                      <button onClick={() => onOpen(f.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
-                      <button onClick={() => onDelete(f.id, f.ref_no)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                      <button onClick={() => onOpen(f.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
+                      <button onClick={() => onDelete(f.id, f.ref_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
                 </tr>
@@ -265,7 +265,7 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
   }
 
   if (loading) {
-    return <div className="card p-8 text-center text-slate-400">Duke ngarkuar...</div>
+    return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
   }
 
   const title = kind === 'hyrje' ? 'Fletë Hyrje' : 'Fletë Dalje'
@@ -280,10 +280,10 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
-            <h2 className="text-lg font-bold text-slate-800">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
               {icon} {fleteId ? `Edito ${title}` : `${title} e Re`}
             </h2>
-            <p className="text-xs text-slate-500 font-mono">Nr. {refNo}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">Nr. {refNo}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -296,8 +296,8 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
 
       <div className="card grid grid-cols-2 md:grid-cols-3 gap-4">
         <div>
-          <label className="form-label">Nr. Fletë <span className="text-[10px] text-slate-400">(auto)</span></label>
-          <input type="text" value={refNo} readOnly className="input-field font-mono bg-slate-50 cursor-not-allowed" />
+          <label className="form-label">Nr. Fletë <span className="text-[10px] text-slate-400 dark:text-slate-500">(auto)</span></label>
+          <input type="text" value={refNo} readOnly className="input-field font-mono bg-slate-50 dark:bg-slate-900 cursor-not-allowed" />
         </div>
         <div>
           <label className="form-label">Datë</label>
@@ -311,13 +311,13 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
       </div>
 
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-600">
+        <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
           ℹ️ {stockEffect}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr className="text-slate-500">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">#</th>
                 <th className="px-2 py-2 text-left font-semibold w-72">Produkti (barkod ose emër)</th>
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
@@ -327,14 +327,14 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
             </thead>
             <tbody>
               {items.map((it, idx) => (
-                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
+                <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                   <td className="px-1 py-1">
                     <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
                   </td>
                   <td className="px-1 py-1">
                     <input type="text" value={it.barcode} readOnly
-                      className="input-field-sm font-mono bg-slate-50 text-slate-600" placeholder="—" />
+                      className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300" placeholder="—" />
                   </td>
                   <td className="px-1 py-1">
                     <input type="number" step="any" min="0" value={it.qty}
@@ -348,12 +348,12 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
                 </tr>
               ))}
             </tbody>
-            <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+            <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={3} className="px-2 py-2 text-right text-slate-600">
+                <td colSpan={3} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI — {validCount} artikuj
                 </td>
-                <td className="px-2 py-2 text-right tabular-nums text-blue-700">
+                <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300">
                   {n(totalQty).toLocaleString('sq-AL')}
                 </td>
                 <td></td>
@@ -361,7 +361,7 @@ function FleteEditor({ kind, date, fleteId, onClose, onSaved }) {
             </tfoot>
           </table>
         </div>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800">
           <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
         </div>
       </div>

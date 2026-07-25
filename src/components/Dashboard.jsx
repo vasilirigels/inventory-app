@@ -93,10 +93,10 @@ const CustomTooltip = ({ active, payload, label }) => {
   const mode = payload[0]?.payload?.mode
   const modeLabel = mode === 'week' ? 'java që fillon' : mode === 'month' ? 'muaji' : 'data'
   return (
-    <div className="bg-slate-900 text-white text-xs px-3 py-2 rounded-xl shadow-xl">
+    <div className="bg-slate-900 dark:bg-slate-950 text-white text-xs px-3 py-2 rounded-xl shadow-xl">
       <p className="font-semibold mb-1">{modeLabel}: {label}</p>
       <p className="text-blue-300 tabular-nums">{fmt(payload[0]?.value, 0)} LEK</p>
-      <p className="text-slate-400">{payload[0]?.payload?.count || 0} fatura</p>
+      <p className="text-slate-400 dark:text-slate-500">{payload[0]?.payload?.count || 0} fatura</p>
     </div>
   )
 }
@@ -301,7 +301,7 @@ export default function Dashboard({ date, onNavigate }) {
     .slice(0, 6)
 
   if (initialLoad) return (
-    <div className="flex items-center justify-center h-64 text-slate-400">
+    <div className="flex items-center justify-center h-64 text-slate-400 dark:text-slate-500">
       <div className="text-center"><div className="text-4xl mb-3 animate-pulse">💍</div><p className="text-sm">Duke ngarkuar...</p></div>
     </div>
   )
@@ -310,8 +310,8 @@ export default function Dashboard({ date, onNavigate }) {
     <div className="flex items-center justify-center h-[70vh]">
       <div className="card text-center py-16 px-10 max-w-md">
         <div className="text-6xl mb-4">💍</div>
-        <h3 className="text-2xl font-bold text-slate-800 mb-2">Mirë se vini në Gold Shop!</h3>
-        <p className="text-slate-500 mb-8 text-sm">Fillo me shtimin e produkteve ose regjistrimin e faturës së parë.</p>
+        <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">Mirë se vini në Gold Shop!</h3>
+        <p className="text-slate-500 dark:text-slate-400 mb-8 text-sm">Fillo me shtimin e produkteve ose regjistrimin e faturës së parë.</p>
         <div className="flex flex-col gap-2 max-w-xs mx-auto">
           <button onClick={() => onNavigate('products')} className="btn-primary">+ Shto Produktin e Parë</button>
           <button onClick={() => onNavigate('fatura-shitje')} className="btn-secondary">🧾 Fatura Shitje</button>
@@ -359,21 +359,21 @@ export default function Dashboard({ date, onNavigate }) {
                 ? `Kesh në Arkë ${arkaTo === activeToday ? 'Sot' : `më ${arkaTo.split('-').reverse().join('.')}`}`
                 : `Kesh nga Periudha ${arkaFrom.split('-').reverse().join('.')} → ${arkaTo.split('-').reverse().join('.')}`}
             </h3>
-            <p className="text-[10px] text-slate-400 mt-0.5">
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
               {isSingleDay
                 ? 'Mbartje + Kesh nga shitjet + Pagesa borxhi − Shpenzime − Blerje kesh'
                 : 'Neto: Kesh nga shitjet + Pagesa borxhi − Shpenzime − Blerje kesh (gjatë periudhës)'}
             </p>
           </div>
-          <span className="text-[10px] text-slate-400 uppercase tracking-wide">→ Arka Ditore</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide">→ Arka Ditore</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           {CURS.map(c => {
             const v = n(arkaToday?.cash_balance?.[c])
             return (
               <div key={c} className="bg-slate-800/70 rounded-lg px-3 py-2 border border-slate-700">
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">{c}</div>
-                <div className={`text-lg md:text-xl font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">{c}</div>
+                <div className={`text-lg md:text-xl font-extrabold tabular-nums ${v < 0 ? 'text-rose-400' : v > 0 ? 'text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
                   {fmt(v)}
                 </div>
               </div>
@@ -391,12 +391,12 @@ export default function Dashboard({ date, onNavigate }) {
             lekTotal += v * r
           }
           const eurTotal = lekTotal / eurRate
-          const cls = eurTotal < 0 ? 'text-rose-400' : eurTotal > 0 ? 'text-emerald-300' : 'text-slate-500'
+          const cls = eurTotal < 0 ? 'text-rose-400' : eurTotal > 0 ? 'text-emerald-300' : 'text-slate-500 dark:text-slate-400'
           return (
             <div className="mt-3 rounded-lg bg-gradient-to-r from-emerald-900/40 to-slate-800 border border-emerald-800/50 px-4 py-2.5 flex items-baseline justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-[10px] text-emerald-300/80 uppercase tracking-wide font-semibold">Total në EUR</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                   1 EUR = {fmt(eurRate)} LEK
                 </div>
               </div>
@@ -452,15 +452,15 @@ export default function Dashboard({ date, onNavigate }) {
       <div className="card bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border border-emerald-200">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
-            <h3 className="font-semibold text-slate-800">💰 Fitimi &amp; Marzhi për Periudhën</h3>
-            <p className="text-[11px] text-slate-500">
+            <h3 className="font-semibold text-slate-800 dark:text-slate-100">💰 Fitimi &amp; Marzhi për Periudhën</h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               {dateRange.from} → {dateRange.to} · shitje pa TVSH − kosto (nga karta e produktit) · sipas monedhës origjinale
             </p>
           </div>
           <button onClick={() => onNavigate('inventar-permbledhese')} className="btn-secondary text-xs">Përmbledhëse Inventari →</button>
         </div>
         {profitCurrencies.length === 0 ? (
-          <div className="text-center py-6 text-slate-400 text-sm">
+          <div className="text-center py-6 text-slate-400 dark:text-slate-500 text-sm">
             Nuk ka shitje në këtë periudhë.
           </div>
         ) : (
@@ -470,8 +470,8 @@ export default function Dashboard({ date, onNavigate }) {
               return (
                 <div key={cur}>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className="badge bg-blue-200 text-blue-800 font-bold">{cur}</span>
-                    <span className="text-[10px] text-slate-500">Sasi e shitur: {fmt(t.qty, 0)}</span>
+                    <span className="badge bg-blue-200 text-blue-800 dark:text-blue-200 font-bold">{cur}</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">Sasi e shitur: {fmt(t.qty, 0)}</span>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
                     <MiniStat label={`Shitje pa TVSH (${cur})`}  value={fmt(t.sales_no_vat)} color="blue" />
@@ -493,7 +493,7 @@ export default function Dashboard({ date, onNavigate }) {
             {/* Referencë e ekuivalentëve në LEK — kombinuar */}
             {salesRangeLek > 0 && (
               <div className="border-t border-emerald-200 pt-2 mt-3">
-                <div className="text-[10px] text-slate-500 uppercase font-semibold mb-1">
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">
                   Ekuivalent i kombinuar në LEK (të konvertuar me kursin e secilës faturë)
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
@@ -522,8 +522,8 @@ export default function Dashboard({ date, onNavigate }) {
         <div className="card">
           <div className="flex items-center justify-between mb-3 md:mb-4 flex-wrap gap-2">
             <div className="min-w-0">
-              <h3 className="text-sm md:text-base font-semibold text-slate-800">Shitjet — {rangeDays} ditë <span className="text-[10px] md:text-xs font-normal text-slate-500">({chartModeLabel})</span></h3>
-              <p className="text-[10px] md:text-xs text-slate-500 mt-0.5 truncate">
+              <h3 className="text-sm md:text-base font-semibold text-slate-800 dark:text-slate-100">Shitjet — {rangeDays} ditë <span className="text-[10px] md:text-xs font-normal text-slate-500 dark:text-slate-400">({chartModeLabel})</span></h3>
+              <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                 {fmt(totalSalesLek)} LEK · {rangeInvoiceCount} fatura · {chartData.length} kategori
               </p>
             </div>
@@ -531,7 +531,7 @@ export default function Dashboard({ date, onNavigate }) {
           </div>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <CartesianGrid strokeDasharray="3 " stroke="#f1f5f9" vertical={false} />
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 10, fill: '#94a3b8' }}
@@ -560,8 +560,8 @@ export default function Dashboard({ date, onNavigate }) {
 
       {/* Detaje ditore: shpenzime + blerje kesh + borxh (multi-currency) */}
       {(expensesToday.length > 0 || purchasesToday.length > 0 || dueToday.length > 0) && (
-        <div className="card bg-slate-50">
-          <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Sot — Dalje &amp; Borxh (sipas monedhës)</p>
+        <div className="card bg-slate-50 dark:bg-slate-900">
+          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-2">Sot — Dalje &amp; Borxh (sipas monedhës)</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <MiniList label="Shpenzime"   items={expensesToday}   color="orange" />
             <MiniList label="Blerje Kesh" items={purchasesToday}  color="amber"  />
@@ -577,13 +577,13 @@ export default function Dashboard({ date, onNavigate }) {
           {/* Produkte në promocion */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-slate-800">🏷️ Produkte Promocion</h3>
+              <h3 className="font-semibold text-slate-800 dark:text-slate-100">🏷️ Produkte Promocion</h3>
               {promotionProducts.length > 0 && (
                 <span className="badge bg-rose-100 text-rose-700">{promotionProducts.length} produkte</span>
               )}
             </div>
             {promotionProducts.length === 0 ? (
-              <div className="text-center py-8 text-slate-400">
+              <div className="text-center py-8 text-slate-400 dark:text-slate-500">
                 <div className="text-4xl mb-2">🏷️</div>
                 <p className="text-sm">Asnjë produkt në promocion aktualisht</p>
               </div>
@@ -596,15 +596,15 @@ export default function Dashboard({ date, onNavigate }) {
                         {CAT_ICONS[p.category] || '📦'}
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-slate-800 leading-tight">{p.name}</p>
-                        <p className="text-xs text-slate-500">{p.brand && `${p.brand} · `}{p.category}</p>
+                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 leading-tight">{p.name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{p.brand && `${p.brand} · `}{p.category}</p>
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-bold text-slate-800 tabular-nums">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 tabular-nums">
                         €{Number(p.sell_price || 0).toFixed(2)}
                       </p>
-                      <p className={`text-[10px] mt-0.5 ${p.stock === 0 ? 'text-rose-500' : p.stock <= p.min_stock ? 'text-amber-500' : 'text-slate-400'}`}>
+                      <p className={`text-[10px] mt-0.5 ${p.stock === 0 ? 'text-rose-500' : p.stock <= p.min_stock ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}>
                         Stok: {p.stock ?? 0}
                       </p>
                     </div>
@@ -622,41 +622,41 @@ export default function Dashboard({ date, onNavigate }) {
           {/* Fatura të fundit */}
           <div className="card">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-slate-800">Faturat e Fundit</h3>
+              <h3 className="font-semibold text-slate-800 dark:text-slate-100">Faturat e Fundit</h3>
               <button onClick={() => onNavigate('fatura-shitje')} className="text-xs text-blue-600 hover:underline">Shih të gjitha →</button>
             </div>
             {recentInvoices.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-6">Asnjë faturë në këtë periudhë.</p>
+              <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-6">Asnjë faturë në këtë periudhë.</p>
             ) : (
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {recentInvoices.map(inv => {
                   const rate = n(inv.exchange_rate) || 1
                   const totLek = n(inv.total_with_vat) * rate
                   const pm = inv.payment_method
                   const pmBadge = pm === 'debt'
-                    ? { cls: 'bg-amber-100 text-amber-700', txt: '⚠️ Borxh' }
+                    ? { cls: 'bg-amber-100 text-amber-700 dark:text-amber-300', txt: '⚠️ Borxh' }
                     : pm === 'bank'
-                    ? { cls: 'bg-blue-100 text-blue-700', txt: '🏦 Bankë' }
+                    ? { cls: 'bg-blue-100 text-blue-700 dark:text-blue-300', txt: '🏦 Bankë' }
                     : pm === 'pos'
-                    ? { cls: 'bg-purple-100 text-purple-700', txt: '💳 POS' }
+                    ? { cls: 'bg-purple-100 text-purple-700 dark:text-purple-300', txt: '💳 POS' }
                     : pm === 'mikse'
                     ? { cls: 'bg-teal-100 text-teal-700', txt: '🔀 Mikse' }
-                    : { cls: 'bg-emerald-100 text-emerald-700', txt: '💵 Cash' }
+                    : { cls: 'bg-emerald-100 text-emerald-700 dark:text-emerald-300', txt: '💵 Cash' }
                   return (
                     <button
                       key={inv.id}
                       onClick={() => onNavigate('fatura-shitje', { date: inv.date, invoiceId: inv.id })}
-                      className="w-full flex items-center justify-between py-2.5 hover:bg-slate-50 rounded-lg px-2"
+                      className="w-full flex items-center justify-between py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg px-2"
                     >
                       <div className="min-w-0 text-left">
-                        <p className="text-sm font-semibold text-slate-800 truncate">
-                          {inv.customer_name || <span className="italic text-slate-400">— pa klient —</span>}
+                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                          {inv.customer_name || <span className="italic text-slate-400 dark:text-slate-500">— pa klient —</span>}
                         </p>
-                        <p className="text-[11px] text-slate-500 font-mono">{inv.invoice_no} · {inv.date}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{inv.invoice_no} · {inv.date}</p>
                       </div>
                       <div className="text-right flex-shrink-0 ml-3">
-                        <p className="text-sm font-bold text-slate-800 tabular-nums">{fmt(inv.total_with_vat, 2)} {inv.currency}</p>
-                        <p className="text-[10px] text-slate-400 tabular-nums">≈ {fmt(totLek)} LEK</p>
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmt(inv.total_with_vat, 2)} {inv.currency}</p>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">≈ {fmt(totLek)} LEK</p>
                         <span className={`badge text-[9px] mt-0.5 inline-block ${pmBadge.cls}`}>{pmBadge.txt}</span>
                       </div>
                     </button>
@@ -670,15 +670,15 @@ export default function Dashboard({ date, onNavigate }) {
         {/* Kolona djathtas: Veprime të Shpejta */}
         <div className="space-y-4">
           <div className="card">
-            <h3 className="font-semibold text-slate-800 mb-3">Veprime të Shpejta</h3>
+            <h3 className="font-semibold text-slate-800 dark:text-slate-100 mb-3">Veprime të Shpejta</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {QUICK_ACTIONS
                 .filter(a => !isSales || a.salesOk)
                 .map(a => (
                 <button key={a.page} onClick={() => onNavigate(a.page)}
-                  className="flex flex-col items-center gap-2 px-2 py-5 rounded-xl hover:bg-slate-50 border border-slate-100 hover:border-blue-200 transition-all text-center">
+                  className="flex flex-col items-center gap-2 px-2 py-5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 border border-slate-100 dark:border-slate-800 hover:border-blue-200 transition-all text-center">
                   <span className="text-4xl">{a.icon}</span>
-                  <span className="text-base font-bold text-slate-700 leading-snug">{a.label}</span>
+                  <span className="text-base font-bold text-slate-700 dark:text-slate-200 leading-snug">{a.label}</span>
                 </button>
               ))}
             </div>
@@ -732,12 +732,12 @@ const QUICK_ACTIONS = [
 // ── UI helpers ────────────────────────────────────────────────────────────
 
 const COLOR_MAP = {
-  blue:    { bg: 'bg-blue-50',    icBg: 'bg-blue-100',    text: 'text-blue-700' },
-  emerald: { bg: 'bg-emerald-50', icBg: 'bg-emerald-100', text: 'text-emerald-700' },
-  amber:   { bg: 'bg-amber-50',   icBg: 'bg-amber-100',   text: 'text-amber-700' },
+  blue:    { bg: 'bg-blue-50 dark:bg-blue-900/30',    icBg: 'bg-blue-100',    text: 'text-blue-700 dark:text-blue-300' },
+  emerald: { bg: 'bg-emerald-50 dark:bg-emerald-900/30', icBg: 'bg-emerald-100', text: 'text-emerald-700 dark:text-emerald-300' },
+  amber:   { bg: 'bg-amber-50 dark:bg-amber-900/30',   icBg: 'bg-amber-100',   text: 'text-amber-700 dark:text-amber-300' },
   rose:    { bg: 'bg-rose-50',    icBg: 'bg-rose-100',    text: 'text-rose-700' },
-  orange:  { bg: 'bg-orange-50',  icBg: 'bg-orange-100',  text: 'text-orange-700' },
-  slate:   { bg: 'bg-slate-50',   icBg: 'bg-slate-100',   text: 'text-slate-700' },
+  orange:  { bg: 'bg-orange-50 dark:bg-orange-900/30',  icBg: 'bg-orange-100',  text: 'text-orange-700 dark:text-orange-300' },
+  slate:   { bg: 'bg-slate-50 dark:bg-slate-900',   icBg: 'bg-slate-100 dark:bg-slate-800',   text: 'text-slate-700 dark:text-slate-200' },
 }
 
 // Kartë "Detyrime Klientësh (Periudha)" — shfaq borxhet e krijuara nga faturat
@@ -754,36 +754,36 @@ function ClientDebtCard({ rangeLek, rangeOthers, rangeCount, from, to, onClick }
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 mb-1 leading-tight">
-            Detyrime Klienti <span className="text-slate-400">Ditore</span>
+          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 dark:text-slate-400 mb-1 leading-tight">
+            Detyrime Klienti <span className="text-slate-400 dark:text-slate-500">Ditore</span>
           </p>
           {hasRange ? (
             <>
               <p className={`text-[10px] md:text-xs font-medium tabular-nums ${c.text} truncate leading-tight`}>
                 {rangeLek > 0.005 ? fmt(rangeLek) : (rangeOthers[0] ? fmt(rangeOthers[0].v) : '—')}
                 {' '}
-                <span className="text-xs md:text-sm font-semibold text-slate-500">
+                <span className="text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400">
                   {rangeLek > 0.005 ? 'LEK' : (rangeOthers[0]?.cur || '')}
                 </span>
               </p>
               {(rangeLek > 0.005 ? rangeOthers : rangeOthers.slice(1)).length > 0 && (
                 <div className="mt-1 space-y-0.5">
                   {(rangeLek > 0.005 ? rangeOthers : rangeOthers.slice(1)).map(o => (
-                    <div key={o.cur} className="text-[11px] md:text-xs text-slate-600 tabular-nums">
+                    <div key={o.cur} className="text-[11px] md:text-xs text-slate-600 dark:text-slate-300 tabular-nums">
                       <span className="font-semibold">{fmt(o.v)}</span>{' '}
-                      <span className="text-[9px] md:text-[10px] text-slate-500 font-medium">{o.cur}</span>
+                      <span className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 font-medium">{o.cur}</span>
                     </div>
                   ))}
                 </div>
               )}
-              <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate" title={periodLabel}>
+              <p className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 mt-1 truncate" title={periodLabel}>
                 {rangeCount} faturë{rangeCount === 1 ? '' : 'a'} · {periodLabel}
               </p>
             </>
           ) : (
             <>
               <p className={`text-[10px] md:text-xs font-medium ${c.text} truncate leading-tight`}>—</p>
-              <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate" title={periodLabel}>
+              <p className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 mt-1 truncate" title={periodLabel}>
                 asnjë borxh në periudhë · {periodLabel}
               </p>
             </>
@@ -808,9 +808,9 @@ function StatCard({ label, value, sub, icon, color = 'blue', onClick }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 mb-1 leading-tight">{label}</p>
+          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 dark:text-slate-400 mb-1 leading-tight">{label}</p>
           <p className={`text-[10px] md:text-xs font-medium tabular-nums ${c.text} truncate leading-tight`}>{value}</p>
-          {sub && <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate">{sub}</p>}
+          {sub && <p className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 mt-1 truncate">{sub}</p>}
         </div>
         <div className={`w-8 h-8 md:w-11 md:h-11 ${c.icBg} rounded-lg md:rounded-xl flex items-center justify-center text-lg md:text-2xl flex-shrink-0`}>
           {icon}
@@ -824,7 +824,7 @@ function MiniStat({ label, value, color = 'slate' }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate
   return (
     <div className={`${c.bg} rounded-lg px-3 py-2`}>
-      <p className="text-[10px] text-slate-500 uppercase font-semibold">{label}</p>
+      <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">{label}</p>
       <p className={`text-lg font-bold tabular-nums ${c.text}`}>{value}</p>
     </div>
   )
@@ -834,7 +834,7 @@ function MiniList({ label, items, color = 'slate' }) {
   const c = COLOR_MAP[color] || COLOR_MAP.slate
   return (
     <div className={`${c.bg} rounded-lg px-3 py-2`}>
-      <p className="text-[10px] text-slate-500 uppercase font-semibold">{label}</p>
+      <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">{label}</p>
       {items.length === 0 ? (
         <p className="text-lg font-bold tabular-nums text-slate-300">—</p>
       ) : (
@@ -842,7 +842,7 @@ function MiniList({ label, items, color = 'slate' }) {
           {items.map(({ cur, v }) => (
             <div key={cur} className="flex items-baseline justify-between gap-2">
               <span className={`text-base font-bold tabular-nums ${c.text}`}>{fmt(v)}</span>
-              <span className="text-[10px] text-slate-500 font-semibold">{cur}</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">{cur}</span>
             </div>
           ))}
         </div>
@@ -868,28 +868,28 @@ function MultiCurrencyCard({ label, items, emptyText, sub, icon, color = 'blue',
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 mb-1 leading-tight">{label}</p>
+          <p className="text-base md:text-lg xl:text-xl font-bold text-slate-500 dark:text-slate-400 mb-1 leading-tight">{label}</p>
           {!primary ? (
             <p className={`text-[10px] md:text-xs font-medium ${c.text} truncate leading-tight`}>—</p>
           ) : (
             <>
               <p className={`text-[10px] md:text-xs font-medium tabular-nums ${c.text} truncate leading-tight`}>
-                {fmt(primary.v)} <span className="text-xs md:text-sm font-semibold text-slate-500">{primary.cur}</span>
+                {fmt(primary.v)} <span className="text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400">{primary.cur}</span>
               </p>
               {rest.length > 0 && (
                 <div className="mt-1 space-y-0.5">
                   {rest.map(r => (
-                    <div key={r.cur} className="text-[11px] md:text-xs text-slate-600 tabular-nums">
+                    <div key={r.cur} className="text-[11px] md:text-xs text-slate-600 dark:text-slate-300 tabular-nums">
                       <span className="font-semibold">{fmt(r.v)}</span>{' '}
-                      <span className="text-[9px] md:text-[10px] text-slate-500 font-medium">{r.cur}</span>
+                      <span className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 font-medium">{r.cur}</span>
                     </div>
                   ))}
                 </div>
               )}
             </>
           )}
-          {(!primary && emptyText) && <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate">{emptyText}</p>}
-          {primary && sub && rest.length === 0 && <p className="text-[9px] md:text-[10px] text-slate-500 mt-1 truncate">{sub}</p>}
+          {(!primary && emptyText) && <p className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 mt-1 truncate">{emptyText}</p>}
+          {primary && sub && rest.length === 0 && <p className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 mt-1 truncate">{sub}</p>}
         </div>
         <div className={`w-8 h-8 md:w-11 md:h-11 ${c.icBg} rounded-lg md:rounded-xl flex items-center justify-center text-lg md:text-2xl flex-shrink-0`}>
           {icon}

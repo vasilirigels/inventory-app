@@ -48,7 +48,7 @@ export default function Customers() {
   const cleared      = enriched.length - indebted
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64 text-slate-400">
+    <div className="flex items-center justify-center h-64 text-slate-400 dark:text-slate-500">
       <div className="text-center"><div className="text-4xl mb-3 animate-pulse">👥</div><p className="text-sm">Duke ngarkuar klientët...</p></div>
     </div>
   )
@@ -56,8 +56,8 @@ export default function Customers() {
   if (customers.length === 0) return (
     <div className="card text-center py-16">
       <div className="text-5xl mb-4">👥</div>
-      <h3 className="text-xl font-bold text-slate-700 mb-2">Nuk ka klientë akoma</h3>
-      <p className="text-slate-400 text-sm">Borxhet e klientëve regjistrohen nga Fatura Shitje</p>
+      <h3 className="text-xl font-bold text-slate-700 dark:text-slate-200 mb-2">Nuk ka klientë akoma</h3>
+      <p className="text-slate-400 dark:text-slate-500 text-sm">Borxhet e klientëve regjistrohen nga Fatura Shitje</p>
     </div>
   )
 
@@ -66,28 +66,28 @@ export default function Customers() {
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="card bg-slate-50">
-          <p className="text-xs text-slate-500 mb-1">Gjithsej Klientë</p>
-          <p className="text-3xl font-extrabold text-slate-700">{enriched.length}</p>
+        <div className="card bg-slate-50 dark:bg-slate-900">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Gjithsej Klientë</p>
+          <p className="text-3xl font-extrabold text-slate-700 dark:text-slate-200">{enriched.length}</p>
         </div>
-        <div className="card bg-red-50">
-          <p className="text-xs text-slate-500 mb-1">Me Borxh</p>
-          <p className="text-3xl font-extrabold text-red-700">{indebted}</p>
+        <div className="card bg-red-50 dark:bg-red-900/30">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Me Borxh</p>
+          <p className="text-3xl font-extrabold text-red-700 dark:text-red-300">{indebted}</p>
         </div>
-        <div className="card bg-emerald-50">
-          <p className="text-xs text-slate-500 mb-1">Borxhi Total €</p>
-          <p className="text-3xl font-extrabold text-emerald-700">€{fmt(totalDebtEur)}</p>
+        <div className="card bg-emerald-50 dark:bg-emerald-900/30">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Borxhi Total €</p>
+          <p className="text-3xl font-extrabold text-emerald-700 dark:text-emerald-300">€{fmt(totalDebtEur)}</p>
         </div>
-        <div className="card bg-blue-50">
-          <p className="text-xs text-slate-500 mb-1">Borxhi Total LEK</p>
-          <p className="text-3xl font-extrabold text-blue-700">{fmt(totalDebtLek, 0)} L</p>
+        <div className="card bg-blue-50 dark:bg-blue-900/30">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Borxhi Total LEK</p>
+          <p className="text-3xl font-extrabold text-blue-700 dark:text-blue-300">{fmt(totalDebtLek, 0)} L</p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text"
             placeholder="Kërko klient..."
@@ -96,59 +96,59 @@ export default function Customers() {
             className="input-field pl-9"
           />
         </div>
-        <div className="flex bg-slate-100 rounded-lg p-0.5">
+        <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
           {[
             { id: 'all',      label: 'Të gjithë' },
             { id: 'indebted', label: '⚠️ Me borxh' },
             { id: 'clear',    label: '✅ Shlyer' },
           ].map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === f.id ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === f.id ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>
               {f.label}
             </button>
           ))}
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">{filtered.length} klientë{search || filter !== 'all' ? ' (filtruar)' : ''}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{filtered.length} klientë{search || filter !== 'all' ? ' (filtruar)' : ''}</p>
 
       {/* Table */}
       <div className="card p-0 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
+          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
             <tr>
-              <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Borxh €</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Paguar €</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Bilanc €</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Borxh LEK</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Bilanc LEK</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Statusi</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Transaksione</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data e fundit</th>
+              <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh €</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Paguar €</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Bilanc €</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh LEK</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Bilanc LEK</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statusi</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Transaksione</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data e fundit</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((c, i) => {
               const hasDebt = c.balance_eur > 0 || c.balance_lek > 0 || c.balance_usd > 0
               return (
-                <tr key={i} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${hasDebt ? '' : ''}`}>
+                <tr key={i} className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${hasDebt ? '' : ''}`}>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base font-bold flex-shrink-0 ${hasDebt ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base font-bold flex-shrink-0 ${hasDebt ? 'bg-red-100 text-red-700 dark:text-red-300' : 'bg-emerald-100 text-emerald-700 dark:text-emerald-300'}`}>
                         {c.name.charAt(0).toUpperCase()}
                       </div>
-                      <span className="font-semibold text-slate-800">{c.name}</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">{c.name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3.5 text-right text-slate-700">{fmt(c.debt_eur)}</td>
-                  <td className="px-4 py-3.5 text-right text-emerald-700">{fmt(c.paid_eur)}</td>
+                  <td className="px-4 py-3.5 text-right text-slate-700 dark:text-slate-200">{fmt(c.debt_eur)}</td>
+                  <td className="px-4 py-3.5 text-right text-emerald-700 dark:text-emerald-300">{fmt(c.paid_eur)}</td>
                   <td className="px-4 py-3.5 text-right font-bold">
                     <span className={c.balance_eur > 0 ? 'text-red-600' : 'text-emerald-600'}>
                       {c.balance_eur > 0 ? `€${fmt(c.balance_eur)}` : '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-3.5 text-right text-slate-700">{fmt(c.debt_lek, 0)}</td>
+                  <td className="px-4 py-3.5 text-right text-slate-700 dark:text-slate-200">{fmt(c.debt_lek, 0)}</td>
                   <td className="px-4 py-3.5 text-right font-bold">
                     <span className={c.balance_lek > 0 ? 'text-red-600' : 'text-emerald-600'}>
                       {c.balance_lek > 0 ? `${fmt(c.balance_lek, 0)} L` : '—'}
@@ -160,15 +160,15 @@ export default function Customers() {
                       : <span className="badge badge-green">Shlyer</span>
                     }
                   </td>
-                  <td className="px-4 py-3.5 text-center text-slate-500 text-sm">{c.entries}</td>
-                  <td className="px-4 py-3.5 text-slate-500 text-sm">{c.last_date || '—'}</td>
+                  <td className="px-4 py-3.5 text-center text-slate-500 dark:text-slate-400 text-sm">{c.entries}</td>
+                  <td className="px-4 py-3.5 text-slate-500 dark:text-slate-400 text-sm">{c.last_date || '—'}</td>
                 </tr>
               )
             })}
           </tbody>
         </table>
         {filtered.length === 0 && (
-          <div className="text-center py-10 text-slate-400">
+          <div className="text-center py-10 text-slate-400 dark:text-slate-500">
             <p className="text-sm">Nuk u gjet asnjë klient</p>
           </div>
         )}

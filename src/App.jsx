@@ -44,7 +44,7 @@ const ShitjeOnline           = lazy(() => import('./components/ShitjeOnline.jsx'
 
 function PageFallback() {
   return (
-    <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+    <div className="flex items-center justify-center h-full text-slate-400 dark:text-slate-500 text-sm">
       <div className="animate-pulse">Duke ngarkuar…</div>
     </div>
   )
@@ -64,8 +64,8 @@ function ComingSoon({ title }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center">
       <div className="text-6xl mb-4">🚧</div>
-      <h3 className="text-xl font-semibold text-slate-700">{title}</h3>
-      <p className="text-sm text-slate-500 mt-2">Ky modul është në ndërtim.</p>
+      <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-200">{title}</h3>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Ky modul është në ndërtim.</p>
     </div>
   )
 }

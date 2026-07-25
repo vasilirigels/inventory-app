@@ -59,17 +59,17 @@ function SupplierPicker({ value, onChange }) {
         />
         {value?.name && (
           <button type="button" onClick={() => { onChange({ name: '', nipt: '' }); setQuery('') }}
-            className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs">✕</button>
+            className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs">✕</button>
         )}
       </div>
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
-          {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+          {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(s => (
             <button key={s.id} type="button" onClick={() => pick(s)}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0">
-              <div className="text-sm font-medium text-slate-800">{s.name || <span className="italic text-slate-400">— pa emër —</span>}</div>
-              <div className="text-[11px] text-slate-500 font-mono">{s.nipt || '—'}</div>
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0">
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{s.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{s.nipt || '—'}</div>
             </button>
           ))}
         </div>
@@ -104,12 +104,12 @@ function GoldSpotBadge() {
       <div className="text-3xl">🟡</div>
       <div className="flex-1">
         <div className="flex items-center justify-between">
-          <div className="text-[10px] uppercase font-bold tracking-wide text-amber-700">
+          <div className="text-[10px] uppercase font-bold tracking-wide text-amber-700 dark:text-amber-300">
             Çmimi Aktual i Florit (Spot)
           </div>
           <button
             type="button" onClick={() => load(true)} disabled={refreshing}
-            className="text-[10px] px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold disabled:opacity-50"
+            className="text-[10px] px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 dark:text-amber-200 font-semibold disabled:opacity-50"
             title="Rifresko çmimin nga burimi"
           >
             {refreshing ? '⏳' : '🔄 Rifresko'}
@@ -117,15 +117,15 @@ function GoldSpotBadge() {
         </div>
         {spot ? (
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-amber-800 tabular-nums">
+            <span className="text-2xl font-extrabold text-amber-800 dark:text-amber-200 tabular-nums">
               {n(spot.eur_per_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-            <span className="text-sm font-semibold text-amber-700">EUR / gram</span>
+            <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">EUR / gram</span>
           </div>
         ) : err ? (
           <div className="text-xs text-red-600">{err}</div>
         ) : (
-          <div className="text-xs text-slate-400">Duke ngarkuar...</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
         )}
         {spot && (
           <div className="text-[10px] text-amber-700/70 mt-0.5">
@@ -173,8 +173,8 @@ function HasList({ date, onOpen, onCreate, onDelete, refreshKey }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">🟡 Blerje HAS</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">🟡 Blerje HAS</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Blerje me shumicë e artikujve prej flori (unaza, varëse, etj.) e llogaritur në gram HAS.
             Shuma paguhet nga arka. Artikujt qëndrojnë si stok grupor derisa të ndahen dhe të peshohen
             veçmas për t'i kaluar te produktet.
@@ -188,7 +188,7 @@ function HasList({ date, onOpen, onCreate, onDelete, refreshKey }) {
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">📅</span>
-          <span className="text-sm font-semibold text-slate-700">Filtër data</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
         </div>
         <div>
           <label className="form-label">Nga data</label>
@@ -209,11 +209,11 @@ function HasList({ date, onOpen, onCreate, onDelete, refreshKey }) {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : list.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">🟡</div>
-            <p className="text-slate-500 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               {fromDate === toDate
                 ? 'Nuk ka blerje HAS për këtë datë.'
                 : 'Nuk ka blerje HAS në këtë periudhë.'}
@@ -222,57 +222,57 @@ function HasList({ date, onOpen, onCreate, onDelete, refreshKey }) {
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr.</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Furnitori / Personi</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Gram HAS</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Çm./Gram (EUR)</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Totali (EUR)</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitori / Personi</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram HAS</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm./Gram (EUR)</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali (EUR)</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
               {list.map(p => {
                 const rate = n(p.exchange_rate) || 1
                 return (
-                  <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                  <tr key={p.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">
                       <button onClick={() => onOpen(p.id)} className="text-blue-600 hover:underline">{p.purchase_no}</button>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{p.date}</td>
-                    <td className="px-4 py-3 text-slate-800">
-                      {p.supplier_name || <span className="text-slate-400 italic">— pa emër —</span>}
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{p.date}</td>
+                    <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
+                      {p.supplier_name || <span className="text-slate-400 dark:text-slate-500 italic">— pa emër —</span>}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-amber-700">{fmtGram(p.gram)} g</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700">{fmt(p.price_per_gram)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900">
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-amber-700 dark:text-amber-300">{fmtGram(p.gram)} g</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(p.price_per_gram)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                       {fmt(p.total_amount)}
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(p.total_amount) * rate)} LEK
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1.5">
-                        <button onClick={() => onOpen(p.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
-                        <button onClick={() => onDelete(p.id, p.purchase_no)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                        <button onClick={() => onOpen(p.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
+                        <button onClick={() => onDelete(p.id, p.purchase_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                       </div>
                     </td>
                   </tr>
                 )
               })}
             </tbody>
-            <tfoot className="bg-amber-50 border-t-2 border-amber-300">
+            <tfoot className="bg-amber-50 dark:bg-amber-900/30 border-t-2 border-amber-300">
               <tr>
-                <td colSpan={3} className="px-4 py-3 text-xs font-bold text-amber-800 uppercase tracking-wide">
-                  🟡 TOTAL <span className="text-[10px] font-normal text-amber-700">— {totals.count} blerje</span>
+                <td colSpan={3} className="px-4 py-3 text-xs font-bold text-amber-800 dark:text-amber-200 uppercase tracking-wide">
+                  🟡 TOTAL <span className="text-[10px] font-normal text-amber-700 dark:text-amber-300">— {totals.count} blerje</span>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-amber-800 text-base">{fmtGram(totals.gram)} g</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-amber-800 dark:text-amber-200 text-base">{fmtGram(totals.gram)} g</td>
                 <td></td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-800">
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-800 dark:text-emerald-200">
                   {fmt(totals.amount)}
-                  <div className="text-[10px] font-normal text-slate-500 italic">
+                  <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                     = {fmt(totals.amountLek)} LEK
                   </div>
                 </td>
@@ -413,7 +413,7 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
   }
 
   if (loading) {
-    return <div className="card p-8 text-center text-slate-400">Duke ngarkuar...</div>
+    return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
   }
 
   return (
@@ -422,10 +422,10 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
-            <h2 className="text-lg font-bold text-slate-800">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
               {purchaseId ? 'Edito Blerjen e HAS' : 'Blerje HAS e Re'}
             </h2>
-            <p className="text-xs text-slate-500 font-mono">Nr. {purchaseNo}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">Nr. {purchaseNo}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -438,8 +438,8 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
 
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
-          <label className="form-label">Nr. Blerjeje <span className="text-[10px] text-slate-400">(auto)</span></label>
-          <input type="text" value={purchaseNo} readOnly className="input-field font-mono bg-slate-50 cursor-not-allowed" />
+          <label className="form-label">Nr. Blerjeje <span className="text-[10px] text-slate-400 dark:text-slate-500">(auto)</span></label>
+          <input type="text" value={purchaseNo} readOnly className="input-field font-mono bg-slate-50 dark:bg-slate-900 cursor-not-allowed" />
         </div>
         <div>
           <label className="form-label">Datë</label>
@@ -465,7 +465,7 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
                 if (cached) setPricePerGram(String(cached))
               }
             }}
-            className="input-field tabular-nums font-semibold text-amber-700" placeholder="p.sh. 1000" />
+            className="input-field tabular-nums font-semibold text-amber-700 dark:text-amber-300" placeholder="p.sh. 1000" />
         </div>
         <div>
           <label className="form-label flex items-center justify-between">
@@ -477,7 +477,7 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
                 if (fresh) setPricePerGram(String(fresh))
               }}
               disabled={spotLoading}
-              className="text-[10px] px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold disabled:opacity-50"
+              className="text-[10px] px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 dark:text-amber-200 font-semibold disabled:opacity-50"
               title="Rifresko dhe vendos çmimin aktual spot"
             >
               {spotLoading ? '⏳' : '🔄 Spot'}
@@ -487,26 +487,26 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
             value={pricePerGram} onChange={v => setPricePerGram(String(v))}
             className="input-field tabular-nums" placeholder="0.00" />
           {spotEurPerGram && (
-            <p className="text-[10px] text-slate-500 mt-0.5">
-              Spot aktual: <b className="text-amber-700">{spotEurPerGram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR/g</b>
-              {spotUpdatedAt && <span className="ml-1 text-slate-400">· {new Date(spotUpdatedAt).toLocaleTimeString('sq-AL', { hour: '2-digit', minute: '2-digit' })}</span>}
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+              Spot aktual: <b className="text-amber-700 dark:text-amber-300">{spotEurPerGram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR/g</b>
+              {spotUpdatedAt && <span className="ml-1 text-slate-400 dark:text-slate-500">· {new Date(spotUpdatedAt).toLocaleTimeString('sq-AL', { hour: '2-digit', minute: '2-digit' })}</span>}
             </p>
           )}
           {spotError && <p className="text-[10px] text-red-600 mt-0.5">{spotError}</p>}
         </div>
         <div className="col-span-2 md:col-span-4 grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali për Pagesë (EUR)</label>
-            <div className="input-field bg-emerald-50 text-emerald-800 border-emerald-200 tabular-nums font-bold text-base">
+            <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali për Pagesë (EUR)</label>
+            <div className="input-field bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 border-emerald-200 tabular-nums font-bold text-base">
               {fmt(totalEur)}
             </div>
           </div>
           <div>
-            <label className="text-[10px] text-slate-500 uppercase font-semibold">
+            <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">
               Ekuivalent në LEK
-              <span className="ml-1 text-slate-400 normal-case">(1 EUR = {n(exchangeRate).toLocaleString('sq-AL')} LEK · {rateSource || '—'})</span>
+              <span className="ml-1 text-slate-400 dark:text-slate-500 normal-case">(1 EUR = {n(exchangeRate).toLocaleString('sq-AL')} LEK · {rateSource || '—'})</span>
             </label>
-            <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold text-base">
+            <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold text-base">
               {fmt(totalLek)}
             </div>
           </div>
@@ -519,8 +519,8 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
         </div>
       </div>
 
-      <div className="card bg-amber-50 border-amber-200">
-        <p className="text-xs text-amber-800">
+      <div className="card bg-amber-50 dark:bg-amber-900/30 border-amber-200">
+        <p className="text-xs text-amber-800 dark:text-amber-200">
           <b>💡 Kujdes:</b> Kjo blerje prej <b>{fmt(totalEur)} EUR</b> do zbritet nga arka ditore (monedha EUR).
           Sasia <b>{fmtGram(gram || 0)} gram HAS</b> qëndron si stok grupor — më vonë do të ndahet copë-copë,
           do të peshohet secili artikull dhe do të kalojë te produktet.

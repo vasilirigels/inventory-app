@@ -70,15 +70,15 @@ function ProductPickerCell({ value, onPick }) {
         className="input-field-sm"
       />
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
-          {loading && <div className="p-2 text-[11px] text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
+          {loading && <div className="p-2 text-[11px] text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(p => (
             <button
               key={p.id} type="button" onClick={() => pick(p)}
-              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-xs font-medium text-slate-800 truncate">{p.name}</div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                 <span className="font-mono">{p.barcode || p.sku || '—'}</span>
                 <span>kosto: {p.cost_price || '—'} · stok: {p.stock}</span>
               </div>
@@ -179,10 +179,10 @@ function WarehousePicker({ value, onChange }) {
         className="input-field font-mono uppercase"
       />
       {open && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-72 overflow-y-auto">
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-72 overflow-y-auto">
           {creating ? (
             <form onSubmit={submitCreate} className="p-3 space-y-2">
-              <div className="text-[11px] font-semibold text-slate-600 uppercase">Magazinë e Re</div>
+              <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 uppercase">Magazinë e Re</div>
               <input
                 type="text" value={newCode}
                 onChange={e => setNewCode(e.target.value.toUpperCase())}
@@ -203,22 +203,22 @@ function WarehousePicker({ value, onChange }) {
             </form>
           ) : (
             <>
-              {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+              {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
               {!loading && results.length === 0 && (
-                <div className="p-3 text-xs text-slate-400">Nuk ka magazina të regjistruara.</div>
+                <div className="p-3 text-xs text-slate-400 dark:text-slate-500">Nuk ka magazina të regjistruara.</div>
               )}
               {results.map(w => (
                 <button
                   key={w.id} type="button" onClick={() => pick(w)}
-                  className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
                 >
-                  <div className="text-sm font-mono font-bold text-slate-800">{w.code}</div>
-                  {w.name && <div className="text-[11px] text-slate-500">{w.name}</div>}
+                  <div className="text-sm font-mono font-bold text-slate-800 dark:text-slate-100">{w.code}</div>
+                  {w.name && <div className="text-[11px] text-slate-500 dark:text-slate-400">{w.name}</div>}
                 </button>
               ))}
               <button
                 type="button" onClick={startCreate}
-                className="w-full text-left px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold border-t border-slate-200"
+                className="w-full text-left px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-xs font-semibold border-t border-slate-200 dark:border-slate-700"
               >+ Krijo magazinë të re{query ? ` "${query}"` : ''}</button>
             </>
           )}
@@ -265,8 +265,8 @@ function MagazinaList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">{icon} {title}</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">{icon} {title}</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             {fromDate === toDate
               ? `Lista e fletëve të ${verb} për këtë datë`
               : `Lista e fletëve të ${verb} nga ${fromDate} në ${toDate}`}
@@ -278,7 +278,7 @@ function MagazinaList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">📅</span>
-          <span className="text-sm font-semibold text-slate-700">Filtër data</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
         </div>
         <div>
           <label className="form-label">Nga data</label>
@@ -299,26 +299,26 @@ function MagazinaList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : list.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">{icon}</div>
-            <p className="text-slate-500 mb-4">Nuk ka fletë magazine për këtë periudhë.</p>
+            <p className="text-slate-500 dark:text-slate-400 mb-4">Nuk ka fletë magazine për këtë periudhë.</p>
             <button onClick={onCreate} className="btn-primary mx-auto">+ Krijo Fletën e Parë</button>
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Dokumenti</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Kod Magazine</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Kursi</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Artikuj</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Sasi Totale</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Totali</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Dokumenti</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kod Magazine</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kursi</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Artikuj</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi Totale</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
@@ -326,44 +326,44 @@ function MagazinaList({ kind, date, onOpen, onCreate, onDelete, refreshKey }) {
                 const rate = n(f.exchange_rate) || 1
                 const isForeign = (f.currency || 'LEK') !== 'LEK'
                 return (
-                  <tr key={f.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-700">{f.date}</td>
+                  <tr key={f.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{f.date}</td>
                     <td className="px-4 py-3 font-mono text-xs">
                       <button onClick={() => onOpen(f.id)} className="text-blue-600 hover:underline font-semibold">
                         {f.ref_no}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-slate-700 font-mono text-xs">{f.warehouse_code || '—'}</td>
-                    <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700">{f.currency}</span></td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-600 text-xs">{n(rate).toFixed(4)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700">{f.item_count}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-800">{n(f.total_qty).toLocaleString('sq-AL')}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900">
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200 font-mono text-xs">{f.warehouse_code || '—'}</td>
+                    <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{f.currency}</span></td>
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300 text-xs">{n(rate).toFixed(4)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">{f.item_count}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">{n(f.total_qty).toLocaleString('sq-AL')}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                       {fmt(f.total)}
                       {isForeign && (
-                        <div className="text-[10px] font-normal text-slate-500 italic">
+                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                           = {fmt(n(f.total) * rate)} LEK
                         </div>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1.5">
-                        <button onClick={() => onOpen(f.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
-                        <button onClick={() => onDelete(f.id, f.ref_no)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                        <button onClick={() => onOpen(f.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
+                        <button onClick={() => onDelete(f.id, f.ref_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                       </div>
                     </td>
                   </tr>
                 )
               })}
             </tbody>
-            <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+            <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr>
-                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
+                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
                   TOTALI (LEK) <span className="text-[10px] font-normal text-blue-600">— {totals.count} fletë</span>
                 </td>
                 <td></td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{n(totals.qty).toLocaleString('sq-AL')}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(totals.totLek)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{n(totals.qty).toLocaleString('sq-AL')}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(totals.totLek)}</td>
                 <td></td>
               </tr>
             </tfoot>
@@ -508,7 +508,7 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
   }
 
   if (loading) {
-    return <div className="card p-8 text-center text-slate-400">Duke ngarkuar...</div>
+    return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
   }
 
   const title = kind === 'hyrje' ? 'Fletë Hyrje Magazine' : 'Fletë Dalje Magazine'
@@ -523,10 +523,10 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
-            <h2 className="text-lg font-bold text-slate-800">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
               {icon} {fleteId ? `Edito ${title}` : `${title} e Re`}
             </h2>
-            <p className="text-xs text-slate-500 font-mono">Nr. {refNo}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">Nr. {refNo}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -539,8 +539,8 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
 
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
-          <label className="form-label">Nr. Dokumenti <span className="text-[10px] text-slate-400">(auto)</span></label>
-          <input type="text" value={refNo} readOnly className="input-field font-mono bg-slate-50 cursor-not-allowed" />
+          <label className="form-label">Nr. Dokumenti <span className="text-[10px] text-slate-400 dark:text-slate-500">(auto)</span></label>
+          <input type="text" value={refNo} readOnly className="input-field font-mono bg-slate-50 dark:bg-slate-900 cursor-not-allowed" />
         </div>
         <div>
           <label className="form-label">Datë</label>
@@ -559,16 +559,16 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
         <div>
           <label className="form-label">
             Kursi i Këmbimit
-            <span className="ml-1 text-[10px] text-slate-400">(1 {currency} = ? LEK)</span>
+            <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">(1 {currency} = ? LEK)</span>
           </label>
           <div className="flex gap-1">
             <input type="number" step="0.0001" min="0"
               value={exchangeRate} onChange={e => setExchangeRate(e.target.value)}
               disabled={currency === 'LEK'} className="input-field flex-1 disabled:bg-slate-50" />
             <button onClick={refreshRates} title="Rifresko kursin"
-              className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs">↻</button>
+              className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs">↻</button>
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
         </div>
         <div className="col-span-2 md:col-span-3">
           <label className="form-label">Shënime</label>
@@ -578,13 +578,13 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
       </div>
 
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-600">
-          ℹ️ {stockEffect} <span className="text-slate-400">— pa TVSH</span>
+        <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
+          ℹ️ {stockEffect} <span className="text-slate-400 dark:text-slate-500">— pa TVSH</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr className="text-slate-500">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">#</th>
                 <th className="px-2 py-2 text-left font-semibold w-64">Produkti (barkod ose emër)</th>
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
@@ -599,14 +599,14 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
               {items.map((it, idx) => {
                 const lt = lineTotals[idx]
                 return (
-                  <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
+                  <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
                     </td>
                     <td className="px-1 py-1">
                       <input type="text" value={it.barcode} readOnly
-                        className="input-field-sm font-mono bg-slate-50 text-slate-600" placeholder="—" />
+                        className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300" placeholder="—" />
                     </td>
                     <td className="px-1 py-1">
                       <input type="number" step="any" value={it.qty}
@@ -623,7 +623,7 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
                         onChange={e => setItem(idx, { discount_percent: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900">{fmt(lt.subtotal)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900 dark:text-white">{fmt(lt.subtotal)}</td>
                     <td className="px-1 py-1 text-center">
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
                     </td>
@@ -631,29 +631,29 @@ function MagazinaEditor({ kind, date, fleteId, onClose, onSaved }) {
                 )
               })}
             </tbody>
-            <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+            <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={3} className="px-2 py-2 text-right text-slate-600">
+                <td colSpan={3} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — {items.filter(it => (it.name && it.name.trim()) || n(it.qty) > 0).length} artikuj
                 </td>
-                <td className="px-2 py-2 text-right tabular-nums text-blue-700">{n(totals.qty).toLocaleString('sq-AL')}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300">{n(totals.qty).toLocaleString('sq-AL')}</td>
                 <td colSpan={2}></td>
-                <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.sub)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.sub)}</td>
                 <td></td>
               </tr>
               {currency !== 'LEK' && (
                 <tr className="text-[11px] bg-blue-100/60 border-t border-blue-200">
-                  <td colSpan={6} className="px-2 py-1.5 text-right text-slate-600 italic">
-                    Në LEK <span className="text-slate-400">(1 {currency} = {n(exchangeRate)} LEK)</span>:
+                  <td colSpan={6} className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 italic">
+                    Në LEK <span className="text-slate-400 dark:text-slate-500">(1 {currency} = {n(exchangeRate)} LEK)</span>:
                   </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums font-bold text-blue-800">{fmt(totals.sub * n(exchangeRate))} LEK</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums font-bold text-blue-800 dark:text-blue-200">{fmt(totals.sub * n(exchangeRate))} LEK</td>
                   <td></td>
                 </tr>
               )}
             </tfoot>
           </table>
         </div>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800">
           <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
         </div>
       </div>

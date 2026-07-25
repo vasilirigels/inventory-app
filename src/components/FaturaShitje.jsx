@@ -161,29 +161,29 @@ function ClientPicker({ value, onChange }) {
         />
         {value?.customer_name && (
           <button type="button" onClick={clear}
-            className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs" title="Pastro">✕</button>
+            className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs" title="Pastro">✕</button>
         )}
       </div>
       {value?.customer_nipt && (
-        <p className="text-[10px] text-slate-500 mt-0.5">
+        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
           NIPT: <span className="font-mono">{value.customer_nipt}</span>
           {value.phone && <> · Tel: <span className="font-mono">{value.phone}</span></>}
         </p>
       )}
       {open && (results.length > 0 || loading || showCreate) && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
-          {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+          {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(c => (
             <button
               key={c.id}
               type="button"
               onClick={() => pick(c)}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-sm font-medium text-slate-800">
-                {clientFullName(c) || <span className="italic text-slate-400">— pa emër —</span>}
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                {clientFullName(c) || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
               </div>
-              <div className="text-[11px] text-slate-500 font-mono">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                 {c.nipt || '—'}{c.phone ? ` · ${c.phone}` : ''}
               </div>
             </button>
@@ -194,12 +194,12 @@ function ClientPicker({ value, onChange }) {
               onClick={createNew}
               className="w-full text-left px-3 py-2 hover:bg-emerald-50 bg-emerald-50/40 border-t border-emerald-100"
             >
-              <div className="text-sm font-semibold text-emerald-700">
+              <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
                 + Krijo klient të ri: <span className="font-bold">{trimmedQuery}</span>
               </div>
-              <div className="text-[11px] text-slate-500">
-                Emri: <span className="font-medium text-slate-700">{previewFirst || '—'}</span>
-                {' · '}Mbiemri: <span className="font-medium text-slate-700">{previewLast || '—'}</span>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Emri: <span className="font-medium text-slate-700 dark:text-slate-200">{previewFirst || '—'}</span>
+                {' · '}Mbiemri: <span className="font-medium text-slate-700 dark:text-slate-200">{previewLast || '—'}</span>
               </div>
             </button>
           )}
@@ -274,8 +274,8 @@ function ProductPickerCell({ value, onPick }) {
         className="input-field-sm"
       />
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
-          {loading && <div className="p-2 text-[11px] text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
+          {loading && <div className="p-2 text-[11px] text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(p => {
             const basePrice = parseFloat(p.sell_price) || 0
             const onPromo = !!p.is_promotion && (parseFloat(p.promo_discount_pct) || 0) > 0
@@ -285,18 +285,18 @@ function ProductPickerCell({ value, onPick }) {
                 key={p.id}
                 type="button"
                 onClick={() => pick(p)}
-                className={`w-full text-left px-3 py-1.5 border-b border-slate-100 last:border-0 ${onPromo ? 'hover:bg-rose-50 bg-rose-50/30' : 'hover:bg-blue-50'}`}
+                className={`w-full text-left px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0 ${onPromo ? 'hover:bg-rose-50 bg-rose-50/30' : 'hover:bg-blue-50'}`}
               >
-                <div className="text-xs font-medium text-slate-800 truncate flex items-center gap-1">
+                <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate flex items-center gap-1">
                   {p.name}
                   {onPromo && <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-semibold">🏷️ -{p.promo_discount_pct}%</span>}
                 </div>
-                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                   <span className="font-mono">{p.barcode || p.sku || '—'}</span>
                   <span>
                     {basePrice > 0 && (
                       onPromo
-                        ? <><span className="line-through text-slate-400 mr-1">€{basePrice.toFixed(2)}</span><span className="text-rose-700 font-bold">€{promoPrice.toFixed(2)}</span></>
+                        ? <><span className="line-through text-slate-400 dark:text-slate-500 mr-1">€{basePrice.toFixed(2)}</span><span className="text-rose-700 font-bold">€{promoPrice.toFixed(2)}</span></>
                         : `€${basePrice}`
                     )}
                     {' · '}stok: {p.stock}
@@ -416,32 +416,32 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">↩️ Kthim nga fatura {invoice.invoice_no}</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">↩️ Kthim nga fatura {invoice.invoice_no}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {invoice.customer_name || 'Pa klient'} · Zgjidh artikujt që klienti po kthen dhe përshtat sasinë
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
-            <div className="text-center text-slate-400 py-8">Duke ngarkuar artikujt...</div>
+            <div className="text-center text-slate-400 dark:text-slate-500 py-8">Duke ngarkuar artikujt...</div>
           ) : items.length === 0 ? (
-            <div className="text-center text-slate-400 py-8">Kjo faturë nuk ka artikuj.</div>
+            <div className="text-center text-slate-400 dark:text-slate-500 py-8">Kjo faturë nuk ka artikuj.</div>
           ) : (
             <>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-500">{items.length} artikuj në faturë</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{items.length} artikuj në faturë</span>
                 <div className="flex gap-1">
-                  <button onClick={selectAll} className="px-2 py-1 text-[11px] rounded bg-slate-100 hover:bg-slate-200 text-slate-700">Zgjidh të gjitha</button>
-                  <button onClick={selectNone} className="px-2 py-1 text-[11px] rounded bg-slate-100 hover:bg-slate-200 text-slate-700">Pastro</button>
+                  <button onClick={selectAll} className="px-2 py-1 text-[11px] rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200">Zgjidh të gjitha</button>
+                  <button onClick={selectNone} className="px-2 py-1 text-[11px] rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200">Pastro</button>
                 </div>
               </div>
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                <thead className="bg-slate-50 dark:bg-slate-900 text-xs text-slate-500 dark:text-slate-400 uppercase">
                   <tr>
                     <th className="px-2 py-2 w-8"></th>
                     <th className="px-2 py-2 text-left font-semibold">Produkti</th>
@@ -458,15 +458,15 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
                     const ratio = origQty > 0 ? Math.min(1, retQty / origQty) : 0
                     const refund = (parseFloat(it.total_with_vat) || 0) * ratio
                     return (
-                      <tr key={it.id} className={`border-b border-slate-100 ${r.selected ? 'bg-purple-50/50' : ''}`}>
+                      <tr key={it.id} className={`border-b border-slate-100 dark:border-slate-800 ${r.selected ? 'bg-purple-50/50' : ''}`}>
                         <td className="px-2 py-2 text-center">
                           <input type="checkbox" checked={!!r.selected} onChange={() => toggle(it.id)} className="w-4 h-4 accent-purple-600" />
                         </td>
                         <td className="px-2 py-2">
-                          <div className="text-slate-800 font-medium">{it.name || <span className="italic text-slate-400">— pa emër —</span>}</div>
-                          {it.barcode && <div className="text-[10px] font-mono text-slate-500">{it.barcode}</div>}
+                          <div className="text-slate-800 dark:text-slate-100 font-medium">{it.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}</div>
+                          {it.barcode && <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">{it.barcode}</div>}
                         </td>
-                        <td className="px-2 py-2 text-right tabular-nums text-slate-600">{origQty}</td>
+                        <td className="px-2 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{origQty}</td>
                         <td className="px-2 py-2">
                           <input type="number" step="any" min="0" max={origQty}
                             value={r.qty}
@@ -475,7 +475,7 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
                             className="input-field-sm text-right tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
                           />
                         </td>
-                        <td className="px-2 py-2 text-right tabular-nums font-semibold text-slate-800">
+                        <td className="px-2 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                           {r.selected && retQty > 0 ? fmt(refund) : '—'}
                         </td>
                       </tr>
@@ -489,26 +489,26 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
         <div className="modal-footer flex-col items-stretch gap-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
-              <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali i artikujve ({currency})</label>
-              <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold">{fmt(refundTotal)}</div>
+              <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali i artikujve ({currency})</label>
+              <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold">{fmt(refundTotal)}</div>
             </div>
             <div>
-              <label className="text-[10px] text-slate-500 uppercase font-semibold">Rimbursimi aktual ({currency})</label>
+              <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Rimbursimi aktual ({currency})</label>
               <input
                 type="number" step="0.01" min="0" max={refundTotal || undefined}
                 value={refundTouched ? refundOverride : (refundTotal ? refundTotal.toFixed(2) : '')}
                 onChange={e => { setRefundOverride(e.target.value); setRefundTouched(true) }}
-                className="input-field tabular-nums font-bold text-purple-700"
+                className="input-field tabular-nums font-bold text-purple-700 dark:text-purple-300"
                 placeholder={refundTotal.toFixed(2)}
                 disabled={selected.length === 0}
               />
-              <p className="text-[10px] text-slate-400 mt-0.5">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                 Default = totali i artikujve. Mund të japësh më pak (p.sh. amortizim).
               </p>
             </div>
             <div>
-              <label className="text-[10px] text-slate-500 uppercase font-semibold">Fee / e mbajtur nga shopi</label>
-              <div className={`input-field tabular-nums font-bold ${refundDiff > 0.005 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+              <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Fee / e mbajtur nga shopi</label>
+              <div className={`input-field tabular-nums font-bold ${refundDiff > 0.005 ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200'}`}>
                 {refundDiff > 0.005 ? `${fmt(refundDiff)} ${currency}` : '✓ Rimbursim i plotë'}
               </div>
               {refundDiff > 0.005 && (
@@ -552,13 +552,13 @@ function CreditNotePicker({ date, onClose, onPicked }) {
   )
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">↩️ Anulim me Minus — Zgjidh Faturën</h3>
-            <p className="text-xs text-slate-500">Zgjidh një faturë ekzistuese për të krijuar kreditoren (me minus)</p>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">↩️ Anulim me Minus — Zgjidh Faturën</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Zgjidh një faturë ekzistuese për të krijuar kreditoren (me minus)</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <div className="px-6 pt-4">
           <input type="text" autoFocus value={q} onChange={e => setQ(e.target.value)}
@@ -566,9 +566,9 @@ function CreditNotePicker({ date, onClose, onPicked }) {
         </div>
         <div className="flex-1 overflow-y-auto p-6 pt-3">
           {loading ? (
-            <div className="text-center text-slate-400 py-8">Duke ngarkuar...</div>
+            <div className="text-center text-slate-400 dark:text-slate-500 py-8">Duke ngarkuar...</div>
           ) : filtered.length === 0 ? (
-            <div className="text-center text-slate-400 py-8">
+            <div className="text-center text-slate-400 dark:text-slate-500 py-8">
               {rows.length === 0 ? 'Asnjë faturë e vlefshme në këtë datë.' : 'Asnjë faturë nuk përputhet me kërkimin.'}
             </div>
           ) : (
@@ -576,20 +576,20 @@ function CreditNotePicker({ date, onClose, onPicked }) {
               {filtered.map(inv => (
                 <button key={inv.id}
                   onClick={() => onPicked(inv)}
-                  className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-colors">
+                  className="w-full text-left p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-purple-400 hover:bg-purple-50 transition-colors">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="font-mono font-bold text-slate-800">{inv.invoice_no}</div>
-                      <div className="text-sm text-slate-600 truncate">
-                        {inv.customer_name || <span className="italic text-slate-400">— pa klient —</span>}
-                        {inv.customer_nipt && <span className="ml-2 text-xs font-mono text-slate-500">({inv.customer_nipt})</span>}
+                      <div className="font-mono font-bold text-slate-800 dark:text-slate-100">{inv.invoice_no}</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-300 truncate">
+                        {inv.customer_name || <span className="italic text-slate-400 dark:text-slate-500">— pa klient —</span>}
+                        {inv.customer_nipt && <span className="ml-2 text-xs font-mono text-slate-500 dark:text-slate-400">({inv.customer_nipt})</span>}
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <div className="text-lg font-bold text-slate-900 tabular-nums">
+                      <div className="text-lg font-bold text-slate-900 dark:text-white tabular-nums">
                         {n(inv.total_with_vat).toLocaleString('sq-AL', { minimumFractionDigits: 2 })}
                       </div>
-                      <div className="text-xs text-slate-500">{inv.currency} · {inv.date}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{inv.currency} · {inv.date}</div>
                     </div>
                   </div>
                 </button>
@@ -718,11 +718,11 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
 
   // Statuset e porosisë online — pills në krye kur online.
   const ONLINE_STATUS_META = {
-    e_re:          { label: 'E re',          cls: 'bg-blue-100 text-blue-700',    activeCls: 'bg-blue-600 text-white',    icon: '🆕' },
-    ne_pergatitje: { label: 'Në përgatitje', cls: 'bg-amber-100 text-amber-700',  activeCls: 'bg-amber-600 text-white',   icon: '📦' },
-    derguar:       { label: 'Dërguar',       cls: 'bg-purple-100 text-purple-700',activeCls: 'bg-purple-600 text-white',  icon: '🚚' },
-    dorezuar:      { label: 'Dorëzuar',      cls: 'bg-emerald-100 text-emerald-700', activeCls: 'bg-emerald-600 text-white', icon: '✓' },
-    anuluar:       { label: 'Anuluar',       cls: 'bg-slate-100 text-slate-500',  activeCls: 'bg-slate-600 text-white',   icon: '❌' },
+    e_re:          { label: 'E re',          cls: 'bg-blue-100 text-blue-700 dark:text-blue-300',    activeCls: 'bg-blue-600 text-white',    icon: '🆕' },
+    ne_pergatitje: { label: 'Në përgatitje', cls: 'bg-amber-100 text-amber-700 dark:text-amber-300',  activeCls: 'bg-amber-600 text-white',   icon: '📦' },
+    derguar:       { label: 'Dërguar',       cls: 'bg-purple-100 text-purple-700 dark:text-purple-300',activeCls: 'bg-purple-600 text-white',  icon: '🚚' },
+    dorezuar:      { label: 'Dorëzuar',      cls: 'bg-emerald-100 text-emerald-700 dark:text-emerald-300', activeCls: 'bg-emerald-600 text-white', icon: '✓' },
+    anuluar:       { label: 'Anuluar',       cls: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400',  activeCls: 'bg-slate-600 text-white',   icon: '❌' },
   }
   const onlineStatusCounts = online
     ? rawList.reduce((a, i) => { const s = i.order_status || 'e_re'; a[s] = (a[s] || 0) + 1; return a }, {})
@@ -747,10 +747,10 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
             {online ? '🛒 Shitje Online' : 'Fatura të Shitjes'}
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             {fromDate === toDate
               ? (online ? 'Porositë online për këtë datë' : 'Lista e faturave për këtë datë')
               : (online ? `Porositë online nga ${fromDate} në ${toDate}` : `Lista e faturave nga ${fromDate} në ${toDate}`)}
@@ -760,7 +760,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
             <div className="flex flex-wrap gap-1.5 mt-2">
               <button
                 onClick={() => setFOrderStatus('all')}
-                className={`badge cursor-pointer ${fOrderStatus === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                className={`badge cursor-pointer ${fOrderStatus === 'all' ? 'bg-slate-800 dark:bg-slate-900 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
               >📋 Të gjitha: {rawList.length}</button>
               {Object.entries(ONLINE_STATUS_META).map(([id, meta]) => (
                 <button key={id}
@@ -774,23 +774,23 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
             <div className="flex flex-wrap gap-1.5 mt-2">
               <button
                 onClick={() => setFType('all')}
-                className={`badge cursor-pointer ${fType === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                className={`badge cursor-pointer ${fType === 'all' ? 'bg-slate-800 dark:bg-slate-900 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
                 title="Shfaq të gjitha"
               >📋 Të gjitha: {rawList.length}</button>
               <button
                 onClick={() => setFType('sale')}
-                className={`badge cursor-pointer ${fType === 'sale' ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                className={`badge cursor-pointer ${fType === 'sale' ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200'}`}
                 title="Shfaq vetëm shitjet e rregullta"
               >🧾 Shitje: {counts.sale}</button>
               <button
                 onClick={() => setFType('return')}
-                className={`badge cursor-pointer ${fType === 'return' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+                className={`badge cursor-pointer ${fType === 'return' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700 dark:text-red-300 hover:bg-red-200'}`}
                 title="Shfaq vetëm kthimet (faturat kreditore)"
               >↩️ Kthime: {counts.return}</button>
               {counts.cancelled > 0 && (
                 <button
                   onClick={() => setFType('cancelled')}
-                  className={`badge cursor-pointer ${fType === 'cancelled' ? 'bg-slate-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
+                  className={`badge cursor-pointer ${fType === 'cancelled' ? 'bg-slate-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
                   title="Shfaq vetëm faturat e anuluara"
                 >🚫 Anuluar: {counts.cancelled}</button>
               )}
@@ -804,7 +804,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">🔎</span>
-          <span className="text-sm font-semibold text-slate-700">Filtra</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtra</span>
         </div>
         <div>
           <label className="form-label">Nga data</label>
@@ -886,11 +886,11 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : list.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">🧾</div>
-            <p className="text-slate-500 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               {fromDate === toDate
                 ? 'Nuk ka fatura për këtë datë.'
                 : 'Nuk ka fatura në këtë periudhë.'}
@@ -900,22 +900,22 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1200px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fature</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase">NIPT</th>
-                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Pagesa</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Pa Zbritje</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Zbritja</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Pa TVSH</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">TVSH</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">TOTALI</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Shuma e Paguar</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Shuma Pa Paguar</th>
-                {online && <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Statusi</th>}
-                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-40">Veprime</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
+                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa Zbritje</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritja</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TOTALI</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shuma e Paguar</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shuma Pa Paguar</th>
+                {online && <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statusi</th>}
+                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-40">Veprime</th>
               </tr>
             </thead>
             <tbody>
@@ -927,43 +927,43 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                 const due = Math.max(0, n(inv.total_with_vat) - initPaid)
                 const pm  = inv.payment_method
                 const pmBadge = pm === 'debt'
-                  ? <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
+                  ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
                   : (pm === 'bank' || pm === 'pos')
-                  ? <span className="badge bg-blue-100 text-blue-700">💳 Me POS</span>
+                  ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">💳 Me POS</span>
                   : pm === 'mikse'
                   ? <span className="badge bg-teal-100 text-teal-700">🔀 Mikse</span>
-                  : <span className="badge bg-emerald-100 text-emerald-700">💵 Cash</span>
+                  : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
                 const isCancelled = !!inv.cancelled
                 const isCredit    = !!inv.is_credit_note
                 const rate        = n(inv.exchange_rate) || 1
                 const isForeign   = (inv.currency || 'LEK') !== 'LEK'
                 const rowCls = isCancelled
-                  ? 'border-b border-slate-100 bg-slate-50 line-through opacity-60'
+                  ? 'border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 line-through opacity-60'
                   : isCredit
-                  ? 'border-b border-slate-100 bg-red-50/40 hover:bg-red-50'
-                  : 'border-b border-slate-100 hover:bg-slate-50'
+                  ? 'border-b border-slate-100 dark:border-slate-800 bg-red-50/40 hover:bg-red-50'
+                  : 'border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                 return (
                 <tr key={inv.id} className={rowCls}>
-                  <td className="px-2 py-2 font-mono text-xs text-slate-700">
+                  <td className="px-2 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">
                     {inv.invoice_no}
-                    {isCancelled && <span className="ml-1.5 badge bg-slate-200 text-slate-600 text-[9px]">ANULUAR</span>}
-                    {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 text-[9px]">KREDITORE</span>}
+                    {isCancelled && <span className="ml-1.5 badge bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px]">ANULUAR</span>}
+                    {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 dark:text-red-300 text-[9px]">KREDITORE</span>}
                   </td>
-                  <td className="px-2 py-2 text-slate-800">{inv.customer_name || <span className="text-slate-400 italic">— pa klient —</span>}</td>
-                  <td className="px-2 py-2 font-mono text-xs text-slate-500">{inv.customer_nipt || '—'}</td>
+                  <td className="px-2 py-2 text-slate-800 dark:text-slate-100">{inv.customer_name || <span className="text-slate-400 dark:text-slate-500 italic">— pa klient —</span>}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{inv.customer_nipt || '—'}</td>
                   <td className="px-2 py-2 text-center text-xs">
                     <span className="badge badge-blue">{inv.currency}</span>
                   </td>
                   <td className="px-2 py-2 text-center text-xs">{pmBadge}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-slate-700">
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
                     {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt((n(inv.subtotal_no_vat) + n(inv.total_discount)) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className={`px-2 py-2 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400'}`}>
+                  <td className={`px-2 py-2 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                     {n(inv.total_discount) > 0.005 ? `-${fmt(inv.total_discount)}` : '—'}
                     {isForeign && n(inv.total_discount) > 0.005 && (
                       <div className="text-[10px] font-normal text-orange-500/80 italic">
@@ -971,31 +971,31 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-slate-700">
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.subtotal_no_vat)}
                     {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(inv.subtotal_no_vat) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-slate-700">
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.total_vat)}
                     {isForeign && n(inv.total_vat) > 0.005 && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(inv.total_vat) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums font-bold text-slate-900">
+                  <td className="px-2 py-2 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                     {fmt(inv.total_with_vat)}
                     {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(inv.total_with_vat) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-emerald-700">
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(initPaid)}
                     {isForeign && initPaid > 0.005 && (
                       <div className="text-[10px] font-normal text-emerald-600/70 italic">
@@ -1012,8 +1012,8 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                               key={i}
                               className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium ${
                                 s.method === 'cash'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200'
+                                  : 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200'
                               }`}
                               title={`${s.method === 'cash' ? 'Cash' : 'POS/Bankë'} · ${s.currency}`}
                             >
@@ -1024,7 +1024,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                       )
                     })()}
                   </td>
-                  <td className={`px-2 py-2 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : due < -0.005 ? 'text-purple-700' : 'text-emerald-600'}`}>
+                  <td className={`px-2 py-2 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : due < -0.005 ? 'text-purple-700 dark:text-purple-300' : 'text-emerald-600'}`}>
                     {Math.abs(due) > 0.005 ? fmt(due) : '✓'}
                     {isForeign && Math.abs(due) > 0.005 && (
                       <div className={`text-[10px] font-normal italic ${due > 0.005 ? 'text-red-500/80' : 'text-purple-600/80'}`}>
@@ -1045,15 +1045,15 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                   })()}
                   <td className="px-2 py-3">
                     <div className="flex items-center justify-center gap-1 flex-wrap">
-                      <button onClick={() => onOpen(inv.id)} className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-[11px] font-medium">Hap</button>
+                      <button onClick={() => onOpen(inv.id)} className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-[11px] font-medium">Hap</button>
                       {online && (() => {
                         const cur = inv.order_status || 'e_re'
                         // Klasat statike (Tailwind s'suporton dinamike te build).
                         const BTN_CLS = {
-                          ne_pergatitje: 'bg-amber-50 hover:bg-amber-100 text-amber-700',
-                          derguar:       'bg-purple-50 hover:bg-purple-100 text-purple-700',
-                          dorezuar:      'bg-emerald-50 hover:bg-emerald-100 text-emerald-700',
-                          anuluar:       'bg-slate-100 hover:bg-slate-200 text-slate-700',
+                          ne_pergatitje: 'bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 text-amber-700 dark:text-amber-300',
+                          derguar:       'bg-purple-50 dark:bg-purple-900/30 hover:bg-purple-100 text-purple-700 dark:text-purple-300',
+                          dorezuar:      'bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300',
+                          anuluar:       'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200',
                         }
                         const btns = []
                         if (cur === 'e_re')          btns.push(['ne_pergatitje', '📦'])
@@ -1070,36 +1070,36 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                       {!online && !isCancelled && !isCredit && (
                         <button
                           onClick={() => onStornim?.(inv.id, inv.invoice_no)}
-                          className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-[11px] font-medium"
+                          className="px-2 py-1 rounded-lg bg-purple-50 dark:bg-purple-900/30 hover:bg-purple-100 text-purple-700 dark:text-purple-300 text-[11px] font-medium"
                           title="Zgjidh artikujt që kthehen (mund të jetë kthim i pjesshëm)"
                         >↩️ Kthim</button>
                       )}
                       {isAdmin && (
                         <button onClick={() => onDelete(inv.id, inv.invoice_no)}
-                          className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-medium">Fshi</button>
+                          className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-[11px] font-medium">Fshi</button>
                       )}
                     </div>
                   </td>
                 </tr>
               )})}
             </tbody>
-            <tfoot className="bg-emerald-50 border-t-2 border-emerald-300">
+            <tfoot className="bg-emerald-50 dark:bg-emerald-900/30 border-t-2 border-emerald-300">
               {currenciesInList.map((cur, idx) => {
                 const t = totalsByCur[cur]
                 return (
                   <tr key={cur} className={idx > 0 ? 'border-t border-emerald-200' : ''}>
-                    <td colSpan={5} className="px-2 py-2 text-xs font-bold text-emerald-700 uppercase tracking-wide">
+                    <td colSpan={5} className="px-2 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                       💵 TOTAL ({cur}) <span className="text-[10px] font-normal text-emerald-600">— {t.count} {t.count === 1 ? 'faturë' : 'fatura'}</span>
                     </td>
-                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.gross)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.gross)}</td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-orange-600">
                       {t.disc > 0.005 ? `-${fmt(t.disc)}` : '—'}
                     </td>
-                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.sub)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.vat)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(t.tot)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-emerald-700 text-base">{fmt(t.paid)}</td>
-                    <td className={`px-2 py-2 text-right tabular-nums font-extrabold text-base ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.sub)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.vat)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(t.tot)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(t.paid)}</td>
+                    <td className={`px-2 py-2 text-right tabular-nums font-extrabold text-base ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                       {t.due > 0.005 ? fmt(t.due) : '✓'}
                     </td>
                     {online && <td></td>}
@@ -1143,6 +1143,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   const [notes, setNotes]             = useState('')
   const [items, setItems]             = useState([emptyItem()])
   const [allRates, setAllRates]       = useState({ LEK: 1 })
+
+  const isAdmin = getUser()?.role === 'admin'
+  const today = new Date().toISOString().split('T')[0]
 
   // Initial load: existing invoice OR fresh new invoice
   useEffect(() => {
@@ -1477,7 +1480,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
 
   if (loading) {
     return (
-      <div className="card p-8 text-center text-slate-400">Duke ngarkuar faturën...</div>
+      <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar faturën...</div>
     )
   }
 
@@ -1488,12 +1491,12 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
-            <h2 className="text-lg font-bold text-slate-800">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
               {online
                 ? (invoiceId ? '🛒 Edito Porosinë Online' : '🛒 Porosi e Re Online')
                 : (invoiceId ? 'Edito Faturën' : 'Faturë e Re Shitje')}
             </h2>
-            <p className="text-xs text-slate-500 font-mono">Nr. {invoiceNo}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">Nr. {invoiceNo}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -1507,10 +1510,10 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
       {/* Header card */}
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
-          <label className="form-label">Nr. Fature <span className="text-[10px] text-slate-400">(auto)</span></label>
+          <label className="form-label">Nr. Fature <span className="text-[10px] text-slate-400 dark:text-slate-500">(auto)</span></label>
           <input
             type="text" value={invoiceNo} readOnly
-            className="input-field font-mono bg-slate-50 text-slate-700 cursor-not-allowed"
+            className="input-field font-mono bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 cursor-not-allowed"
           />
         </div>
         <div>
@@ -1518,7 +1521,10 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
           <input
             type="date" value={invoiceDate}
             onChange={e => setInvoiceDate(e.target.value)}
-            className="input-field"
+            max={isAdmin ? undefined : today}
+            min={isAdmin ? undefined : today}
+            readOnly={!isAdmin}
+            className={`input-field ${!isAdmin ? 'bg-slate-50 dark:bg-slate-900 cursor-not-allowed' : ''}`}
           />
         </div>
         <ClientPicker value={customer} onChange={setCustomer} />
@@ -1531,7 +1537,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
         <div>
           <label className="form-label">
             Kursi i Këmbimit
-            <span className="ml-1 text-[10px] text-slate-400">(1 {currency} = ? LEK)</span>
+            <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">(1 {currency} = ? LEK)</span>
           </label>
           <div className="flex gap-1">
             <input
@@ -1542,9 +1548,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
               className="input-field flex-1 disabled:bg-slate-50"
             />
             <button onClick={refreshRates} title="Rifresko kursin"
-              className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs">↻</button>
+              className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs">↻</button>
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
             Burimi: <span className="font-medium">{rateSource || '—'}</span>
           </p>
         </div>
@@ -1559,9 +1565,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             const invR = parseFloat(exchangeRate) || 1
             return (
               <div className="mt-3 space-y-3">
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-slate-500">
+                    <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
                       <tr>
                         <th className="px-2 py-2 text-left font-semibold w-28">Metoda</th>
                         <th className="px-2 py-2 text-left font-semibold w-24">Monedha</th>
@@ -1573,7 +1579,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     <tbody>
                       {paymentSplits.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="px-3 py-4 text-center text-amber-700 bg-amber-50 text-xs">
+                          <td colSpan={5} className="px-3 py-4 text-center text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 text-xs">
                             ⚠️ Asnjë pagesë — fatura do të mbetet <span className="font-semibold">borxh i plotë</span>. Përdor butonat më poshtë për të shtuar pagesë.
                           </td>
                         </tr>
@@ -1583,7 +1589,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         const r = parseFloat(s.exchange_rate) || 1
                         const inInv = invR > 0 ? +((amt * r) / invR).toFixed(2) : 0
                         return (
-                          <tr key={idx} className="border-t border-slate-100">
+                          <tr key={idx} className="border-t border-slate-100 dark:border-slate-800">
                             <td className="px-1 py-1">
                               <select value={s.method} onChange={e => updateSplit(idx, { method: e.target.value })}
                                 className="input-field-sm">
@@ -1602,7 +1608,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                                 onChange={v => updateSplit(idx, { amount: v })}
                                 className="input-field-sm text-right tabular-nums" placeholder="0.00" />
                             </td>
-                            <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt(inInv)}</td>
+                            <td className="px-2 py-1 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(inInv)}</td>
                             <td className="px-1 py-1 text-center">
                               <button type="button" onClick={() => removeSplit(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
                             </td>
@@ -1611,23 +1617,23 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                       })}
                     </tbody>
                   </table>
-                  <div className="p-2 border-t border-slate-100 flex gap-2">
+                  <div className="p-2 border-t border-slate-100 dark:border-slate-800 flex gap-2">
                     <button type="button" onClick={() => addSplit('cash')} className="btn-secondary text-xs">+ Shto Cash</button>
                     <button type="button" onClick={() => addSplit('bank')} className="btn-secondary text-xs">+ Shto POS/Bankë</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali ({currency})</label>
-                    <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold">{fmt(tot)}</div>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali ({currency})</label>
+                    <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold">{fmt(tot)}</div>
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-500 uppercase font-semibold">Shuma e Paguar ({currency})</label>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Shuma e Paguar ({currency})</label>
                     <div className="input-field bg-teal-50 text-teal-700 border-teal-200 tabular-nums font-bold">{fmt(sumPaid)}</div>
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-500 uppercase font-semibold">Pa Paguar / Borxh ({currency})</label>
-                    <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 text-red-700 border-red-200' : due < -0.005 ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Pa Paguar / Borxh ({currency})</label>
+                    <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200' : due < -0.005 ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-purple-200' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200'}`}>
                       {due > 0.005 ? fmt(due) : due < -0.005 ? `+${fmt(-due)} tepër` : '✓ Paguar plotësisht'}
                     </div>
                   </div>
@@ -1651,7 +1657,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
         <div className="card border-purple-200 bg-purple-50/30">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xl">🛒</span>
-            <h3 className="text-sm font-bold text-slate-800">Detajet e Porosisë Online</h3>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Detajet e Porosisë Online</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
@@ -1694,8 +1700,8 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr className="text-slate-500">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">#</th>
                 <th className="px-2 py-2 text-left font-semibold w-64">Produkti (barkod ose emër)</th>
                 <th className="px-2 py-2 text-left font-semibold w-28">Nr Serie</th>
@@ -1715,8 +1721,8 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                 const base = n(it.qty) * n(it.unit_price_no_vat)
                 const discEur = discountEurFor(it)
                 return (
-                  <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
+                  <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
                       {it.on_promotion && (
@@ -1730,14 +1736,14 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     <td className="px-1 py-1">
                       <input
                         type="text" value={it.serial_no || ''} readOnly
-                        className="input-field-sm font-mono bg-slate-50 text-slate-600"
+                        className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
                         placeholder="—"
                       />
                     </td>
                     <td className="px-1 py-1">
                       <input
                         type="text" value={it.barcode} readOnly
-                        className="input-field-sm font-mono bg-slate-50 text-slate-600"
+                        className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
                         placeholder="—"
                       />
                     </td>
@@ -1781,7 +1787,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         className="input-field-sm text-right"
                       />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900">{fmt(lt.total_with_vat)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900 dark:text-white">{fmt(lt.total_with_vat)}</td>
                     <td className="px-1 py-1 text-center">
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
                     </td>
@@ -1789,16 +1795,16 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                 )
               })}
             </tbody>
-            <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+            <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={9} className="px-2 py-2 text-right text-slate-600">TOTALI ({currency}):</td>
-                <td className="px-2 py-2 text-right tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</td>
+                <td colSpan={9} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
+                <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
               </tr>
             </tfoot>
           </table>
         </div>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800">
           <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
         </div>
       </div>

@@ -40,10 +40,10 @@ function ProductImage({ product, onUploaded }) {
     >
       {imgSrc ? (
         <img src={imgSrc} alt={product.name}
-          className="w-14 h-14 rounded-2xl object-cover border border-slate-200" />
+          className="w-14 h-14 rounded-2xl object-cover border border-slate-200 dark:border-slate-700" />
       ) : (
         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl
-          bg-slate-100 hover:bg-blue-50 transition-colors`}>
+          bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 transition-colors`}>
           {CAT_ICONS[product.category] || '📦'}
         </div>
       )}
@@ -79,14 +79,14 @@ const CAT_ICONS = {
   'Tjeter':          '📦',
 }
 const CAT_COLORS = {
-  'Flori':           'bg-yellow-100 text-yellow-800',
-  'Diamant':         'bg-blue-100 text-blue-800',
-  'Ora':             'bg-slate-100 text-slate-700',
-  'Unazë':           'bg-yellow-100 text-yellow-800',
+  'Flori':           'bg-yellow-100 text-yellow-800 dark:text-yellow-200',
+  'Diamant':         'bg-blue-100 text-blue-800 dark:text-blue-200',
+  'Ora':             'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200',
+  'Unazë':           'bg-yellow-100 text-yellow-800 dark:text-yellow-200',
   'Vathë':           'bg-pink-100 text-pink-800',
-  'Byzylyk':         'bg-amber-100 text-amber-800',
-  'Gjerdan / Varëse':'bg-orange-100 text-orange-800',
-  'Komplet':         'bg-purple-100 text-purple-800',
+  'Byzylyk':         'bg-amber-100 text-amber-800 dark:text-amber-200',
+  'Gjerdan / Varëse':'bg-orange-100 text-orange-800 dark:text-orange-200',
+  'Komplet':         'bg-purple-100 text-purple-800 dark:text-purple-200',
   'Tjeter':          'bg-gray-100 text-gray-700',
 }
 const EMPTY = {
@@ -218,13 +218,13 @@ function BarcodeModal({ product, onClose, onSaved }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md">
         <div className="modal-header">
           <div className="min-w-0">
-            <h3 className="font-bold text-slate-800 text-lg">🏷️ Barkod — {productNo(product.id)}</h3>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">{product.name}</p>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">🏷️ Barkod — {productNo(product.id)}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">{product.name}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
         <div className="modal-body space-y-4">
           <div>
@@ -246,33 +246,33 @@ function BarcodeModal({ product, onClose, onSaved }) {
                 🎲 Gjenero
               </button>
             </div>
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
               Vetëm: 0-9, A-Z, dhe - . $ / + % (Code-39). Skanuesi e lexon si tekst.
             </p>
           </div>
 
-          <div className="bg-white border-2 border-slate-200 rounded-xl p-4">
-            <div className="text-center text-xs font-semibold text-slate-700 mb-2 truncate">{product.name}</div>
+          <div className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl p-4">
+            <div className="text-center text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2 truncate">{product.name}</div>
             {clean ? (
               <div dangerouslySetInnerHTML={{ __html: svg }} />
             ) : (
               <div className="text-center text-xs text-red-500 py-6">Vendos një vlerë të vlefshme.</div>
             )}
             {product.sell_price > 0 && (
-              <div className="text-center text-sm font-bold text-slate-800 mt-2">
+              <div className="text-center text-sm font-bold text-slate-800 dark:text-slate-100 mt-2">
                 €{Number(product.sell_price).toFixed(2)}
               </div>
             )}
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-600 font-medium">Kopje për print</label>
+            <label className="text-xs text-slate-600 dark:text-slate-300 font-medium">Kopje për print</label>
             <input
               type="number" min="1" max="50" value={copies}
               onChange={e => setCopies(e.target.value)}
               className="input-field w-24"
             />
-            <span className="text-[11px] text-slate-500">etiketa 50×25 mm</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">etiketa 50×25 mm</span>
           </div>
         </div>
         <div className="modal-footer">
@@ -495,19 +495,19 @@ function ImportModal({ onClose, onDone }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
 
         {/* Header */}
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
               {step === 'done' ? '✅ Import u krye!' : 'Import nga Excel'}
             </h3>
             {fileName && step !== 'upload' && (
-              <p className="text-xs text-slate-500 mt-0.5">📄 {fileName}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">📄 {fileName}</p>
             )}
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xl">×</button>
         </div>
 
         <div className="p-6">
@@ -518,11 +518,11 @@ function ImportModal({ onClose, onDone }) {
               {/* Drop zone */}
               <div
                 onClick={() => fileRef.current.click()}
-                className="border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-2xl p-10 text-center cursor-pointer transition-colors group"
+                className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-400 rounded-2xl p-10 text-center cursor-pointer transition-colors group"
               >
                 <div className="text-5xl mb-3">📂</div>
-                <p className="font-semibold text-slate-700 group-hover:text-blue-600">Klikoni për të zgjedhur Excel-in</p>
-                <p className="text-sm text-slate-400 mt-1">Mbështet: .xlsx, .xls</p>
+                <p className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-blue-600">Klikoni për të zgjedhur Excel-in</p>
+                <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Mbështet: .xlsx, .xls</p>
                 <input
                   ref={fileRef}
                   type="file"
@@ -532,12 +532,12 @@ function ImportModal({ onClose, onDone }) {
                 />
               </div>
 
-              {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
+              {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 p-3 rounded-lg">{error}</p>}
 
               {/* Template hint */}
-              <div className="flex items-center justify-between p-4 bg-blue-50 rounded-xl border border-blue-100">
+              <div className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-100">
                 <div>
-                  <p className="text-sm font-semibold text-blue-800">Nuk keni template?</p>
+                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">Nuk keni template?</p>
                   <p className="text-xs text-blue-600">Shkarkoni modelin e gatshëm me kolonat e sakta</p>
                 </div>
                 <button onClick={downloadTemplate} className="btn-secondary text-xs whitespace-nowrap">
@@ -556,11 +556,11 @@ function ImportModal({ onClose, onDone }) {
                 <div className="grid grid-cols-3 gap-2">
                   {COL_FIELDS.map(f => (
                     <div key={f.key} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-600 w-32 flex-shrink-0">{f.label}</span>
+                      <span className="text-xs text-slate-600 dark:text-slate-300 w-32 flex-shrink-0">{f.label}</span>
                       <select
                         value={mapping[f.key] ?? -1}
                         onChange={e => setMap(f.key, e.target.value)}
-                        className={`input-field-sm flex-1 ${mapping[f.key] >= 0 ? 'border-green-400' : 'border-slate-300'}`}
+                        className={`input-field-sm flex-1 ${mapping[f.key] >= 0 ? 'border-green-400' : 'border-slate-300 dark:border-slate-700'}`}
                       >
                         <option value={-1}>— Nuk ka —</option>
                         {headers.map((h, i) => (
@@ -574,16 +574,16 @@ function ImportModal({ onClose, onDone }) {
 
               {/* Stats */}
               <div className="flex gap-3">
-                <div className="flex-1 p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
-                  <p className="text-2xl font-bold text-emerald-700">{products.length}</p>
+                <div className="flex-1 p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl border border-emerald-200 text-center">
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{products.length}</p>
                   <p className="text-xs text-emerald-600">Produkte të gatshme</p>
                 </div>
-                <div className="flex-1 p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
-                  <p className="text-2xl font-bold text-slate-700">{dataRows.length - products.length}</p>
-                  <p className="text-xs text-slate-500">Rreshta të zbrazur</p>
+                <div className="flex-1 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                  <p className="text-2xl font-bold text-slate-700 dark:text-slate-200">{dataRows.length - products.length}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Rreshta të zbrazur</p>
                 </div>
-                <div className="flex-1 p-3 bg-blue-50 rounded-xl border border-blue-200 text-center">
-                  <p className="text-2xl font-bold text-blue-700">{headers.length}</p>
+                <div className="flex-1 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-200 text-center">
+                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{headers.length}</p>
                   <p className="text-xs text-blue-600">Kolona totale</p>
                 </div>
               </div>
@@ -591,52 +591,52 @@ function ImportModal({ onClose, onDone }) {
               {/* Preview table */}
               <div>
                 <p className="section-title">Shembull — 5 produktet e para</p>
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50">
+                    <thead className="bg-slate-50 dark:bg-slate-900">
                       <tr>
-                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Nr.</th>
-                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Barkodi</th>
-                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Nr Serie</th>
-                        <th className="px-2 py-2 text-left font-semibold text-slate-500">Pershkrimi</th>
-                        <th className="px-2 py-2 text-center font-semibold text-slate-500">Njesi</th>
-                        <th className="px-2 py-2 text-center font-semibold text-slate-500">Sasi</th>
-                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Gram</th>
-                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Cm PA</th>
-                        <th className="px-2 py-2 text-center font-semibold text-slate-500">TVSH</th>
-                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Kosto</th>
-                        <th className="px-2 py-2 text-right font-semibold text-slate-500">Shitje</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Nr.</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Barkodi</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Nr Serie</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Pershkrimi</th>
+                        <th className="px-2 py-2 text-center font-semibold text-slate-500 dark:text-slate-400">Njesi</th>
+                        <th className="px-2 py-2 text-center font-semibold text-slate-500 dark:text-slate-400">Sasi</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Gram</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Cm PA</th>
+                        <th className="px-2 py-2 text-center font-semibold text-slate-500 dark:text-slate-400">TVSH</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Kosto</th>
+                        <th className="px-2 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Shitje</th>
                       </tr>
                     </thead>
                     <tbody>
                       {products.slice(0, 5).map((p, i) => (
-                        <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
-                          <td className="px-2 py-2 font-mono text-slate-400">{i + 1}</td>
-                          <td className="px-2 py-2 font-mono text-slate-500">{p.barcode || '—'}</td>
-                          <td className="px-2 py-2 font-mono text-slate-500">{p.serial_no || '—'}</td>
-                          <td className="px-2 py-2 font-medium text-slate-800 max-w-[180px] truncate">{p.name || <span className="text-red-400 italic">bosh</span>}</td>
-                          <td className="px-2 py-2 text-center text-slate-600">{p.unit || '—'}</td>
+                        <tr key={i} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="px-2 py-2 font-mono text-slate-400 dark:text-slate-500">{i + 1}</td>
+                          <td className="px-2 py-2 font-mono text-slate-500 dark:text-slate-400">{p.barcode || '—'}</td>
+                          <td className="px-2 py-2 font-mono text-slate-500 dark:text-slate-400">{p.serial_no || '—'}</td>
+                          <td className="px-2 py-2 font-medium text-slate-800 dark:text-slate-100 max-w-[180px] truncate">{p.name || <span className="text-red-400 italic">bosh</span>}</td>
+                          <td className="px-2 py-2 text-center text-slate-600 dark:text-slate-300">{p.unit || '—'}</td>
                           <td className="px-2 py-2 text-center">
                             <span className={`badge ${p.stock === 0 ? 'badge-red' : 'badge-green'}`}>{p.stock}</span>
                           </td>
-                          <td className="px-2 py-2 text-right text-slate-600 tabular-nums">{p.gram || '—'}</td>
-                          <td className="px-2 py-2 text-right text-slate-700 tabular-nums">{p.purchase_price_no_vat || '—'}</td>
-                          <td className="px-2 py-2 text-center text-slate-600">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
-                          <td className="px-2 py-2 text-right text-slate-700 tabular-nums">{p.cost_price || '—'}</td>
-                          <td className="px-2 py-2 text-right font-semibold text-slate-900 tabular-nums">{p.sell_price || '—'}</td>
+                          <td className="px-2 py-2 text-right text-slate-600 dark:text-slate-300 tabular-nums">{p.gram || '—'}</td>
+                          <td className="px-2 py-2 text-right text-slate-700 dark:text-slate-200 tabular-nums">{p.purchase_price_no_vat || '—'}</td>
+                          <td className="px-2 py-2 text-center text-slate-600 dark:text-slate-300">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
+                          <td className="px-2 py-2 text-right text-slate-700 dark:text-slate-200 tabular-nums">{p.cost_price || '—'}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-slate-900 dark:text-white tabular-nums">{p.sell_price || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 {products.length > 5 && (
-                  <p className="text-xs text-slate-400 mt-2 text-center">
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 text-center">
                     + {products.length - 5} produkte të tjera...
                   </p>
                 )}
               </div>
 
-              {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
+              {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 p-3 rounded-lg">{error}</p>}
 
               <div className="flex gap-3">
                 <button onClick={() => setStep('upload')} className="btn-secondary">
@@ -659,10 +659,10 @@ function ImportModal({ onClose, onDone }) {
           {step === 'done' && (
             <div className="text-center py-8">
               <div className="text-6xl mb-4">🎉</div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">
                 {importedCount} produkte u importuan!
               </h3>
-              <p className="text-slate-500 text-sm mb-6">
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
                 Të gjitha produktet janë shtuar në inventar me numërim automatik.
               </p>
               <button onClick={onClose} className="btn-primary mx-auto">
@@ -735,17 +735,17 @@ function ProductModal({ product, onClose, onSave }) {
       <div className="modal-box">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
               {product?.id ? `Ndrysho — ${productNo(product.id)}` : 'Shto Produkt të Ri'}
             </h3>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {/* Category picker */}
-            <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl">
+            <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl">
               <div className="text-5xl select-none">{CAT_ICONS[form.category] || '📦'}</div>
               <div className="flex-1">
                 <label className="form-label">Kategoria</label>
@@ -786,20 +786,20 @@ function ProductModal({ product, onClose, onSave }) {
                 <MoneyInput value={form.purchase_price_no_vat}
                   onChange={v => set('purchase_price_no_vat', String(v))}
                   className="input-field" placeholder="0.00" />
-                <p className="text-[10px] text-slate-400 mt-0.5">Çmimi bazë nga furnitori (pa TVSH).</p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Çmimi bazë nga furnitori (pa TVSH).</p>
               </div>
               <div>
                 <label className="form-label">Çmimi Kosto (€)</label>
                 <MoneyInput value={form.cost_price} onChange={v => set('cost_price', String(v))}
                   className="input-field" placeholder="0.00" />
-                <p className="text-[10px] text-slate-400 mt-0.5">Kosto totale (me TVSH + tarifat).</p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Kosto totale (me TVSH + tarifat).</p>
               </div>
               <div>
                 <label className="form-label">Çmimi Shitje (€)</label>
                 <MoneyInput value={form.sell_price} onChange={v => set('sell_price', String(v))}
                   className="input-field" placeholder="0.00" />
                 <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                  <span className="text-[10px] text-slate-500 mr-0.5">nga kosto:</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 mr-0.5">nga kosto:</span>
                   {[0.5, 1, 1.5, 2, 2.5, 3].map(m => {
                     const cost = parseFloat(form.cost_price) || 0
                     const disabled = cost <= 0
@@ -810,7 +810,7 @@ function ProductModal({ product, onClose, onSave }) {
                         disabled={disabled}
                         onClick={() => set('sell_price', (cost * m).toFixed(2))}
                         title={disabled ? 'Vendos fillimisht koston' : `Çm. Shitje = €${(cost * m).toFixed(2)}`}
-                        className="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 font-semibold border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-100 disabled:hover:text-slate-600"
+                        className="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-100 disabled:hover:text-slate-600"
                       >
                         ×{m}
                       </button>
@@ -832,7 +832,7 @@ function ProductModal({ product, onClose, onSave }) {
                 <label className="form-label">Gramatura (gr)</label>
                 <input type="number" step="0.001" min="0" value={form.gram} onChange={e => set('gram', e.target.value)}
                   className="input-field" placeholder="0.000" />
-                <p className="text-[10px] text-slate-400 mt-1">Do të plotësohet automatikisht në faturat e shitjes.</p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Do të plotësohet automatikisht në faturat e shitjes.</p>
               </div>
               <div className="col-span-2">
                 <label className="form-label">TVSH %</label>
@@ -855,7 +855,7 @@ function ProductModal({ product, onClose, onSave }) {
                     className="input-field w-32"
                     placeholder="20"
                   />
-                  <span className="text-xs text-slate-500">do të aplikohet automatikisht kur ky produkt të shitet</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">do të aplikohet automatikisht kur ky produkt të shitet</span>
                 </div>
               </div>
               <div className="col-span-2">
@@ -864,7 +864,7 @@ function ProductModal({ product, onClose, onSave }) {
                   className="input-field resize-none" rows={2} placeholder="Detaje shtesë..." />
               </div>
               <div className="col-span-2">
-                <div className={`p-3 rounded-xl border transition ${form.is_promotion ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`p-3 rounded-xl border transition ${form.is_promotion ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input
                       type="checkbox"
@@ -873,8 +873,8 @@ function ProductModal({ product, onClose, onSave }) {
                       className="w-4 h-4 accent-rose-600"
                     />
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-slate-800">🏷️ Në Promocion</p>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">🏷️ Në Promocion</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         Produkti do të shfaqet edhe tek faqja "Produkte Promocion".
                       </p>
                     </div>
@@ -891,9 +891,9 @@ function ProductModal({ product, onClose, onSave }) {
                         autoFocus
                       />
                       {parseFloat(form.sell_price) > 0 && parseFloat(form.promo_discount_pct) > 0 && (
-                        <div className="text-[11px] text-slate-600 flex-1 text-right">
-                          <span className="text-slate-400 line-through mr-1.5">€{parseFloat(form.sell_price).toFixed(2)}</span>
-                          <span className="font-bold text-emerald-700">
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300 flex-1 text-right">
+                          <span className="text-slate-400 dark:text-slate-500 line-through mr-1.5">€{parseFloat(form.sell_price).toFixed(2)}</span>
+                          <span className="font-bold text-emerald-700 dark:text-emerald-300">
                             €{(parseFloat(form.sell_price) * (1 - parseFloat(form.promo_discount_pct) / 100)).toFixed(2)}
                           </span>
                         </div>
@@ -906,9 +906,9 @@ function ProductModal({ product, onClose, onSave }) {
 
             {margin !== null && (
               <div className={`p-3 rounded-xl border text-sm flex justify-between
-                ${parseFloat(margin) >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                <span className="text-slate-600">Fitimi për cope:</span>
-                <span className={`font-bold ${parseFloat(margin) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                ${parseFloat(margin) >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200' : 'bg-red-50 dark:bg-red-900/30 border-red-200'}`}>
+                <span className="text-slate-600 dark:text-slate-300">Fitimi për cope:</span>
+                <span className={`font-bold ${parseFloat(margin) >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
                   €{(parseFloat(form.sell_price) - parseFloat(form.cost_price)).toFixed(2)}
                   &nbsp;({margin}%)
                 </span>
@@ -1102,7 +1102,7 @@ export default function Products() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-slate-400">
+      <div className="flex items-center justify-center h-64 text-slate-400 dark:text-slate-500">
         <div className="text-center">
           <div className="text-4xl mb-3 animate-pulse">💍</div>
           <p className="text-sm">Duke ngarkuar produktet...</p>
@@ -1117,7 +1117,7 @@ export default function Products() {
       {/* ── Top bar ── */}
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text"
             placeholder="Kërko emër, brand, SKU, GS-0001..."
@@ -1136,9 +1136,9 @@ export default function Products() {
         </select>
 
         {/* Grid / List toggle */}
-        <div className="flex bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
-          <button onClick={() => setView('grid')} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'grid' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>⊞</button>
-          <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'list' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>☰</button>
+        <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 flex-shrink-0">
+          <button onClick={() => setView('grid')} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'grid' ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>⊞</button>
+          <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'list' ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>☰</button>
         </div>
 
         <button onClick={exportExcel} className="btn-secondary flex-shrink-0">
@@ -1156,7 +1156,7 @@ export default function Products() {
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">📅</span>
-          <span className="text-sm font-semibold text-slate-700">Filtër data (shtimit)</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data (shtimit)</span>
         </div>
         <div>
           <label className="form-label">Nga data</label>
@@ -1201,7 +1201,7 @@ export default function Products() {
               if (m) applyBulkMultiplier(m)
             }}
             title="Apliko Çm. Shitje = Kosto × shumëzues për të gjitha produktet e shfaqura"
-            className="input-field w-56 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-emerald-700"
+            className="input-field w-56 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-emerald-700 dark:text-emerald-300"
           >
             <option value="">⚡ {bulkApplying ? 'Duke aplikuar...' : 'Zgjidh shumëzuesin...'}</option>
             <option value="0.5">×0.5 (kosto × 0.5)</option>
@@ -1220,9 +1220,9 @@ export default function Products() {
 
       {/* ── Stock strip ── */}
       {products.length > 0 && (
-        <div className="flex items-center gap-4 text-xs text-slate-500">
+        <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
           <span>{filtered.length} produkte{search || filterCat !== 'Të gjitha' ? ' (filtruar)' : ''}</span>
-          <span className="w-px h-3 bg-slate-200" />
+          <span className="w-px h-3 bg-slate-200 dark:bg-slate-700" />
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-emerald-500 rounded-full" />{stockOk} OK</span>
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-amber-400 rounded-full" />{stockLow} stok i ulët</span>
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-red-500 rounded-full" />{stockOut} pa stok</span>
@@ -1235,8 +1235,8 @@ export default function Products() {
           {products.length === 0 ? (
             <>
               <div className="text-6xl mb-4">💍</div>
-              <h3 className="text-xl font-bold text-slate-700 mb-2">Nuk ka produkte akoma</h3>
-              <p className="text-slate-400 mb-6 text-sm">Shtoni artikuj manualisht ose importoni nga Excel</p>
+              <h3 className="text-xl font-bold text-slate-700 dark:text-slate-200 mb-2">Nuk ka produkte akoma</h3>
+              <p className="text-slate-400 dark:text-slate-500 mb-6 text-sm">Shtoni artikuj manualisht ose importoni nga Excel</p>
               <div className="flex gap-3 justify-center">
                 <button onClick={() => setShowImport(true)} className="btn-secondary">📂 Import Excel</button>
                 <button onClick={() => setModal('add')} className="btn-primary">+ Shto Manualisht</button>
@@ -1245,7 +1245,7 @@ export default function Products() {
           ) : (
             <>
               <div className="text-4xl mb-3">🔍</div>
-              <p className="text-slate-500 mb-4">Nuk u gjet asnjë produkt</p>
+              <p className="text-slate-500 dark:text-slate-400 mb-4">Nuk u gjet asnjë produkt</p>
               <button onClick={() => { setSearch(''); setFilterCat('Të gjitha') }} className="btn-secondary mx-auto">Pastro filtrat</button>
             </>
           )}
@@ -1275,29 +1275,29 @@ export default function Products() {
                   <ProductImage product={p} onUploaded={load} />
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => setBarcodeFor(p)} title="Barkod"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm">🏷️</button>
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm">🏷️</button>
                     <button onClick={() => setModal(p)} title="Ndrysho"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-sm">✏️</button>
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-sm">✏️</button>
                     <button onClick={() => setConfirmDel(p)} title="Fshi"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-sm">🗑️</button>
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-sm">🗑️</button>
                   </div>
                 </div>
 
                 {/* Product number */}
-                <p className="text-xs font-mono text-slate-400 mb-0.5">{productNo(p.id)}</p>
+                <p className="text-xs font-mono text-slate-400 dark:text-slate-500 mb-0.5">{productNo(p.id)}</p>
 
-                <h4 className="font-semibold text-slate-800 text-sm leading-snug mb-0.5 line-clamp-2">{p.name}</h4>
-                {p.brand && <p className="text-xs text-slate-400 mb-2">{p.brand}</p>}
-                <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 text-slate-700'}`}>
+                <h4 className="font-semibold text-slate-800 dark:text-slate-100 text-sm leading-snug mb-0.5 line-clamp-2">{p.name}</h4>
+                {p.brand && <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{p.brand}</p>}
+                <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>
                   {CAT_ICONS[p.category]} {p.category}
                 </span>
 
-                <div className="border-t border-slate-100 my-3" />
+                <div className="border-t border-slate-100 dark:border-slate-800 my-3" />
 
                 <div className="flex items-end justify-between">
                   <div>
-                    <p className="text-xs text-slate-400 mb-0.5">Çmimi shitje</p>
-                    <p className="text-xl font-extrabold text-slate-900">
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Çmimi shitje</p>
+                    <p className="text-xl font-extrabold text-slate-900 dark:text-white">
                       {p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}
                     </p>
                     {margin !== null && (
@@ -1308,7 +1308,7 @@ export default function Products() {
                   </div>
                   <div className="text-right">
                     <StockBadge stock={p.stock} minStock={p.min_stock} />
-                    {p.sku && <p className="text-xs text-slate-400 mt-1 font-mono">{p.sku}</p>}
+                    {p.sku && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 font-mono">{p.sku}</p>}
                   </div>
                 </div>
               </div>
@@ -1322,52 +1322,52 @@ export default function Products() {
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1200px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr.</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Barkodi</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Nr Serie</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Pershkrimi</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Kategoria</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Njesi</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Sasi</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Gram</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Cmimi PA</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">TVSH %</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Cmim Kosto €</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Cmim Shitje €</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr Serie</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pershkrimi</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Njesi</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmimi PA</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Shitje €</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(p => (
-                <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                  <td className="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{productNo(p.id)}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-600">{p.barcode || <span className="text-slate-300">—</span>}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-600">{p.serial_no || <span className="text-slate-300">—</span>}</td>
+                <tr key={p.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{productNo(p.id)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{p.barcode || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{p.serial_no || <span className="text-slate-300">—</span>}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="text-lg">{CAT_ICONS[p.category] || '📦'}</span>
                       <div>
-                        <p className="font-medium text-slate-800">{p.name}</p>
-                        {p.brand && <p className="text-[11px] text-slate-500">{p.brand}</p>}
+                        <p className="font-medium text-slate-800 dark:text-slate-100">{p.name}</p>
+                        {p.brand && <p className="text-[11px] text-slate-500 dark:text-slate-400">{p.brand}</p>}
                       </div>
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 text-slate-700'}`}>{p.category}</span>
+                    <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>{p.category}</span>
                   </td>
-                  <td className="px-3 py-2 text-center text-xs text-slate-600">{p.unit || 'copë'}</td>
+                  <td className="px-3 py-2 text-center text-xs text-slate-600 dark:text-slate-300">{p.unit || 'copë'}</td>
                   <td className="px-3 py-2 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
                     {p.gram > 0 ? `${Number(p.gram).toLocaleString('sq-AL', { maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{p.purchase_price_no_vat ? `€${Number(p.purchase_price_no_vat).toLocaleString()}` : '—'}</td>
-                  <td className="px-3 py-2 text-center text-xs text-slate-600">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{p.cost_price ? `€${Number(p.cost_price).toLocaleString()}` : '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{p.purchase_price_no_vat ? `€${Number(p.purchase_price_no_vat).toLocaleString()}` : '—'}</td>
+                  <td className="px-3 py-2 text-center text-xs text-slate-600 dark:text-slate-300">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{p.cost_price ? `€${Number(p.cost_price).toLocaleString()}` : '—'}</td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <span className="font-bold text-slate-900 tabular-nums">
+                      <span className="font-bold text-slate-900 dark:text-white tabular-nums">
                         {p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}
                       </span>
                       <select
@@ -1379,7 +1379,7 @@ export default function Products() {
                           if (m) applyMultiplier(p, m)
                         }}
                         title={p.cost_price ? 'Vendos Çm. Shitje = Kosto × shumëzues' : 'Vendos fillimisht koston'}
-                        className="text-[10px] bg-white border border-slate-300 rounded px-1 py-0.5 text-emerald-700 font-bold cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                        className="text-[10px] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-emerald-700 dark:text-emerald-300 font-bold cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <option value="">×</option>
                         <option value="0.5">×0.5</option>
@@ -1398,9 +1398,9 @@ export default function Products() {
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => setBarcodeFor(p)} title="Gjenero & Printo Barkod"
-                        className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium">🏷️</button>
-                      <button onClick={() => setModal(p)} className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Ndrysho</button>
-                      <button onClick={() => setConfirmDel(p)} className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                        className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium">🏷️</button>
+                      <button onClick={() => setModal(p)} className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Ndrysho</button>
+                      <button onClick={() => setConfirmDel(p)} className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
                 </tr>
@@ -1440,13 +1440,13 @@ export default function Products() {
       {/* ── Delete Confirm ── */}
       {confirmDel && (
         <div className="modal-overlay">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
             <div className="text-center">
               <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🗑️</div>
-              <p className="text-xs font-mono text-slate-400 mb-1">{productNo(confirmDel.id)}</p>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Fshi Produktin?</h3>
-              <p className="text-slate-500 text-sm mb-6">
-                A jeni të sigurt që doni të fshini <strong className="text-slate-700">{confirmDel.name}</strong>?
+              <p className="text-xs font-mono text-slate-400 dark:text-slate-500 mb-1">{productNo(confirmDel.id)}</p>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Fshi Produktin?</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
+                A jeni të sigurt që doni të fshini <strong className="text-slate-700 dark:text-slate-200">{confirmDel.name}</strong>?
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setConfirmDel(null)} className="btn-secondary flex-1 justify-center">Anulo</button>

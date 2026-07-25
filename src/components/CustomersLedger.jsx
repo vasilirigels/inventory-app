@@ -131,7 +131,7 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
   }
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64 text-slate-400">
+    <div className="flex items-center justify-center h-64 text-slate-400 dark:text-slate-500">
       <div className="text-center"><div className="text-4xl mb-3 animate-pulse">👥</div><p className="text-sm">Duke ngarkuar klientët...</p></div>
     </div>
   )
@@ -149,20 +149,20 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
       </div>
 
       {/* ── Toolbar ── */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3 flex flex-wrap items-center gap-3">
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3 flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[200px] relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input type="text" placeholder="Kërko klient..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-        <div className="flex bg-slate-100 rounded-lg p-0.5">
+        <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
           {[
             { id: 'all',      label: 'Të gjithë' },
             { id: 'indebted', label: '⚠️ Me borxh' },
             { id: 'clear',    label: '✅ Shlyer' },
           ].map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === f.id ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === f.id ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
               {f.label}
             </button>
           ))}
@@ -175,44 +175,44 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
 
       {/* ── Quick add form ── */}
       {quickForm.open && (
-        <form onSubmit={submitQuick} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <form onSubmit={submitQuick} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
           <div className="flex flex-wrap items-end gap-3">
             <div>
-              <label className="block text-[10px] text-slate-500 mb-0.5 uppercase font-semibold">Lloji</label>
-              <div className="flex bg-slate-100 rounded-md p-0.5">
+              <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 uppercase font-semibold">Lloji</label>
+              <div className="flex bg-slate-100 dark:bg-slate-800 rounded-md p-0.5">
                 {['debt','repayment'].map(t => (
                   <button key={t} type="button" onClick={() => setQuickForm(f => ({ ...f, type: t }))}
-                    className={`px-3 py-1.5 text-xs font-medium rounded ${quickForm.type === t ? (t === 'debt' ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white') : 'text-slate-500'}`}>
+                    className={`px-3 py-1.5 text-xs font-medium rounded ${quickForm.type === t ? (t === 'debt' ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white') : 'text-slate-500 dark:text-slate-400'}`}>
                     {t === 'debt' ? 'Borxh i ri' : 'Kthim borxhi'}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <label className="block text-[10px] text-slate-500 mb-0.5 uppercase font-semibold">Data</label>
+              <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 uppercase font-semibold">Data</label>
               <input type="date" value={quickForm.date} onChange={e => setQuickForm(f => ({ ...f, date: e.target.value }))}
-                className="px-2 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="px-2 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div className="flex-1 min-w-[180px]">
-              <label className="block text-[10px] text-slate-500 mb-0.5 uppercase font-semibold">Emri</label>
+              <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 uppercase font-semibold">Emri</label>
               <input type="text" value={quickForm.name} onChange={e => setQuickForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="Emri i klientit" required
-                className="w-full px-2 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full px-2 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {CUR.map(cur => (
               <div key={cur}>
-                <label className="block text-[10px] text-slate-500 mb-0.5 uppercase font-semibold">{CUR_LABEL[cur]}</label>
+                <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 uppercase font-semibold">{CUR_LABEL[cur]}</label>
                 <input type="number" step="any" value={quickForm[cur]} onChange={e => setQuickForm(f => ({ ...f, [cur]: e.target.value }))}
                   placeholder="0"
-                  className="w-full px-2 py-2 border border-slate-200 rounded-md text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  className="w-full px-2 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             ))}
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={() => setQuickForm({ open: false, name: '', type: 'debt', date: today(), lek: '', eur: '', usd: '', gbp: '', chf: '' })}
-              className="px-3 py-2 text-sm text-slate-600 hover:text-slate-800">Anulo</button>
+              className="px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-100">Anulo</button>
             <button type="submit" disabled={busy}
               className={`px-4 py-2 text-sm font-medium text-white rounded-md disabled:opacity-50 ${quickForm.type === 'debt' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
               {busy ? 'Duke ruajtur…' : 'Ruaj'}
@@ -222,11 +222,11 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
       )}
 
       {/* ── Table ── */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <p className="text-xs text-slate-500 px-4 py-2 border-b border-slate-100">{filtered.length} klientë{search || filter !== 'all' ? ' (filtruar)' : ''}</p>
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <p className="text-xs text-slate-500 dark:text-slate-400 px-4 py-2 border-b border-slate-100 dark:border-slate-800">{filtered.length} klientë{search || filter !== 'all' ? ' (filtruar)' : ''}</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <ThSort label="Klienti" col="name" sortBy={sortBy} sortIcon={sortIcon} onClick={sort} align="left" />
                 {CUR.map(cur => (
@@ -234,7 +234,7 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
                 ))}
                 <ThSort label="Tx" col="entries" sortBy={sortBy} sortIcon={sortIcon} onClick={sort} align="center" />
                 <ThSort label="Data e fundit" col="last_date" sortBy={sortBy} sortIcon={sortIcon} onClick={sort} align="left" />
-                <th className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-center">Statusi</th>
+                <th className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase text-center">Statusi</th>
               </tr>
             </thead>
             <tbody>
@@ -243,13 +243,13 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
                 return (
                   <tr key={c.name}
                     onClick={() => openDrawer(c.name)}
-                    className="border-b border-slate-100 hover:bg-blue-50 cursor-pointer transition-colors">
+                    className="border-b border-slate-100 dark:border-slate-800 hover:bg-blue-50 cursor-pointer transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${ind ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${ind ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700 dark:text-emerald-300'}`}>
                           {c.name.charAt(0).toUpperCase()}
                         </div>
-                        <span className="font-semibold text-slate-800">{c.name}</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">{c.name}</span>
                       </div>
                     </td>
                     {CUR.map(cur => {
@@ -258,16 +258,16 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
                         <td key={cur} className="px-3 py-3 text-right tabular-nums">
                           {b > 0.005 ? <span className="text-rose-600 font-semibold">{fmt(b, cur === 'lek' ? 0 : 2)}</span>
                           : b < -0.005 ? <span className="text-emerald-600">+{fmt(-b, cur === 'lek' ? 0 : 2)}</span>
-                          : <span className="text-slate-400">—</span>}
+                          : <span className="text-slate-400 dark:text-slate-500">—</span>}
                         </td>
                       )
                     })}
-                    <td className="px-3 py-3 text-center text-xs text-slate-500">{c.entries}</td>
-                    <td className="px-3 py-3 text-xs text-slate-500">{fmtDate(c.last_date)}</td>
+                    <td className="px-3 py-3 text-center text-xs text-slate-500 dark:text-slate-400">{c.entries}</td>
+                    <td className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">{fmtDate(c.last_date)}</td>
                     <td className="px-3 py-3 text-center">
                       {ind
                         ? <span className="inline-block px-2 py-0.5 text-[10px] font-semibold rounded bg-rose-100 text-rose-700">Me borxh</span>
-                        : <span className="inline-block px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-100 text-emerald-700">Shlyer</span>}
+                        : <span className="inline-block px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-100 text-emerald-700 dark:text-emerald-300">Shlyer</span>}
                     </td>
                   </tr>
                 )
@@ -275,8 +275,8 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
             </tbody>
             {filtered.length > 0 && (
               <tfoot>
-                <tr className="bg-slate-50 font-bold border-t-2 border-slate-200">
-                  <td className="px-4 py-2 text-slate-700">Total (vetëm borxhe)</td>
+                <tr className="bg-slate-50 dark:bg-slate-900 font-bold border-t-2 border-slate-200 dark:border-slate-700">
+                  <td className="px-4 py-2 text-slate-700 dark:text-slate-200">Total (vetëm borxhe)</td>
                   {CUR.map(cur => (
                     <td key={cur} className="px-3 py-2 text-right tabular-nums text-rose-700">{fmt(totals[cur], cur === 'lek' ? 0 : 2)}</td>
                   ))}
@@ -287,7 +287,7 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
           </table>
         </div>
         {filtered.length === 0 && (
-          <div className="text-center py-10 text-slate-400 text-sm">Nuk u gjet asnjë klient</div>
+          <div className="text-center py-10 text-slate-400 dark:text-slate-500 text-sm">Nuk u gjet asnjë klient</div>
         )}
       </div>
 
@@ -299,13 +299,13 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
 
 function Stat({ label, value, color }) {
   const map = {
-    slate: 'bg-slate-50 text-slate-700',
+    slate: 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200',
     rose: 'bg-rose-50 text-rose-700',
-    emerald: 'bg-emerald-50 text-emerald-700',
-    amber: 'bg-amber-50 text-amber-700',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
   }
   return (
-    <div className={`rounded-xl border border-slate-200 p-4 ${map[color]}`}>
+    <div className={`rounded-xl border border-slate-200 dark:border-slate-700 p-4 ${map[color]}`}>
       <p className="text-[10px] uppercase font-semibold opacity-80">{label}</p>
       <p className="text-2xl font-extrabold mt-1 tabular-nums">{value}</p>
     </div>
@@ -316,7 +316,7 @@ function ThSort({ label, col, sortBy, sortIcon, onClick, align = 'left' }) {
   const alignClass = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'
   return (
     <th onClick={() => onClick(col)}
-      className={`px-3 py-2 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-700 select-none ${alignClass}`}>
+      className={`px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase cursor-pointer hover:text-slate-700 dark:hover:text-slate-200 select-none ${alignClass}`}>
       {label}{sortIcon(col)}
     </th>
   )
@@ -340,31 +340,31 @@ function CustomerDrawer({ customer, onClose, onDelete, onNavigate }) {
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-full max-w-3xl bg-white shadow-2xl overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between z-10">
+      <div className="w-full max-w-3xl bg-white dark:bg-slate-800 shadow-2xl overflow-y-auto">
+        <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-5 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-base font-bold">
+            <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 dark:text-blue-300 flex items-center justify-center text-base font-bold">
               {name.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-800">{name}</h3>
-              {summary && <p className="text-xs text-slate-500">{summary.entries} transaksione · {fmtDate(summary.first_date)} → {fmtDate(summary.last_date)}</p>}
+              <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{name}</h3>
+              {summary && <p className="text-xs text-slate-500 dark:text-slate-400">{summary.entries} transaksione · {fmtDate(summary.first_date)} → {fmtDate(summary.last_date)}</p>}
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-md hover:bg-slate-100 text-slate-500 text-xl leading-none">×</button>
+          <button onClick={onClose} className="w-8 h-8 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 text-xl leading-none">×</button>
         </div>
 
         <div className="p-5 space-y-4">
           {balance && (
             <div>
-              <p className="text-[10px] text-slate-500 uppercase font-semibold mb-2">Bilanci aktual</p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-2">Bilanci aktual</p>
               <div className="grid grid-cols-5 gap-2">
                 {CUR.map(cur => {
                   const v = balance[cur]
                   return (
-                    <div key={cur} className={`rounded-lg border p-3 ${v > 0.005 ? 'bg-rose-50 border-rose-200' : v < -0.005 ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">{CUR_LABEL[cur]}</p>
-                      <p className={`text-base font-bold tabular-nums mt-1 ${v > 0.005 ? 'text-rose-700' : v < -0.005 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                    <div key={cur} className={`rounded-lg border p-3 ${v > 0.005 ? 'bg-rose-50 border-rose-200' : v < -0.005 ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
+                      <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">{CUR_LABEL[cur]}</p>
+                      <p className={`text-base font-bold tabular-nums mt-1 ${v > 0.005 ? 'text-rose-700' : v < -0.005 ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400 dark:text-slate-500'}`}>
                         {v === 0 ? '—' : (v > 0 ? '' : '+') + fmt(Math.abs(v), cur === 'lek' ? 0 : 2)}
                       </p>
                     </div>
@@ -375,13 +375,13 @@ function CustomerDrawer({ customer, onClose, onDelete, onNavigate }) {
           )}
 
           <div>
-            <p className="text-[10px] text-slate-500 uppercase font-semibold mb-2">Historiku i transaksioneve</p>
-            {loading && <p className="text-sm text-slate-400">Duke ngarkuar…</p>}
-            {!loading && txWithBalance.length === 0 && <p className="text-sm text-slate-400">Asnjë transaksion.</p>}
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-2">Historiku i transaksioneve</p>
+            {loading && <p className="text-sm text-slate-400 dark:text-slate-500">Duke ngarkuar…</p>}
+            {!loading && txWithBalance.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">Asnjë transaksion.</p>}
             {!loading && txWithBalance.length > 0 && (
-              <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
                 <table className="w-full text-xs">
-                  <thead className="bg-slate-50">
+                  <thead className="bg-slate-50 dark:bg-slate-900">
                     <tr>
                       <th className="px-2 py-2 text-left">Data</th>
                       <th className="px-2 py-2 text-left">Lloji</th>
@@ -392,20 +392,20 @@ function CustomerDrawer({ customer, onClose, onDelete, onNavigate }) {
                   </thead>
                   <tbody>
                     {txWithBalance.map(t => (
-                      <tr key={t.id} className={`border-t border-slate-100 ${t.type === 'debt' ? '' : 'bg-emerald-50/30'}`}>
-                        <td className="px-2 py-2 text-slate-700 whitespace-nowrap">
+                      <tr key={t.id} className={`border-t border-slate-100 dark:border-slate-800 ${t.type === 'debt' ? '' : 'bg-emerald-50/30'}`}>
+                        <td className="px-2 py-2 text-slate-700 dark:text-slate-200 whitespace-nowrap">
                           {fmtDate(t.date)}
                         </td>
                         <td className="px-2 py-2">
                           {t.type === 'debt'
                             ? <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-rose-100 text-rose-700">Borxh</span>
-                            : <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-100 text-emerald-700">Kthim</span>}
+                            : <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-100 text-emerald-700 dark:text-emerald-300">Kthim</span>}
                         </td>
                         {CUR.map(cur => {
                           const v = n(t[cur])
-                          return <td key={cur} className={`px-2 py-2 text-right tabular-nums ${v === 0 ? 'text-slate-300' : t.type === 'debt' ? 'text-rose-600' : 'text-emerald-700'}`}>{v === 0 ? '—' : (t.type === 'debt' ? '' : '−') + fmt(v, cur === 'lek' ? 0 : 2)}</td>
+                          return <td key={cur} className={`px-2 py-2 text-right tabular-nums ${v === 0 ? 'text-slate-300' : t.type === 'debt' ? 'text-rose-600' : 'text-emerald-700 dark:text-emerald-300'}`}>{v === 0 ? '—' : (t.type === 'debt' ? '' : '−') + fmt(v, cur === 'lek' ? 0 : 2)}</td>
                         })}
-                        <td className={`px-2 py-2 text-right tabular-nums font-semibold ${t.running.eur > 0.005 ? 'text-rose-700' : t.running.eur < -0.005 ? 'text-emerald-700' : 'text-slate-400'}`}>{t.running.eur === 0 ? '—' : fmt(t.running.eur)}</td>
+                        <td className={`px-2 py-2 text-right tabular-nums font-semibold ${t.running.eur > 0.005 ? 'text-rose-700' : t.running.eur < -0.005 ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400 dark:text-slate-500'}`}>{t.running.eur === 0 ? '—' : fmt(t.running.eur)}</td>
                         <td className="px-2 py-2 text-center">
                           <button onClick={() => onDelete(t.id)} className="text-rose-400 hover:text-rose-600 text-xs">✕</button>
                         </td>

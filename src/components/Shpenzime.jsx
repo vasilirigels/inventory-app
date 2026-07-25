@@ -48,10 +48,10 @@ function ExpenseCategoryPicker({ value, onChange, categories, onCreated, disable
           placeholder="Emri i zërit të ri (p.sh. Qera)..."
         />
         <button type="button" onClick={save} disabled={saving || !name.trim()}
-          className="px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-semibold disabled:opacity-50"
+          className="px-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-sm font-semibold disabled:opacity-50"
           title="Ruaj zërin">✓</button>
         <button type="button" onClick={() => { setCreating(false); setName('') }}
-          className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm"
+          className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm"
           title="Anulo">✕</button>
       </div>
     )
@@ -225,16 +225,16 @@ export default function Shpenzime({ date, onNavigate }) {
   const totalsList = Object.entries(totals.by_currency).filter(([, v]) => Math.abs(v) > 0.005)
 
   // ── Raport periodik
-  if (loading && rows.length === 0) return <div className="card p-8 text-center text-slate-400">Duke ngarkuar...</div>
+  if (loading && rows.length === 0) return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Fleta e Shpenzimeve</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Fleta e Shpenzimeve</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Kursi për monedhat e huaja merret automatikisht nga kursi zyrtar i datës
-            {rateSource && <span className="ml-1 text-slate-400">(burimi: <span className="font-medium">{rateSource}</span>)</span>}.
+            {rateSource && <span className="ml-1 text-slate-400 dark:text-slate-500">(burimi: <span className="font-medium">{rateSource}</span>)</span>}.
             Mund të mbishkruhet dorazi nëse duhet.
           </p>
         </div>
@@ -255,7 +255,7 @@ export default function Shpenzime({ date, onNavigate }) {
 
       {/* New entry row */}
       <div className="card">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">+ Shto Shpenzim</h3>
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">+ Shto Shpenzim</h3>
         <div className="grid grid-cols-2 md:grid-cols-6 gap-2 items-end">
           <div className="md:col-span-2">
             <label className="form-label">Zëri</label>
@@ -307,8 +307,8 @@ export default function Shpenzime({ date, onNavigate }) {
             />
           </div>
           <div className="md:col-span-6 flex items-center justify-between">
-            <p className="text-xs text-slate-500">
-              Total LEK: <span className="font-bold text-blue-700 tabular-nums">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Total LEK: <span className="font-bold text-blue-700 dark:text-blue-300 tabular-nums">
                 {fmt(n(draft.amount) * (draft.currency === 'LEK' ? 1 : n(draft.exchange_rate)))}
               </span>
             </p>
@@ -338,39 +338,39 @@ export default function Shpenzime({ date, onNavigate }) {
 
       {/* Existing entries */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-slate-800">Shpenzimet e Regjistruara</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Shpenzimet e Regjistruara</h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
               {rangeActive
                 ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
                 : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
             </p>
           </div>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-slate-500 dark:text-slate-400">
             {visibleRows.length} {visibleRows.length === 1 ? 'rresht' : 'rreshta'}
           </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 {showDateCol && (
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase w-24">Data</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-24">Data</th>
                 )}
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase w-48">Zëri</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Përshkrimi</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-24">Monedha</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase w-32">Vlera</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase w-28">Kursi (LEK)</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 uppercase w-32 bg-blue-50/60">Total LEK</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-12"></th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-48">Zëri</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Përshkrimi</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-24">Monedha</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-32">Vlera</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-28">Kursi (LEK)</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-32 bg-blue-50/60">Total LEK</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-12"></th>
               </tr>
             </thead>
             <tbody>
               {visibleRows.length === 0 ? (
                 <tr>
-                  <td colSpan={showDateCol ? 8 : 7} className="p-6 text-center text-slate-400 text-sm italic">
+                  <td colSpan={showDateCol ? 8 : 7} className="p-6 text-center text-slate-400 dark:text-slate-500 text-sm italic">
                     {rows.length === 0
                       ? (rangeActive
                         ? 'Asnjë shpenzim në periudhën e zgjedhur.'
@@ -385,9 +385,9 @@ export default function Shpenzime({ date, onNavigate }) {
                   const eIsLek = eCur === 'LEK'
                   const eTotalLek = n(editDraft.amount) * (eIsLek ? 1 : n(editDraft.exchange_rate))
                   return (
-                    <tr key={r.id} className="border-b border-slate-100 bg-amber-50/40">
+                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 bg-amber-50/40">
                       {showDateCol && (
-                        <td className="px-3 py-2 text-slate-600 text-xs font-mono">
+                        <td className="px-3 py-2 text-slate-600 dark:text-slate-300 text-xs font-mono">
                           {fmtDate(editDraft.date || r.date)}
                         </td>
                       )}
@@ -451,12 +451,12 @@ export default function Shpenzime({ date, onNavigate }) {
                           className="input-field-sm text-right tabular-nums disabled:bg-slate-100 disabled:text-slate-400"
                         />
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-700 bg-blue-50/40">
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/40">
                         {fmt(eTotalLek)}
                       </td>
                       <td className="px-2 py-1 text-center whitespace-nowrap">
-                        <button onClick={saveEdit} className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium mr-1" title="Ruaj">✓</button>
-                        <button onClick={cancelEdit} className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium" title="Anulo">✕</button>
+                        <button onClick={saveEdit} className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-xs font-medium mr-1" title="Ruaj">✓</button>
+                        <button onClick={cancelEdit} className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-medium" title="Anulo">✕</button>
                       </td>
                     </tr>
                   )
@@ -465,37 +465,37 @@ export default function Shpenzime({ date, onNavigate }) {
                 const isLek = cur === 'LEK'
                 const totalLek = n(r.amount) * n(r.exchange_rate || 1)
                 return (
-                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     {showDateCol && (
-                      <td className="px-3 py-2 text-slate-600 text-xs font-mono">{fmtDate(r.date)}</td>
+                      <td className="px-3 py-2 text-slate-600 dark:text-slate-300 text-xs font-mono">{fmtDate(r.date)}</td>
                     )}
-                    <td className="px-3 py-2 text-slate-800">
-                      {categoryName(r.category_id) || r.category_name || <span className="italic text-slate-400">— pa zër —</span>}
+                    <td className="px-3 py-2 text-slate-800 dark:text-slate-100">
+                      {categoryName(r.category_id) || r.category_name || <span className="italic text-slate-400 dark:text-slate-500">— pa zër —</span>}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">
-                      {r.description || <span className="italic text-slate-400">—</span>}
+                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
+                      {r.description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <span className="badge bg-blue-100 text-blue-700">{cur}</span>
+                      <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{cur}</span>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-800 font-semibold">
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100 font-semibold">
                       {fmt(r.amount)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
                       {isLek ? '1' : fmt(r.exchange_rate)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-700 bg-blue-50/40">
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/40">
                       {fmt(totalLek)}
                     </td>
                     <td className="px-2 py-1 text-center whitespace-nowrap">
                       <button
                         onClick={() => startEdit(r)}
-                        className="px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium mr-1"
+                        className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-medium mr-1"
                         title="Edito"
                       >✏️</button>
                       <button
                         onClick={() => removeEntry(r.id)}
-                        className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium"
+                        className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
                         title="Fshi"
                       >✕</button>
                     </td>
@@ -503,10 +503,10 @@ export default function Shpenzime({ date, onNavigate }) {
                 )
               })}
             </tbody>
-            <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+            <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={showDateCol ? 4 : 3} className="px-3 py-2 text-right text-slate-700 uppercase">TOTALI:</td>
-                <td colSpan={2} className="px-3 py-2 text-right text-slate-600 text-[11px]">
+                <td colSpan={showDateCol ? 4 : 3} className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 uppercase">TOTALI:</td>
+                <td colSpan={2} className="px-3 py-2 text-right text-slate-600 dark:text-slate-300 text-[11px]">
                   {totalsList.length === 0
                     ? '—'
                     : totalsList.map(([c, v]) => `${fmt(v)} ${c}`).join(' · ')}
@@ -521,7 +521,7 @@ export default function Shpenzime({ date, onNavigate }) {
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-400 italic px-1">
+      <p className="text-[11px] text-slate-400 dark:text-slate-500 italic px-1">
         Kursi për monedhat e huaja plotësohet automatikisht nga kursi zyrtar i datës — mund të mbishkruhet
         dorazi për raste specifike. Totali ditor në LEK ruhet automatikisht te regjistri ditor
         (Përmbledhja Mujore, EndOfDay, etj.).

@@ -145,27 +145,27 @@ function SupplierPicker({ value, onChange }) {
         />
         {value?.name && (
           <button type="button" onClick={() => { onChange({ name: '', nipt: '', phone: '' }); setQuery('') }}
-            className="px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs" title="Pastro">✕</button>
+            className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs" title="Pastro">✕</button>
         )}
       </div>
       {value?.nipt && (
-        <p className="text-[10px] text-slate-500 mt-0.5">
+        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
           NIPT: <span className="font-mono">{value.nipt}</span>
           {value.phone && <> · Tel: <span className="font-mono">{value.phone}</span></>}
         </p>
       )}
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
-          {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+          {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(s => (
             <button
               key={s.id} type="button" onClick={() => pick(s)}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-sm font-medium text-slate-800">
-                {s.name || <span className="italic text-slate-400">— pa emër —</span>}
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                {s.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
               </div>
-              <div className="text-[11px] text-slate-500 font-mono">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                 {s.nipt || '—'}{s.phone ? ` · ${s.phone}` : ''}
               </div>
             </button>
@@ -223,15 +223,15 @@ function ProductPickerCell({ value, onPick }) {
         className="input-field-sm"
       />
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
-          {loading && <div className="p-2 text-[11px] text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
+          {loading && <div className="p-2 text-[11px] text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(p => (
             <button
               key={p.id} type="button" onClick={() => pick(p)}
-              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-xs font-medium text-slate-800 truncate">{p.name}</div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                 <span className="font-mono">{p.barcode || p.sku || '—'}</span>
                 <span>kosto: {p.cost_price || '—'} · stok: {p.stock}{p.vat_rate != null ? ` · TVSH ${p.vat_rate}%` : ''}</span>
               </div>
@@ -299,8 +299,8 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Fatura Blerje</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Fatura Blerje</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             {fromDate === toDate
               ? 'Lista e faturave të blerjes për këtë datë'
               : `Lista e faturave të blerjes nga ${fromDate} në ${toDate}`}
@@ -313,7 +313,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">📅</span>
-          <span className="text-sm font-semibold text-slate-700">Filtër data</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
         </div>
         <div>
           <label className="form-label">Nga data</label>
@@ -343,11 +343,11 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
 
       <div className="card p-0 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
         ) : list.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">📦</div>
-            <p className="text-slate-500 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               {fromDate === toDate
                 ? 'Nuk ka fatura blerje për këtë datë.'
                 : 'Nuk ka fatura blerje në këtë periudhë.'}
@@ -356,21 +356,21 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fature</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Furnitori</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">NIPT</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Pagesa</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Pa Zbritje</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Zbritja</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Pa TVSH</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">TVSH</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">TOTALI</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Paguar</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Borxh</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Veprime</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitori</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa Zbritje</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritja</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TOTALI</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Paguar</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
             <tbody>
@@ -381,32 +381,32 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                 const due = Math.max(0, n(inv.total_with_vat) - initPaid)
                 const pm = inv.payment_method
                 const pmBadge = pm === 'debt'
-                  ? <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
+                  ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
                   : pm === 'bank'
-                  ? <span className="badge bg-blue-100 text-blue-700">🏦 Bankë</span>
+                  ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
                   : pm === 'pos'
-                  ? <span className="badge bg-purple-100 text-purple-700">💳 POS</span>
-                  : <span className="badge bg-emerald-100 text-emerald-700">💵 Cash</span>
+                  ? <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
+                  : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
                 const rate = n(inv.exchange_rate) || 1
                 const isForeign = (inv.currency || 'LEK') !== 'LEK'
                 return (
-                <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                <tr key={inv.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">
                     <button onClick={() => onOpen(inv.id)} className="text-blue-600 hover:underline">{inv.invoice_no}</button>
                   </td>
-                  <td className="px-4 py-3 text-slate-800">{inv.supplier_name || <span className="text-slate-400 italic">— pa furnitor —</span>}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{inv.supplier_nipt || '—'}</td>
-                  <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700">{inv.currency}</span></td>
+                  <td className="px-4 py-3 text-slate-800 dark:text-slate-100">{inv.supplier_name || <span className="text-slate-400 dark:text-slate-500 italic">— pa furnitor —</span>}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{inv.supplier_nipt || '—'}</td>
+                  <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
                   <td className="px-4 py-3 text-center text-xs">{pmBadge}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
                     {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt((n(inv.subtotal_no_vat) + n(inv.total_discount)) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className={`px-4 py-3 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400'}`}>
+                  <td className={`px-4 py-3 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                     {n(inv.total_discount) > 0.005 ? `-${fmt(inv.total_discount)}` : '—'}
                     {isForeign && n(inv.total_discount) > 0.005 && (
                       <div className="text-[10px] font-normal text-orange-500/80 italic">
@@ -414,31 +414,31 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.subtotal_no_vat)}
                     {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(inv.subtotal_no_vat) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.total_vat)}
                     {isForeign && n(inv.total_vat) > 0.005 && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(inv.total_vat) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900">
+                  <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                     {fmt(inv.total_with_vat)}
                     {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 italic">
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                         = {fmt(n(inv.total_with_vat) * rate)} LEK
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700">
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(initPaid)}
                     {isForeign && initPaid > 0.005 && (
                       <div className="text-[10px] font-normal text-emerald-600/70 italic">
@@ -456,27 +456,27 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
-                      <button onClick={() => onOpen(inv.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
-                      <button onClick={() => onDelete(inv.id, inv.invoice_no)} className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                      <button onClick={() => onOpen(inv.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
+                      <button onClick={() => onDelete(inv.id, inv.invoice_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
                 </tr>
               )})}
             </tbody>
-            <tfoot className="bg-emerald-50 border-t-2 border-emerald-300">
+            <tfoot className="bg-emerald-50 dark:bg-emerald-900/30 border-t-2 border-emerald-300">
               <tr>
-                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 uppercase tracking-wide">
+                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                   💵 TOTAL CASH (LEK) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.grossLek)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossLek)}</td>
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
                   {totals.discLek > 0.005 ? `-${fmt(totals.discLek)}` : '—'}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.subLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(totals.vatLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 text-base">{fmt(totals.totLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 text-base">{fmt(totals.paidLek)}</td>
-                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueLek > 0.005 ? 'text-red-600' : 'text-emerald-700'}`}>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.subLek)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.vatLek)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(totals.totLek)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(totals.paidLek)}</td>
+                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueLek > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                   {totals.dueLek > 0.005 ? fmt(totals.dueLek) : '✓'}
                 </td>
                 <td></td>
@@ -578,30 +578,30 @@ function ImportExcelModal({ onClose, onImported }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">Import Artikujsh nga Excel</h3>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">Import Artikujsh nga Excel</h3>
             {fileName && step !== 'upload' && (
-              <p className="text-xs text-slate-500 mt-0.5">📄 {fileName}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">📄 {fileName}</p>
             )}
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xl">×</button>
         </div>
         <div className="p-6">
           {step === 'upload' && (
             <div className="space-y-5">
               <div
                 onClick={() => fileRef.current.click()}
-                className="border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-2xl p-10 text-center cursor-pointer transition-colors group"
+                className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-400 rounded-2xl p-10 text-center cursor-pointer transition-colors group"
               >
                 <div className="text-5xl mb-3">📂</div>
-                <p className="font-semibold text-slate-700 group-hover:text-blue-600">Klikoni për të zgjedhur Excel-in</p>
-                <p className="text-sm text-slate-400 mt-1">Mbështet: .xlsx, .xls</p>
+                <p className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-blue-600">Klikoni për të zgjedhur Excel-in</p>
+                <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Mbështet: .xlsx, .xls</p>
                 <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
               </div>
-              {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
-              <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-700">
+              {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 p-3 rounded-lg">{error}</p>}
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-100 text-xs text-blue-700 dark:text-blue-300">
                 Çdo rresht do regjistrohet si <b>produkt i ri</b> dhe do shtohet si <b>artikull</b> në këtë faturë blerje.
                 Sasia do të shtohet automatikisht në stok kur ruani faturën.
               </div>
@@ -614,11 +614,11 @@ function ImportExcelModal({ onClose, onImported }) {
                 <div className="grid grid-cols-3 gap-2">
                   {COL_FIELDS.map(f => (
                     <div key={f.key} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-600 w-32 flex-shrink-0">{f.label}</span>
+                      <span className="text-xs text-slate-600 dark:text-slate-300 w-32 flex-shrink-0">{f.label}</span>
                       <select
                         value={mapping[f.key] ?? -1}
                         onChange={e => setMap(f.key, e.target.value)}
-                        className={`input-field-sm flex-1 ${mapping[f.key] >= 0 ? 'border-green-400' : 'border-slate-300'}`}
+                        className={`input-field-sm flex-1 ${mapping[f.key] >= 0 ? 'border-green-400' : 'border-slate-300 dark:border-slate-700'}`}
                       >
                         <option value={-1}>— Nuk ka —</option>
                         {headers.map((h, i) => (
@@ -630,52 +630,52 @@ function ImportExcelModal({ onClose, onImported }) {
                 </div>
               </div>
               <div className="flex gap-3">
-                <div className="flex-1 p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
-                  <p className="text-2xl font-bold text-emerald-700">{products.length}</p>
+                <div className="flex-1 p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl border border-emerald-200 text-center">
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{products.length}</p>
                   <p className="text-xs text-emerald-600">Artikuj të gatshëm</p>
                 </div>
-                <div className="flex-1 p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
-                  <p className="text-2xl font-bold text-slate-700">{dataRows.length - products.length}</p>
-                  <p className="text-xs text-slate-500">Rreshta të zbrazur</p>
+                <div className="flex-1 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                  <p className="text-2xl font-bold text-slate-700 dark:text-slate-200">{dataRows.length - products.length}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Rreshta të zbrazur</p>
                 </div>
-                <div className="flex-1 p-3 bg-blue-50 rounded-xl border border-blue-200 text-center">
-                  <p className="text-2xl font-bold text-blue-700">{headers.length}</p>
+                <div className="flex-1 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-200 text-center">
+                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{headers.length}</p>
                   <p className="text-xs text-blue-600">Kolona totale</p>
                 </div>
               </div>
               <div>
                 <p className="section-title">Shembull — 5 të parët</p>
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50">
+                    <thead className="bg-slate-50 dark:bg-slate-900">
                       <tr>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">Nr.</th>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">Emri</th>
-                        <th className="px-3 py-2 text-left font-semibold text-slate-500">Barkodi</th>
-                        <th className="px-3 py-2 text-right font-semibold text-slate-500">Sasia</th>
-                        <th className="px-3 py-2 text-right font-semibold text-slate-500">Kosto €</th>
-                        <th className="px-3 py-2 text-right font-semibold text-slate-500">Shitje €</th>
+                        <th className="px-3 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Nr.</th>
+                        <th className="px-3 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Emri</th>
+                        <th className="px-3 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Barkodi</th>
+                        <th className="px-3 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Sasia</th>
+                        <th className="px-3 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Kosto €</th>
+                        <th className="px-3 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Shitje €</th>
                       </tr>
                     </thead>
                     <tbody>
                       {products.slice(0, 5).map((p, i) => (
-                        <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
-                          <td className="px-3 py-2 font-mono text-slate-400">{i + 1}</td>
-                          <td className="px-3 py-2 font-medium text-slate-800 max-w-[180px] truncate">{p.name}</td>
-                          <td className="px-3 py-2 font-mono text-slate-500">{p.barcode || '—'}</td>
+                        <tr key={i} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="px-3 py-2 font-mono text-slate-400 dark:text-slate-500">{i + 1}</td>
+                          <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100 max-w-[180px] truncate">{p.name}</td>
+                          <td className="px-3 py-2 font-mono text-slate-500 dark:text-slate-400">{p.barcode || '—'}</td>
                           <td className="px-3 py-2 text-right">{p.stock || '—'}</td>
-                          <td className="px-3 py-2 text-right text-slate-700">{p.cost_price || '—'}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-slate-900">{p.sell_price || '—'}</td>
+                          <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">{p.cost_price || '—'}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-900 dark:text-white">{p.sell_price || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 {products.length > 5 && (
-                  <p className="text-xs text-slate-400 mt-2 text-center">+ {products.length - 5} të tjerë...</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 text-center">+ {products.length - 5} të tjerë...</p>
                 )}
               </div>
-              {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
+              {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 p-3 rounded-lg">{error}</p>}
               <div className="flex gap-3">
                 <button onClick={() => setStep('upload')} className="btn-secondary">← Ndrysho Skedarin</button>
                 <button
@@ -953,7 +953,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   }
 
   if (loading) {
-    return <div className="card p-8 text-center text-slate-400">Duke ngarkuar faturën...</div>
+    return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar faturën...</div>
   }
 
   return (
@@ -962,10 +962,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
-            <h2 className="text-lg font-bold text-slate-800">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
               {invoiceId ? 'Edito Faturën Blerje' : 'Faturë Blerje e Re'}
             </h2>
-            <p className="text-xs text-slate-500 font-mono">Nr. {invoiceNo}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">Nr. {invoiceNo}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -978,8 +978,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
 
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
-          <label className="form-label">Nr. Fature <span className="text-[10px] text-slate-400">(auto)</span></label>
-          <input type="text" value={invoiceNo} readOnly className="input-field font-mono bg-slate-50 cursor-not-allowed" />
+          <label className="form-label">Nr. Fature <span className="text-[10px] text-slate-400 dark:text-slate-500">(auto)</span></label>
+          <input type="text" value={invoiceNo} readOnly className="input-field font-mono bg-slate-50 dark:bg-slate-900 cursor-not-allowed" />
         </div>
         <div>
           <label className="form-label">Datë</label>
@@ -1002,12 +1002,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
         <div>
           <label className="form-label">
             Kursi i Këmbimit
-            <span className="ml-1 text-[10px] text-slate-400">(1 {currency} = ? LEK)</span>
+            <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">(1 {currency} = ? LEK)</span>
           </label>
           <input type="number" step="0.0001" min="0"
             value={exchangeRate} onChange={e => setExchangeRate(e.target.value)}
             disabled={currency === 'LEK'} className="input-field disabled:bg-slate-50" />
-          <p className="text-[10px] text-slate-400 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
         </div>
         <div>
           <label className="form-label">Kategoria</label>
@@ -1017,16 +1017,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             <option value="diamant">💎 Diamant</option>
             <option value="ora">⌚ Ora</option>
           </select>
-          <p className="text-[10px] text-slate-400 mt-0.5">Aplikohet për të gjithë artikujt e faturës</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Aplikohet për të gjithë artikujt e faturës</p>
         </div>
         <div className="col-span-2 md:col-span-4">
           <label className="form-label">Lloji i Pagesës ndaj Furnitorit</label>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
+          <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
             <button
               type="button"
               onClick={() => { setPaymentMethod('cash'); setAmountPaid('') }}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'cash' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'
+                paymentMethod === 'cash' ? 'bg-white dark:bg-slate-800 shadow-sm text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
               title="E paguar plotësisht në Cash"
             >💵 Cash</button>
@@ -1034,7 +1034,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               type="button"
               onClick={() => { setPaymentMethod('pos'); setAmountPaid('') }}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'pos' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'
+                paymentMethod === 'pos' ? 'bg-white dark:bg-slate-800 shadow-sm text-purple-700 dark:text-purple-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
               title="POS / Kartë — e paguar plotësisht"
             >💳 POS</button>
@@ -1042,7 +1042,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               type="button"
               onClick={() => { setPaymentMethod('bank'); setAmountPaid('0') }}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'bank' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-700'
+                paymentMethod === 'bank' ? 'bg-white dark:bg-slate-800 shadow-sm text-blue-700 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
               title="Do paguhet me bankë — borxh i hapur"
             >🏦 Bankë</button>
@@ -1050,7 +1050,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               type="button"
               onClick={() => { setPaymentMethod('debt'); setAmountPaid('0') }}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                paymentMethod === 'debt' ? 'bg-white shadow-sm text-amber-700' : 'text-slate-500 hover:text-slate-700'
+                paymentMethod === 'debt' ? 'bg-white dark:bg-slate-800 shadow-sm text-amber-700 dark:text-amber-300' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
               title="Borxh ndaj furnitorit — vendos manualisht sa është paguar"
             >⚠️ Borxh</button>
@@ -1062,11 +1062,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             return (
               <div className="grid grid-cols-3 gap-3 mt-3">
                 <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-semibold">Totali ({currency})</label>
-                  <div className="input-field bg-slate-50 text-slate-700 tabular-nums font-bold">{fmt(tot)}</div>
+                  <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali ({currency})</label>
+                  <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold">{fmt(tot)}</div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-semibold">Shuma e Paguar ({currency})</label>
+                  <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Shuma e Paguar ({currency})</label>
                   <MoneyInput
                     value={amountPaid}
                     onChange={v => setAmountPaid(String(v))}
@@ -1075,8 +1075,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-semibold">Borxh ndaj Furnitorit ({currency})</label>
-                  <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                  <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Borxh ndaj Furnitorit ({currency})</label>
+                  <div className={`input-field tabular-nums font-bold ${due > 0.005 ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200'}`}>
                     {due > 0.005 ? fmt(due) : '✓ Paguar plotësisht'}
                   </div>
                 </div>
@@ -1094,8 +1094,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr className="text-slate-500">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">Nr.</th>
                 <th className="px-2 py-2 text-left font-semibold w-40">Barkodi</th>
                 <th className="px-2 py-2 text-left font-semibold w-28">Nr Serie</th>
@@ -1107,7 +1107,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmimi PA</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Kosto €</th>
-                <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800">Cmim Shitje €</th>
+                <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:text-emerald-200">Cmim Shitje €</th>
                 <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-50 text-rose-700" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
@@ -1115,8 +1115,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             <tbody>
               {items.map((it, idx) => {
                 return (
-                  <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
+                  <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
                       <div className="flex items-center gap-0.5">
                         <input
@@ -1128,14 +1128,14 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                         <button
                           type="button"
                           onClick={() => generateForRow(idx)}
-                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm"
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 text-sm"
                           title="Gjenero barkod të ri (Code128, GS-XXXXXXXX)"
                         >🔀</button>
                         <button
                           type="button"
                           onClick={() => printLabels([it])}
                           disabled={!it.barcode}
-                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Printo etiketë për këtë produkt"
                         >🖨️</button>
                       </div>
@@ -1183,10 +1183,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                         onChange={v => setItem(idx, { cost_price: v })}
                         className="input-field-sm text-right" />
                     </td>
-                    <td className="px-1 py-1 bg-emerald-50">
+                    <td className="px-1 py-1 bg-emerald-50 dark:bg-emerald-900/30">
                       <MoneyInput value={it.sell_price}
                         onChange={v => setItem(idx, { sell_price: v })}
-                        className="input-field-sm text-right font-semibold text-emerald-800" />
+                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200" />
                     </td>
                     <td className="px-1 py-1 text-center bg-rose-50/40">
                       <div className="flex items-center justify-center gap-1">
@@ -1221,19 +1221,19 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 )
               })}
             </tbody>
-            <tfoot className="bg-blue-50 border-t-2 border-blue-200">
+            <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={13} className="px-2 py-2 text-right text-slate-600">
-                  TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800">{fmt(totals.sub)}</span>
-                  {' · '}TVSH: <span className="tabular-nums text-slate-800">{fmt(totals.vat)}</span>
-                  {' · '}me TVSH: <span className="tabular-nums text-blue-700 text-sm">{fmt(totals.tot)}</span>
+                <td colSpan={13} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                  TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
+                  {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
+                  {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
                 </td>
                 <td></td>
               </tr>
             </tfoot>
           </table>
         </div>
-        <div className="p-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
             <button onClick={() => setShowImport(true)} className="btn-secondary text-xs">📥 Importo Excel</button>
@@ -1244,7 +1244,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             >🔀 Gjenero Barkodet</button>
             <button
               onClick={printAllLabels}
-              className="text-xs bg-slate-900 hover:bg-slate-800 text-white font-semibold px-2 py-1.5 rounded-lg"
+              className="text-xs bg-slate-900 dark:bg-slate-950 hover:bg-slate-800 text-white font-semibold px-2 py-1.5 rounded-lg"
               title="Printo etiketa (50×30mm) për të gjithë rreshtat me barkod"
             >🖨️ Printo Etiketat</button>
             <select
@@ -1262,7 +1262,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 })))
               }}
               title="Vendos Çm. Shitje = Çm. Blerje × shumëzues për të gjithë rreshtat"
-              className="text-xs bg-white border border-emerald-300 rounded-lg px-2 py-1.5 text-emerald-700 font-semibold cursor-pointer hover:bg-emerald-50"
+              className="text-xs bg-white dark:bg-slate-800 border border-emerald-300 rounded-lg px-2 py-1.5 text-emerald-700 dark:text-emerald-300 font-semibold cursor-pointer hover:bg-emerald-50"
             >
               <option value="">⚡ Apliko × për të gjithë...</option>
               <option value="0.5">×0.5 (blerje × 0.5)</option>
@@ -1276,7 +1276,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               <option value="4.5">×4.5 (blerje × 4.5)</option>
               <option value="5">×5 (blerje × 5)</option>
             </select>
-            <div className="flex items-center gap-1 pl-2 border-l border-slate-200">
+            <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-700">
               <span className="text-[10px] text-rose-700 font-semibold uppercase">Promo Bulk:</span>
               <input
                 type="number" step="0.01" min="0" max="100"
@@ -1308,12 +1308,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                     ? { ...it, is_promotion: false, promo_discount_pct: 0 }
                     : it))
                 }}
-                className="text-xs bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 px-2 py-1.5 rounded-lg"
+                className="text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-300 px-2 py-1.5 rounded-lg"
                 title="Hiq promocionin nga të gjithë rreshtat e faturës aktuale"
               >Hiq</button>
             </div>
           </div>
-          <p className="text-[10px] text-slate-500">
+          <p className="text-[10px] text-slate-500 dark:text-slate-400">
             <span className="inline-block w-3 h-3 bg-emerald-100 mr-1 align-middle border border-emerald-300"></span>
             Çmimi i Shitjes do aplikohet automatikisht në produkt → përdoret te FATURA SHITJE
           </p>

@@ -137,7 +137,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
   if (loading) {
     return (
       <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-        <div className="bg-white rounded-2xl shadow-2xl p-8 text-center text-slate-400">Duke ngarkuar...</div>
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
       </div>
     )
   }
@@ -145,11 +145,11 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
   if (loadErr || !data) {
     return (
       <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 max-w-md">
           <div className="text-center">
             <div className="text-5xl mb-3">⚠️</div>
-            <h3 className="font-bold text-slate-800 text-lg mb-2">Pagesat s'mund të ngarkohen</h3>
-            <p className="text-sm text-slate-600 mb-4">{loadErr || 'Gabim i panjohur'}</p>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg mb-2">Pagesat s'mund të ngarkohen</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{loadErr || 'Gabim i panjohur'}</p>
             <button onClick={onClose} className="btn-secondary mx-auto">Mbyll</button>
           </div>
         </div>
@@ -247,41 +247,41 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
   }
 
   const methodBadge = (pm) => pm === 'debt'
-    ? <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
+    ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
     : pm === 'bank'
-    ? <span className="badge bg-blue-100 text-blue-700">🏦 Bankë</span>
+    ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
     : pm === 'pos'
-    ? <span className="badge bg-purple-100 text-purple-700">💳 POS</span>
-    : <span className="badge bg-emerald-100 text-emerald-700">💵 Cash</span>
+    ? <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
+    : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">💰 Pagesa — {inv.invoice_no}</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">💰 Pagesa — {inv.invoice_no}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {inv.customer_name || 'pa klient'}{inv.customer_nipt ? ` · ${inv.customer_nipt}` : ''} · datë fature: {inv.date}
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 text-xl">×</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
         </div>
 
         <div className="p-6 space-y-4">
           {/* Summary */}
           <div className="grid grid-cols-3 gap-3">
             <div className="card py-3 text-center">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">Totali</p>
-              <p className="text-xl font-bold text-slate-800 tabular-nums">{fmt(inv.total_with_vat)}</p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali</p>
+              <p className="text-xl font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmt(inv.total_with_vat)}</p>
             </div>
-            <div className="card py-3 text-center bg-emerald-50 border-emerald-200">
-              <p className="text-[10px] text-emerald-700 uppercase font-semibold">Paguar deri tani</p>
-              <p className="text-xl font-bold text-emerald-700 tabular-nums">{fmt(inv.amount_paid)}</p>
+            <div className="card py-3 text-center bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200">
+              <p className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase font-semibold">Paguar deri tani</p>
+              <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(inv.amount_paid)}</p>
             </div>
-            <div className={`card py-3 text-center ${isPaid ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-              <p className={`text-[10px] uppercase font-semibold ${isPaid ? 'text-emerald-700' : 'text-red-600'}`}>Borxh i mbetur</p>
-              <p className={`text-xl font-bold tabular-nums ${isPaid ? 'text-emerald-700' : 'text-red-600'}`}>
+            <div className={`card py-3 text-center ${isPaid ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200' : 'bg-red-50 dark:bg-red-900/30 border-red-200'}`}>
+              <p className={`text-[10px] uppercase font-semibold ${isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>Borxh i mbetur</p>
+              <p className={`text-xl font-bold tabular-nums ${isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>
                 {isPaid ? '✓ Mbyllur' : fmt(due)}
               </p>
             </div>
@@ -289,18 +289,18 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
 
           {/* Payment history — date + amount, prominent */}
           <div>
-            <h4 className="text-sm font-semibold text-slate-700 mb-2">Pagesat e Bëra</h4>
+            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Pagesat e Bëra</h4>
             <div className="space-y-2">
               {data.initial_paid > 0.005 && (
-                <div className="card flex items-center justify-between bg-slate-50">
+                <div className="card flex items-center justify-between bg-slate-50 dark:bg-slate-900">
                   <div>
-                    <div className="text-xs text-slate-500 font-semibold uppercase">Data Pagesës</div>
-                    <div className="text-lg font-bold text-slate-800">{data.initial_date}</div>
-                    <div className="text-[10px] italic text-slate-500 mt-0.5">Pagesë në regjistrim</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Data Pagesës</div>
+                    <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{data.initial_date}</div>
+                    <div className="text-[10px] italic text-slate-500 dark:text-slate-400 mt-0.5">Pagesë në regjistrim</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-slate-500 font-semibold uppercase">Vlera</div>
-                    <div className="text-2xl font-extrabold text-emerald-700 tabular-nums">{fmt(data.initial_paid)}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Vlera</div>
+                    <div className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(data.initial_paid)}</div>
                     <div className="mt-1">{methodBadge(inv.payment_method)}</div>
                   </div>
                 </div>
@@ -308,23 +308,23 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
               {data.payments.map(p => (
                 <div key={p.id} className="card flex items-center justify-between">
                   <div>
-                    <div className="text-xs text-slate-500 font-semibold uppercase">Data Pagesës</div>
-                    <div className="text-lg font-bold text-slate-800">{p.date}</div>
-                    {p.notes && <div className="text-[11px] text-slate-600 mt-0.5">{p.notes}</div>}
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Data Pagesës</div>
+                    <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{p.date}</div>
+                    {p.notes && <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">{p.notes}</div>}
                   </div>
                   <div className="text-right flex items-center gap-3">
                     <div>
-                      <div className="text-xs text-slate-500 font-semibold uppercase">Vlera</div>
-                      <div className="text-2xl font-extrabold text-emerald-700 tabular-nums">{fmt(p.amount)}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Vlera</div>
+                      <div className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(p.amount)}</div>
                       <div className="mt-1">{methodBadge(p.payment_method)}</div>
                     </div>
                     <button onClick={() => removePayment(p.id)}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-500 text-sm" title="Fshi pagesën">✕</button>
+                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-500 text-sm" title="Fshi pagesën">✕</button>
                   </div>
                 </div>
               ))}
               {data.payments.length === 0 && data.initial_paid <= 0.005 && (
-                <div className="card py-6 text-center text-slate-400 text-sm">
+                <div className="card py-6 text-center text-slate-400 dark:text-slate-500 text-sm">
                   Asnjë pagesë e regjistruar akoma.
                 </div>
               )}
@@ -351,8 +351,8 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
 
           {/* Partial payment form */}
           {!isPaid && (
-            <form onSubmit={submit} className="card bg-blue-50 border-blue-200">
-              <h4 className="text-sm font-semibold text-blue-800 mb-3">
+            <form onSubmit={submit} className="card bg-blue-50 dark:bg-blue-900/30 border-blue-200">
+              <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-200 mb-3">
                 Ose regjistro pagesë të pjesshme
                 {payCurrency !== inv.currency && (
                   <span className="ml-2 text-[11px] font-normal text-blue-600">
@@ -379,7 +379,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                     className="input-field tabular-nums"
                     placeholder={dueInPayCcy != null ? fmt(dueInPayCcy) : '—'} />
                   {payCurrency !== inv.currency && amount && payRate && (
-                    <p className="text-[10px] text-slate-500 italic mt-0.5">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">
                       = {fmt(toInvoiceCcy(amount))} {inv.currency}
                     </p>
                   )}
@@ -398,7 +398,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                 </div>
               </div>
               {payCurrency !== inv.currency && !payRate && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-3">
+                <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 rounded px-2 py-1 mt-3">
                   ⚠️ Nuk u gjet kursi i {payCurrency} për datën {date}. Ndrysho datën ose zgjidh një monedhë tjetër.
                 </p>
               )}
@@ -412,9 +412,9 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
           )}
 
           {isPaid && (
-            <div className="card bg-emerald-50 border-emerald-200 text-center py-6">
+            <div className="card bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 text-center py-6">
               <div className="text-4xl mb-2">✅</div>
-              <p className="font-bold text-emerald-700 text-lg">Borxhi është mbyllur plotësisht!</p>
+              <p className="font-bold text-emerald-700 dark:text-emerald-300 text-lg">Borxhi është mbyllur plotësisht!</p>
               <p className="text-xs text-emerald-600 mt-1">Kjo faturë nuk ka detyrime të mbetura.</p>
             </div>
           )}
@@ -448,7 +448,7 @@ function DebtSummaryList({ selected, onPick, refreshKey, dateRange }) {
   }, [refreshKey, onlyDebt, dateRange?.from, dateRange?.to])
 
   if (loading) {
-    return <div className="card p-6 text-center text-slate-400 text-sm">Duke ngarkuar...</div>
+    return <div className="card p-6 text-center text-slate-400 dark:text-slate-500 text-sm">Duke ngarkuar...</div>
   }
 
   const withDebt = rows.filter(r => n(r.due) > 0.005).length
@@ -456,10 +456,10 @@ function DebtSummaryList({ selected, onPick, refreshKey, dateRange }) {
 
   return (
     <div className="card p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-bold text-slate-800">Klientët (A → Z)</h3>
-          <label className="text-[11px] text-slate-600 flex items-center gap-1.5 cursor-pointer">
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Klientët (A → Z)</h3>
+          <label className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
               checked={onlyDebt}
@@ -469,7 +469,7 @@ function DebtSummaryList({ selected, onPick, refreshKey, dateRange }) {
             Vetëm me borxh
           </label>
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-slate-500">
+        <div className="flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-400">
           <span>{rows.length} klientë</span>
           <span>·</span>
           <span className="text-red-600 font-semibold">{withDebt} me borxh</span>
@@ -478,12 +478,12 @@ function DebtSummaryList({ selected, onPick, refreshKey, dateRange }) {
         </div>
       </div>
       {rows.length === 0 ? (
-        <div className="p-8 text-center text-slate-400 text-sm">
+        <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">
           <div className="text-3xl mb-2">📭</div>
           Asnjë klient i regjistruar në fatura
         </div>
       ) : (
-        <ul className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[65vh] overflow-y-auto">
           {rows.map((r, i) => {
             const isSel = selected && (
               (selected.nipt && r.customer_nipt && selected.nipt === r.customer_nipt) ||
@@ -495,14 +495,14 @@ function DebtSummaryList({ selected, onPick, refreshKey, dateRange }) {
               <li key={i}>
                 <button
                   onClick={() => onPick({ name: r.customer_name, nipt: r.customer_nipt })}
-                  className={`w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors ${isSel ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
+                  className={`w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors ${isSel ? 'bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500' : ''}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-slate-800 truncate">
-                        {r.customer_name || <span className="italic text-slate-400">— pa emër —</span>}
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                        {r.customer_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
                       </p>
-                      <p className="text-[10px] text-slate-500 font-mono truncate">{r.customer_nipt || '—'}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono truncate">{r.customer_nipt || '—'}</p>
                     </div>
                     <div className="text-right">
                       {hasDebt ? (
@@ -510,7 +510,7 @@ function DebtSummaryList({ selected, onPick, refreshKey, dateRange }) {
                       ) : (
                         <p className="text-sm font-bold text-emerald-600">✓</p>
                       )}
-                      <p className="text-[10px] text-slate-500">{r.currency} · {r.invoice_count}f.</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">{r.currency} · {r.invoice_count}f.</p>
                     </div>
                   </div>
                 </button>
@@ -559,7 +559,7 @@ function ClientSearchBox({ value, onPick, onClear }) {
     <div ref={boxRef} className="relative">
       <div className="flex gap-2">
         <div className="flex-1 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text" value={query}
             placeholder="Kërko klient — emër, NIPT, telefon..."
@@ -573,18 +573,18 @@ function ClientSearchBox({ value, onPick, onClear }) {
         )}
       </div>
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-72 overflow-y-auto">
-          {loading && <div className="p-2 text-xs text-slate-400">Duke kërkuar...</div>}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-72 overflow-y-auto">
+          {loading && <div className="p-2 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
           {results.map(c => (
             <button
               key={c.id}
               onClick={() => { onPick({ name: clientFullName(c) || c.nipt, nipt: c.nipt }); setOpen(false) }}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-              <div className="text-sm font-medium text-slate-800">
-                {clientFullName(c) || <span className="italic text-slate-400">— pa emër —</span>}
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                {clientFullName(c) || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
               </div>
-              <div className="text-[11px] text-slate-500 font-mono">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                 {c.nipt || '—'}{c.phone ? ` · ${c.phone}` : ''}
               </div>
             </button>
@@ -630,28 +630,28 @@ function AllClientsSummary({ onPick, dateRange, refreshKey }) {
   }, { invCount: 0, total: 0, paid: 0, due: 0 })
 
   if (loading) {
-    return <div className="card text-center py-12 text-slate-400">Duke ngarkuar...</div>
+    return <div className="card text-center py-12 text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
   }
 
   return (
     <div className="card p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between flex-wrap gap-3">
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between flex-wrap gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-bold text-slate-800">Të Gjithë Klientët — Përmbledhje Detyrimesh</h3>
-          <p className="text-[10px] text-slate-500">
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Të Gjithë Klientët — Përmbledhje Detyrimesh</h3>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400">
             {rows.length} klientë{search && rawRows.length !== rows.length ? ` (nga ${rawRows.length})` : ''} · sipas alfabetit
           </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
             <input
               type="text" value={search} onChange={e => setSearch(e.target.value)}
               className="input-field pl-7 w-56 py-1.5 text-sm"
               placeholder="Kërko klient / NIPT..."
             />
           </div>
-          <label className="text-xs text-slate-600 flex items-center gap-1.5 cursor-pointer">
+          <label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer">
             <input type="checkbox" checked={onlyDebt} onChange={e => setOnlyDebt(e.target.checked)} className="rounded" />
             Vetëm me borxh
           </label>
@@ -660,34 +660,34 @@ function AllClientsSummary({ onPick, dateRange, refreshKey }) {
       {rows.length === 0 ? (
         <div className="p-10 text-center">
           <div className="text-5xl mb-3">✓</div>
-          <p className="text-slate-500">Asnjë klient me detyrime për këtë periudhë.</p>
+          <p className="text-slate-500 dark:text-slate-400">Asnjë klient me detyrime për këtë periudhë.</p>
         </div>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
+          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Klienti</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">NIPT</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Nr. Faturave</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Totali</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Paguar</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Borxh</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Faturave</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Paguar</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => {
               const due = n(r.due)
               return (
-                <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-slate-800">
-                    {r.customer_name || <span className="italic text-slate-400">— pa emër —</span>}
+                <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-100">
+                    {r.customer_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.customer_nipt || '—'}</td>
-                  <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700">{r.currency}</span></td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">{r.invoice_count}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-800">{fmt(r.total)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.paid)}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{r.customer_nipt || '—'}</td>
+                  <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{r.currency}</span></td>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">{r.invoice_count}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">{fmt(r.total)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">{fmt(r.paid)}</td>
                   <td className={`px-4 py-3 text-right tabular-nums font-bold ${due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
                     {due > 0.005 ? fmt(due) : '✓'}
                   </td>
@@ -695,12 +695,12 @@ function AllClientsSummary({ onPick, dateRange, refreshKey }) {
               )
             })}
           </tbody>
-          <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+          <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-700">
             <tr>
-              <td colSpan={3} className="px-4 py-3 text-xs font-bold text-slate-700 uppercase">GJITHSEJ</td>
-              <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-800">{totals.invCount}</td>
-              <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-800">{fmt(totals.total)}</td>
-              <td className="px-4 py-3 text-right tabular-nums font-bold text-emerald-700">{fmt(totals.paid)}</td>
+              <td colSpan={3} className="px-4 py-3 text-xs font-bold text-slate-700 dark:text-slate-200 uppercase">GJITHSEJ</td>
+              <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-800 dark:text-slate-100">{totals.invCount}</td>
+              <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-800 dark:text-slate-100">{fmt(totals.total)}</td>
+              <td className="px-4 py-3 text-right tabular-nums font-bold text-emerald-700 dark:text-emerald-300">{fmt(totals.paid)}</td>
               <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${totals.due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
                 {fmt(totals.due)}
               </td>
@@ -813,26 +813,26 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
       {/* Summary header */}
       <div className="card">
         <div className="min-w-0">
-          <p className="text-xs text-slate-500 uppercase font-semibold tracking-wide">
+          <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold tracking-wide">
             {client ? 'Klienti i Zgjedhur' : 'Të Gjithë Klientët'}
           </p>
-          <h2 className="text-xl font-bold text-slate-800 truncate">
+          <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate">
             {client
-              ? (client.name || <span className="italic text-slate-400">— pa emër —</span>)
+              ? (client.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>)
               : `${groupArr.length} klientë me borxh`}
           </h2>
-          {client?.nipt && <p className="text-sm font-mono text-slate-500">NIPT: {client.nipt}</p>}
+          {client?.nipt && <p className="text-sm font-mono text-slate-500 dark:text-slate-400">NIPT: {client.nipt}</p>}
         </div>
       </div>
 
       {/* Invoices grouped by client */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between flex-wrap gap-3">
-          <h3 className="text-sm font-bold text-slate-800">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between flex-wrap gap-3">
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
             Faturat e Papaguara ({invoices.length})
           </h3>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-600 font-medium">Rendit:</label>
+            <label className="text-xs text-slate-600 dark:text-slate-300 font-medium">Rendit:</label>
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value)}
@@ -857,80 +857,80 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
           </div>
         </div>
         {loading ? (
-          <div className="p-8 text-center text-slate-400">Duke ngarkuar...</div>
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
         ) : invoices.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">✓</div>
-            <p className="text-slate-500">
+            <p className="text-slate-500 dark:text-slate-400">
               {client ? 'Asnjë borxh i hapur për këtë klient.' : 'Asnjë borxh i hapur në sistem.'}
             </p>
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Data Fature</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nr. Fature</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Monedha</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Pagesa</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Totali</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Paguar (Data)</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Borxh</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Vepro</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data Fature</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Paguar (Data)</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vepro</th>
               </tr>
             </thead>
             <tbody>
               {groupArr.map((g, gi) => (
                 <Fragment key={gi}>
-                  <tr className="bg-blue-50 border-t-2 border-blue-200">
+                  <tr className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
                     <td colSpan={8} className="px-4 py-2 font-bold text-blue-900">
-                      👤 {g.name || <span className="italic text-slate-500">— pa klient —</span>}
-                      {g.nipt && <span className="ml-2 text-xs font-mono text-slate-600">({g.nipt})</span>}
-                      <span className="ml-2 text-xs font-normal text-slate-500">· {g.list.length} fatura</span>
+                      👤 {g.name || <span className="italic text-slate-500 dark:text-slate-400">— pa klient —</span>}
+                      {g.nipt && <span className="ml-2 text-xs font-mono text-slate-600 dark:text-slate-300">({g.nipt})</span>}
+                      <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">· {g.list.length} fatura</span>
                     </td>
                   </tr>
                   {g.list.map(inv => {
                     const pm  = inv.payment_method
                     const pmBadge = pm === 'debt'
-                      ? <span className="badge bg-amber-100 text-amber-700">⚠️ Borxh</span>
+                      ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
                       : pm === 'bank'
-                      ? <span className="badge bg-blue-100 text-blue-700">🏦 Bankë</span>
+                      ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
                       : pm === 'pos'
-                      ? <span className="badge bg-purple-100 text-purple-700">💳 POS</span>
-                      : <span className="badge bg-emerald-100 text-emerald-700">💵 Cash</span>
+                      ? <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
+                      : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
                     const isCredit  = !!inv.is_credit_note
                     const rate      = n(inv.exchange_rate) || 1
                     const isForeign = (inv.currency || 'LEK') !== 'LEK'
                     return (
-                      <tr key={inv.id} className={`border-b border-slate-100 ${isCredit ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50'}`}>
-                        <td className="px-4 py-2 text-slate-700">{inv.date}</td>
+                      <tr key={inv.id} className={`border-b border-slate-100 dark:border-slate-800 ${isCredit ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                        <td className="px-4 py-2 text-slate-700 dark:text-slate-200">{inv.date}</td>
                         <td className="px-4 py-2 font-mono text-xs">
                           <button
                             onClick={() => onNavigate?.('fatura-shitje', { date: inv.date, invoiceId: inv.id })}
                             className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
                             title="Hap faturën te FATURA SHITJE"
                           >{inv.invoice_no}</button>
-                          {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 text-[9px]">KREDITORE</span>}
+                          {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 dark:text-red-300 text-[9px]">KREDITORE</span>}
                         </td>
-                        <td className="px-4 py-2 text-center"><span className="badge bg-blue-100 text-blue-700">{inv.currency}</span></td>
+                        <td className="px-4 py-2 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
                         <td className="px-4 py-2 text-center">{pmBadge}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-slate-800">
+                        <td className="px-4 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
                           {fmt(inv.total_with_vat)}
                           {isForeign && (
-                            <div className="text-[10px] font-normal text-slate-500 italic">
+                            <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
                               = {fmt(n(inv.total_with_vat) * rate)} LEK
                             </div>
                           )}
                         </td>
                         <td className="px-4 py-2 text-right">
-                          <div className="tabular-nums text-emerald-700 font-semibold">{fmt(inv.amount_paid)}</div>
+                          <div className="tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{fmt(inv.amount_paid)}</div>
                           {isForeign && n(inv.amount_paid) > 0.005 && (
                             <div className="text-[10px] font-normal text-emerald-600/70 italic">
                               = {fmt(n(inv.amount_paid) * rate)} LEK
                             </div>
                           )}
                           {n(inv.amount_paid) > 0 && (
-                            <div className="text-[10px] text-slate-500 mt-0.5">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                               {inv.last_payment_date || inv.date}
                               {inv.payment_count > 0 && <span className="ml-1 text-emerald-600">· {inv.payment_count}p.</span>}
                             </div>
@@ -947,7 +947,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                         <td className="px-4 py-2 text-center">
                           <button
                             onClick={() => onOpenPayment?.(inv.id)}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium"
+                            className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-xs font-medium"
                             title="Regjistro pagesë / shih historikun"
                           >💰 Pagesë</button>
                         </td>
@@ -957,16 +957,16 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                 </Fragment>
               ))}
             </tbody>
-            <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+            <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-700">
               {currenciesInList.map((cur, idx) => {
                 const t = totalsByCur[cur]
                 return (
-                  <tr key={cur} className={`bg-blue-50 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
-                    <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 uppercase tracking-wide">
+                  <tr key={cur} className={`bg-blue-50 dark:bg-blue-900/30 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
+                    <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
                       💱 TOTAL ({cur})
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800">{fmt(t.tot)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700">{fmt(t.paid)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.tot)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(t.paid)}</td>
                     <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
                       {t.due > 0.005 ? fmt(t.due) : '✓'}
                     </td>

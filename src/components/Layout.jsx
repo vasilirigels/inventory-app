@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { clearSession } from '../lib/auth.js'
 import { useUnreadCommentsCount } from '../lib/unreadComments.js'
+import { useTheme } from '../lib/theme.js'
 import CommentToast from './CommentToast.jsx'
 
 // Faqet që role='sales' mund të shohë (veprimet ditore + raportet ditore).
@@ -194,6 +195,7 @@ export default function Layout({
 
   const headerTitle = PAGE_TITLES[page] ?? getChildTitle(page) ?? 'Faqe'
   const unreadComments = useUnreadCommentsCount()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   // Në mobile, kliku në një zë navigacioni mbyll sidebar-in.
   const handleNavigate = (id) => {
@@ -202,7 +204,7 @@ export default function Layout({
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
       <CommentToast onOpenKomentet={() => handleNavigate('komentet')} />
 
       {/* ── Backdrop për mobile (kliku mbyll sidebar-in) ── */}
@@ -217,7 +219,8 @@ export default function Layout({
       {/* ── Sidebar ── */}
       <aside
         className={`
-          w-60 bg-slate-900 flex flex-col flex-shrink-0 shadow-xl
+          w-60 bg-white border-r border-slate-200 dark:bg-slate-900 dark:border-slate-800
+          flex flex-col flex-shrink-0 shadow-xl
           fixed inset-y-0 left-0 z-40 transform transition-transform duration-200
           md:static md:translate-x-0
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
@@ -225,16 +228,16 @@ export default function Layout({
       >
 
         {/* Logo */}
-        <div className="px-5 py-5 border-b border-slate-700/60">
+        <div className="px-5 py-5 border-b border-slate-200 dark:border-slate-700/60">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-yellow-500 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/40 flex-shrink-0">
               <span className="text-white text-lg leading-none">💍</span>
             </div>
             <div>
-              <h1 className="text-white font-bold text-base leading-tight tracking-tight">
+              <h1 className="text-slate-800 dark:text-white font-bold text-base leading-tight tracking-tight">
                 Gold Shop
               </h1>
-              <p className="text-slate-500 text-xs">Sistem Inventari</p>
+              <p className="text-slate-500 dark:text-slate-400 text-xs">Sistem Inventari</p>
             </div>
           </div>
         </div>
@@ -243,7 +246,7 @@ export default function Layout({
         <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
           {NAV.map(group => (
             <div key={group.label}>
-              <p className="section-title px-3 pb-1 text-slate-600 text-[10px]">{group.label}</p>
+              <p className="section-title px-3 pb-1 text-slate-500 dark:text-slate-500 text-[10px]">{group.label}</p>
               <div className="space-y-0.5">
                 {group.items.map(item => {
                   const hasChildren = item.children && item.children.length > 0
@@ -287,7 +290,7 @@ export default function Layout({
                         </a>
                       )}
                       {hasChildren && isOpen && (
-                        <div className="ml-6 mt-0.5 mb-1 space-y-0.5 border-l border-slate-700/60 pl-2">
+                        <div className="ml-6 mt-0.5 mb-1 space-y-0.5 border-l border-slate-200 dark:border-slate-700/60 pl-2">
                           {item.children.map(child => (
                             <a
                               key={child.id}
@@ -312,11 +315,11 @@ export default function Layout({
         </nav>
 
         {/* Sidebar footer */}
-        <div className="px-5 py-4 border-t border-slate-700/60 space-y-2">
+        <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700/60 space-y-2">
           {user && (
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-xs text-slate-300 font-semibold truncate">
+                <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold truncate">
                   {user.role === 'admin' ? '🔐' : '🧾'} {user.username}
                 </p>
                 <p className="text-[10px] text-slate-500 uppercase">
@@ -326,7 +329,8 @@ export default function Layout({
               <button
                 type="button"
                 onClick={() => { clearSession(); window.location.reload() }}
-                className="text-[10px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded-md font-medium"
+                className="text-[10px] text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md font-medium
+                           dark:text-slate-400 dark:hover:text-white dark:bg-slate-800 dark:hover:bg-slate-700"
                 title="Dil"
               >Dil</button>
             </div>
@@ -335,7 +339,7 @@ export default function Layout({
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0" />
             <span className="text-xs text-slate-500">Online</span>
           </div>
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-slate-600 dark:text-slate-400">
             {now.toLocaleDateString('sq-AL', {
               weekday: 'short', day: 'numeric',
               month: 'short', year: 'numeric',
@@ -348,35 +352,35 @@ export default function Layout({
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Top header */}
-        <header className="bg-white border-b border-slate-200 px-3 md:px-6 h-14 flex items-center justify-between flex-shrink-0 gap-2">
+        <header className="bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 px-3 md:px-6 h-14 flex items-center justify-between flex-shrink-0 gap-2">
           <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
             {/* Hamburger për mobile */}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex-shrink-0"
+              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 flex-shrink-0"
               aria-label="Hap menynë"
             >
               <span className="text-xl leading-none">☰</span>
             </button>
-            <h2 className="text-sm md:text-base font-bold text-slate-800 truncate">{headerTitle}</h2>
+            <h2 className="text-sm md:text-base font-bold text-slate-800 dark:text-slate-100 truncate">{headerTitle}</h2>
 
             {/* Daily date nav — show on any date-driven page */}
             {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && !PAGES_WITH_OWN_DATE_FILTER.has(page) && (
               <div className="hidden lg:flex items-center gap-1.5">
                 <button
                   onClick={() => onDateChange(prevDay(currentDate))}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm"
                 >‹</button>
-                <span className="text-sm font-medium text-slate-700 px-1">{dateLabel}</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200 px-1">{dateLabel}</span>
                 <input
                   type="date"
                   value={currentDate}
                   onChange={e => onDateChange(e.target.value)}
-                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
                 />
                 <button
                   onClick={() => onDateChange(nextDay(currentDate))}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm"
                 >›</button>
                 <button
                   onClick={() => onDateChange(new Date().toISOString().split('T')[0])}
@@ -391,18 +395,27 @@ export default function Layout({
           <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
             <button
               type="button"
+              onClick={toggleTheme}
+              className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300"
+              title={theme === 'dark' ? 'Kalo në Light mode' : 'Kalo në Dark mode'}
+              aria-label="Ndrysho temën"
+            >
+              <span className="text-lg leading-none">{theme === 'dark' ? '☀️' : '🌙'}</span>
+            </button>
+            <button
+              type="button"
               onClick={() => handleNavigate('komentet')}
               className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                 unreadComments > 0
-                  ? 'bg-red-50 hover:bg-red-100 text-red-600'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  ? 'bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-300'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300'
               }`}
               title={unreadComments > 0 ? `${unreadComments} komente të palexuara` : 'Komentet'}
               aria-label="Komentet"
             >
               <span className="text-lg leading-none">💬</span>
               {unreadComments > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold shadow-md animate-pulse ring-2 ring-white">
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold shadow-md animate-pulse ring-2 ring-white dark:ring-slate-900">
                   {unreadComments > 99 ? '99+' : unreadComments}
                 </span>
               )}
@@ -410,12 +423,12 @@ export default function Layout({
             <a
               href="/api/backup"
               download
-              className="flex items-center gap-1.5 px-2 md:px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-2 md:px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg transition-colors"
               title="Shkarko backup të bazës së të dhënave"
             >
               💾 <span className="hidden sm:inline">Backup</span>
             </a>
-            <span className="text-xs text-slate-400 hidden lg:block">
+            <span className="text-xs text-slate-400 dark:text-slate-500 hidden lg:block">
               {now.toLocaleDateString('sq-AL', { day: 'numeric', month: 'short', year: 'numeric' })}
             </span>
             <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-lg flex items-center justify-center text-white text-sm font-bold shadow-sm">
@@ -426,20 +439,20 @@ export default function Layout({
 
         {/* Date nav për mobile / tablet — nën header */}
         {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && !PAGES_WITH_OWN_DATE_FILTER.has(page) && (
-          <div className="lg:hidden bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1.5 flex-wrap flex-shrink-0">
+          <div className="lg:hidden bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 px-3 py-2 flex items-center gap-1.5 flex-wrap flex-shrink-0">
             <button
               onClick={() => onDateChange(prevDay(currentDate))}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm"
             >‹</button>
             <input
               type="date"
               value={currentDate}
               onChange={e => onDateChange(e.target.value)}
-              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 flex-1 min-w-[130px]"
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 flex-1 min-w-[130px]"
             />
             <button
               onClick={() => onDateChange(nextDay(currentDate))}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm"
             >›</button>
             <button
               onClick={() => onDateChange(new Date().toISOString().split('T')[0])}
@@ -449,7 +462,7 @@ export default function Layout({
         )}
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto p-3 md:p-6">
+        <main className={`flex-1 overflow-auto p-3 md:p-6 ${page !== 'dashboard' ? 'thick-inputs' : ''}`}>
           {children}
         </main>
       </div>
