@@ -49,7 +49,10 @@ function requireAdmin(req, res, next) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const uploadDir = path.join(__dirname, 'uploads', 'products');
+// Në production paketimi vendos server-in brenda app.asar (read-only). Përdor
+// UPLOAD_DIR nga Electron (te userData) nëse është dhënë; përndryshe fallback
+// te folderi lokal (për dev).
+const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads', 'products');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({

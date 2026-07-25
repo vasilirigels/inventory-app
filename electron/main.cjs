@@ -53,12 +53,17 @@ let serverExitCode = null;
 function startServer() {
   const serverPath = path.join(__dirname, '..', 'server', 'index.js');
   const envLoaded = loadEnv();
+  // Folderi për upload-e produktesh — brenda userData që të mos përpiqet të
+  // shkruajë brenda app.asar (read-only) dhe të ruhet me user-in.
+  const uploadDir = path.join(app.getPath('userData'), 'uploads', 'products');
+  try { fs.mkdirSync(uploadDir, { recursive: true }); } catch (_) {}
   const env = {
     ...process.env,
     ...envLoaded,
     PORT: String(PORT),
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
+    UPLOAD_DIR: uploadDir,
   };
   serverOutput = `[env keys]: ${Object.keys(envLoaded).join(', ') || '(none)'}\n`;
   serverOutput += `[server path]: ${serverPath}\n`;
