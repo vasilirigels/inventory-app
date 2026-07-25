@@ -45,37 +45,56 @@ function loadEnv() {
   return out;
 }
 
+// Buffer i outputit të server-it (memory) që të mund ta tregojmë te dialog
+// kur server-i dështon — pa varësi nga skedari log.
+let serverOutput = '';
+let serverExitCode = null;
+
 function startServer() {
   const serverPath = path.join(__dirname, '..', 'server', 'index.js');
+  const envLoaded = loadEnv();
   const env = {
     ...process.env,
-    ...loadEnv(),
+    ...envLoaded,
     PORT: String(PORT),
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
   };
-  // Log te skedar që kur aplikacioni dështon në PC të klientit, të mund të
-  // shohim gabimin real pa cmd. Skedari ndodhet te userData (per-user, i
-  // aksesueshëm nga %APPDATA%\Ari Shop\logs\server.log në Windows).
+  serverOutput = `[env keys]: ${Object.keys(envLoaded).join(', ') || '(none)'}\n`;
+  serverOutput += `[server path]: ${serverPath}\n`;
+  serverOutput += `[exec path]: ${process.execPath}\n\n`;
+  // Provo edhe log-un në skedar (backup), por parësor është buffer-i memory.
   const logDir = path.join(app.getPath('userData'), 'logs');
-  try { fs.mkdirSync(logDir, { recursive: true }); } catch (_) {}
-  const logPath = path.join(logDir, 'server.log');
-  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-  logStream.write(`\n\n===== ${new Date().toISOString()} startup =====\n`);
-  serverProcess = spawn(process.execPath, [serverPath], {
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  serverProcess.stdout.on('data', d => logStream.write(d));
-  serverProcess.stderr.on('data', d => logStream.write(d));
+  let logStream = null;
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    logStream = fs.createWriteStream(path.join(logDir, 'server.log'), { flags: 'a' });
+    logStream.on('error', () => { logStream = null; });
+    logStream.write(`\n\n===== ${new Date().toISOString()} startup =====\n${serverOutput}`);
+  } catch (_) {}
+  const capture = (d) => {
+    const s = d.toString();
+    serverOutput += s;
+    if (logStream) { try { logStream.write(s); } catch (_) {} }
+  };
+  try {
+    serverProcess = spawn(process.execPath, [serverPath], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    capture(`[spawn threw]: ${err.message}\n`);
+    return;
+  }
+  serverProcess.stdout.on('data', capture);
+  serverProcess.stderr.on('data', capture);
   serverProcess.on('exit', (code) => {
-    logStream.write(`[server] exited with code ${code}\n`);
-    console.log(`[server] exited with code ${code}. Log: ${logPath}`);
+    serverExitCode = code;
+    capture(`[server] exited with code ${code}\n`);
     serverProcess = null;
   });
   serverProcess.on('error', (err) => {
-    logStream.write(`[server] spawn error: ${err.message}\n`);
-    console.error('[server] spawn error:', err.message);
+    capture(`[server] spawn error: ${err.message}\n`);
   });
 }
 
@@ -147,10 +166,12 @@ app.whenReady().then(async () => {
     startServer();
     try { await waitForServer(); }
     catch (err) {
-      const logPath = path.join(app.getPath('userData'), 'logs', 'server.log');
+      // Prit deri në 500ms që stdout/stderr të shterojë para se të tregohet dialogu.
+      await new Promise(r => setTimeout(r, 500));
+      const lastLines = serverOutput.split('\n').slice(-40).join('\n');
       dialog.showErrorBox(
         'Server-i nuk startohet',
-        `Aplikacioni s'mund të hapet sepse server-i i brendshëm dështoi.\n\nSheko log-un për detaje:\n${logPath}\n\nGabim: ${err.message}`
+        `Server-i i brendshëm dështoi (${err.message}).\nExit code: ${serverExitCode ?? '(ende po funksionon)'}\n\n---- Output i server-it ----\n${lastLines}`
       );
       app.quit();
       return;
