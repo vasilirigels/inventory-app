@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Cham Shop",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -15,13 +15,12 @@
     "electron:build": "vite build && electron-builder",
     "electron:build:win": "vite build && electron-builder --win",
     "electron:build:mac": "vite build && electron-builder --mac",
+    "libsql:mac-both": "npm i @libsql/darwin-x64@0.5.29 --no-save --force --os=darwin --cpu=x64 && npm i @libsql/darwin-arm64@0.5.29 --no-save --force --os=darwin --cpu=arm64",
     "release:win": "vite build && dotenv -e .env -- electron-builder --win --publish always",
-    "release:mac": "vite build && dotenv -e .env -- electron-builder --mac --publish always"
+    "release:mac": "npm run libsql:mac-both && vite build && dotenv -e .env -- electron-builder --mac --x64 --arm64 --publish always"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
-    "@libsql/darwin-arm64": "^0.5.29",
-    "@libsql/darwin-x64": "0.5.29",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
