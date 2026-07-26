@@ -465,45 +465,53 @@ function setupAutoUpdate() {
 }
 
 // Menu me opsion manual për të kontrolluar update-in (Help → Kontrollo për Update).
+// Në macOS përfshihet edhe `role: 'appMenu'` që të shfaqet "Cham Shop" menu me
+// standardet Quit / Hide / About — pa këtë Cmd+Q nuk funksionon.
 function buildAppMenu() {
+  const isMac = process.platform === 'darwin';
+  const helpMenu = {
+    label: 'Ndihmë',
+    role: 'help',
+    submenu: [
+      {
+        label: 'Kontrollo për Update',
+        click: () => {
+          updaterLog('manual check triggered from menu');
+          if (isMac) {
+            checkForUpdateMac(true);
+          } else {
+            manualUpdateCheck = true;
+            autoUpdater.checkForUpdates().catch(err => {
+              updaterLog(`manual check failed: ${err?.message || err}`);
+              dialog.showMessageBox(mainWindow, {
+                type: 'error', title: 'Gabim',
+                message: 'Nuk u kontrollua dot për update.',
+                detail: String(err?.message || err),
+              });
+            });
+          }
+        },
+      },
+      {
+        label: 'Hap log-un e update-it',
+        click: () => {
+          if (updaterLogPath && fs.existsSync(updaterLogPath)) shell.openPath(updaterLogPath);
+          else dialog.showMessageBox(mainWindow, { type: 'info', message: 'Log-u i update-it nuk ekziston ende.' });
+        },
+      },
+      { type: 'separator' },
+      { label: `Versioni: v${app.getVersion()}`, enabled: false },
+    ],
+  };
   const template = [
+    // Në macOS: appMenu domosdoshme për Quit/Hide/About. Në Windows/Linux
+    // s'ekziston dhe fileMenu mban Quit-in.
+    ...(isMac ? [{ role: 'appMenu' }] : []),
     { role: 'fileMenu' },
     { role: 'editMenu' },
     { role: 'viewMenu' },
     { role: 'windowMenu' },
-    {
-      label: 'Ndihmë',
-      submenu: [
-        {
-          label: 'Kontrollo për Update',
-          click: () => {
-            updaterLog('manual check triggered from menu');
-            if (process.platform === 'darwin') {
-              checkForUpdateMac(true);
-            } else {
-              manualUpdateCheck = true;
-              autoUpdater.checkForUpdates().catch(err => {
-                updaterLog(`manual check failed: ${err?.message || err}`);
-                dialog.showMessageBox(mainWindow, {
-                  type: 'error', title: 'Gabim',
-                  message: 'Nuk u kontrollua dot për update.',
-                  detail: String(err?.message || err),
-                });
-              });
-            }
-          },
-        },
-        {
-          label: 'Hap log-un e update-it',
-          click: () => {
-            if (updaterLogPath && fs.existsSync(updaterLogPath)) shell.openPath(updaterLogPath);
-            else dialog.showMessageBox(mainWindow, { type: 'info', message: 'Log-u i update-it nuk ekziston ende.' });
-          },
-        },
-        { type: 'separator' },
-        { label: `Versioni: v${app.getVersion()}`, enabled: false },
-      ],
-    },
+    helpMenu,
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
