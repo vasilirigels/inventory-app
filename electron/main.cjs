@@ -310,95 +310,62 @@ async function checkForUpdateMac(manual = false) {
     });
     if (r2 !== 0) { updaterLog('Mac updater: user postponed install'); return; }
 
-    // Shkruaj script-in që bën install-in pasi app-i mbyllet. Kryhet detached
-    // që të vazhdojë edhe pasi vdes electron process-i i tanishëm.
-    // - Përdorim mountpoint eksplicit që të mos parse-ojmë output-in e hdiutil
-    // - Redirect-ojmë të gjithë stdout/stderr te log-u që të kapim çdo gabim
-    // - Pa `set -e` që një error i vogël (p.sh. detach) të mos ndalë të gjithë flow-in
-    const scriptPath = path.join(app.getPath('temp'), `cham-shop-install-${Date.now()}.sh`);
-    const logPath = path.join(app.getPath('userData'), 'updater.log');
+    // Instalimi bëhet TE VETË procesi Electron pa spawn detached — kështu nuk
+    // varemi nga launchd që të mos vrasë child bash process-in. macOS lejon
+    // rm/cp mbi një .app që është duke ekzekutuar (unlike Windows).
+    // Sekuenca: mount → replace .app → xattr → detach → app.relaunch() + quit
+    const { execSync } = require('child_process');
     const mountPoint = path.join(app.getPath('temp'), `chamshop-mount-${Date.now()}`);
-    const script = `#!/bin/bash
-LOG=${JSON.stringify(logPath)}
-DMG=${JSON.stringify(dmgPath)}
-MOUNT=${JSON.stringify(mountPoint)}
-APP_BUNDLE=${JSON.stringify(appBundlePath)}
-APP_PARENT=${JSON.stringify(appParentDir)}
+    try {
+      fs.mkdirSync(mountPoint, { recursive: true });
+      updaterLog(`Mac updater: mounting ${dmgPath} at ${mountPoint}`);
+      execSync(`hdiutil attach "${dmgPath}" -nobrowse -noautoopen -mountpoint "${mountPoint}"`, {
+        stdio: 'pipe', timeout: 30000,
+      });
+      updaterLog('Mac updater: mount OK');
 
-exec >> "$LOG" 2>&1
+      // Gjej .app-in brenda mount-it.
+      let newAppPath = path.join(mountPoint, 'Cham Shop.app');
+      if (!fs.existsSync(newAppPath)) {
+        const entries = fs.readdirSync(mountPoint);
+        const appEntry = entries.find(e => e.endsWith('.app'));
+        if (!appEntry) throw new Error(`no .app found in DMG (entries: ${entries.join(', ')})`);
+        newAppPath = path.join(mountPoint, appEntry);
+      }
+      updaterLog(`Mac updater: found new .app at ${newAppPath}`);
 
-echo ""
-echo "===== installer.sh: $(date) ====="
-echo "DMG=$DMG"
-echo "MOUNT=$MOUNT"
-echo "APP_BUNDLE=$APP_BUNDLE"
-echo "APP_PARENT=$APP_PARENT"
+      // Zëvendëso .app-in ekzistues. macOS lejon rm mbi running .app.
+      updaterLog(`Mac updater: removing old ${appBundlePath}`);
+      execSync(`rm -rf "${appBundlePath}"`, { stdio: 'pipe' });
 
-echo "waiting 4s for app to fully quit..."
-sleep 4
+      updaterLog(`Mac updater: copying to ${appBundlePath}`);
+      execSync(`cp -R "${newAppPath}" "${appParentDir}/"`, { stdio: 'pipe', timeout: 60000 });
 
-echo "creating mount directory..."
-mkdir -p "$MOUNT"
+      updaterLog('Mac updater: removing quarantine');
+      try { execSync(`xattr -cr "${appBundlePath}"`, { stdio: 'pipe' }); }
+      catch (e) { updaterLog(`xattr warning: ${e.message}`); }
 
-echo "attaching DMG at $MOUNT..."
-hdiutil attach "$DMG" -nobrowse -noautoopen -mountpoint "$MOUNT"
-if [ $? -ne 0 ]; then
-  echo "ERROR: hdiutil attach failed"
-  osascript -e 'display alert "Cham Shop Update" message "Nuk u mount DMG."'
-  exit 1
-fi
+      updaterLog('Mac updater: detaching DMG');
+      try { execSync(`hdiutil detach "${mountPoint}" -force`, { stdio: 'pipe' }); }
+      catch (e) { updaterLog(`detach warning: ${e.message}`); }
 
-NEW_APP="$MOUNT/Cham Shop.app"
-if [ ! -d "$NEW_APP" ]; then
-  echo "Cham Shop.app not at expected path, searching..."
-  NEW_APP=$(find "$MOUNT" -maxdepth 2 -name "*.app" -type d | head -1)
-  echo "found: $NEW_APP"
-fi
-if [ ! -d "$NEW_APP" ]; then
-  echo "ERROR: no .app in DMG"
-  hdiutil detach "$MOUNT" -force 2>/dev/null
-  osascript -e 'display alert "Cham Shop Update" message "S'"'"'u gjet .app në DMG."'
-  exit 1
-fi
+      try { fs.rmSync(mountPoint, { recursive: true, force: true }); } catch (_) {}
+      try { fs.unlinkSync(dmgPath); } catch (_) {}
 
-echo "removing old app at $APP_BUNDLE..."
-rm -rf "$APP_BUNDLE"
-
-echo "copying new app to $APP_PARENT..."
-cp -R "$NEW_APP" "$APP_PARENT/"
-if [ $? -ne 0 ]; then
-  echo "ERROR: cp failed"
-  hdiutil detach "$MOUNT" -force 2>/dev/null
-  osascript -e 'display alert "Cham Shop Update" message "Kopjimi dështoi. Ndoshta nuk ke leje te destinacioni."'
-  exit 1
-fi
-
-echo "removing quarantine attribute..."
-xattr -cr "$APP_BUNDLE" 2>&1 || echo "(xattr warning, vazhdojmë)"
-
-echo "detaching DMG..."
-hdiutil detach "$MOUNT" -force 2>&1 || echo "(detach warning)"
-
-echo "removing tmp files..."
-rm -rf "$MOUNT"
-rm -f "$DMG"
-
-echo "opening new app..."
-open "$APP_BUNDLE"
-
-echo "===== installer.sh: done ====="
-`;
-    fs.writeFileSync(scriptPath, script, { mode: 0o755 });
-    updaterLog(`Mac updater: wrote installer script ${scriptPath}`);
-    updaterLog(`Mac updater: mount point will be ${mountPoint}`);
-
-    const { spawn } = require('child_process');
-    const child = spawn('/bin/bash', [scriptPath], {
-      detached: true, stdio: 'ignore',
-    });
-    child.unref();
-    updaterLog(`Mac updater: spawned installer PID=${child.pid}, quitting app in 500ms`);
-    setTimeout(() => app.quit(), 500);
+      updaterLog('Mac updater: install complete, relaunching');
+      // app.relaunch() cakton që të hapet përsëri pas quit; app.quit() e mbyll.
+      app.relaunch();
+      app.exit(0);
+    } catch (installErr) {
+      updaterLog(`Mac updater INSTALL ERROR: ${installErr?.message || installErr}`);
+      // Pastro mount-in nëse mbetur.
+      try { execSync(`hdiutil detach "${mountPoint}" -force`, { stdio: 'pipe' }); } catch (_) {}
+      dialog.showMessageBox(mainWindow, {
+        type: 'error', title: 'Gabim gjatë instalimit',
+        message: 'Instalimi i update-it dështoi.',
+        detail: `${installErr?.message || installErr}\n\nMund të provosh nga menu Ndihmë → Kontrollo për Update, ose të shkarkosh manualisht nga faqja e release-it.`,
+      });
+    }
   } catch (err) {
     updaterLog(`Mac updater ERROR: ${err?.message || err}`);
     if (manual) {
