@@ -345,6 +345,11 @@ export default function Layout({
               month: 'short', year: 'numeric',
             })}
           </p>
+          {typeof __APP_VERSION__ !== 'undefined' && (
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+              v{__APP_VERSION__}
+            </p>
+          )}
         </div>
       </aside>
 
