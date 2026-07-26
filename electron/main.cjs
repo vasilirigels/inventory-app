@@ -361,14 +361,6 @@ async function checkForUpdateMac(manual = false) {
         try { serverProcess.kill('SIGKILL'); } catch (_) {}
         serverProcess = null;
       }
-      // Ruaj versionin që sapo u instalua për ta krahasuar pas relaunch-it
-      // dhe treguar dialog konfirmimi user-it.
-      try {
-        fs.writeFileSync(
-          path.join(app.getPath('userData'), 'pending-update.json'),
-          JSON.stringify({ version: latestVersion, at: new Date().toISOString() }),
-        );
-      } catch (_) {}
       app.relaunch();
       app.exit(0);
     } catch (installErr) {
@@ -594,23 +586,27 @@ app.whenReady().then(async () => {
   if (!isDev) {
     buildAppMenu();
     setupAutoUpdate();
-    // Kontrollo nëse sapo u bë update — nëse po, shfaq konfirmim me versionin e ri.
+    // Detekto update duke krahasuar versionin aktual me atë të fundit që u lançua.
+    // Punon uniformisht për Mac (custom updater), Windows installer (electron-updater),
+    // dhe portable (user zëvendëson .exe manualisht) — çdo herë që versioni ndryshon
+    // nga run-i i mëparshëm, shfaq popup konfirmimi.
     try {
-      const pendingPath = path.join(app.getPath('userData'), 'pending-update.json');
-      if (fs.existsSync(pendingPath)) {
-        const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
-        fs.unlinkSync(pendingPath);
-        const current = app.getVersion();
-        if (pending.version === current) {
-          setTimeout(() => {
-            dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: 'Update i suksesshëm',
-              message: `App-i u përditësua me sukses`,
-              detail: `Tani je te versioni v${current}.`,
-            });
-          }, 1500);
-        }
+      const current = app.getVersion();
+      const versionFile = path.join(app.getPath('userData'), 'last-launched-version');
+      let previous = null;
+      if (fs.existsSync(versionFile)) {
+        previous = fs.readFileSync(versionFile, 'utf8').trim();
+      }
+      fs.writeFileSync(versionFile, current);
+      if (previous && previous !== current) {
+        setTimeout(() => {
+          dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'Update i suksesshëm',
+            message: 'App-i u përditësua me sukses',
+            detail: `Nga v${previous} → v${current}`,
+          });
+        }, 1500);
       }
     } catch (_) {}
   }
