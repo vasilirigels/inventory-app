@@ -36,6 +36,12 @@ jobs:
           TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}
           EOF
 
+      - name: Install libsql native binaries for both arch-et
+        # npm install në macos-latest (arm64) shkarkon vetëm @libsql/darwin-arm64.
+        # Për të prodhuar DMG-në x64 me native binary të saktë, shkarkojmë edhe
+        # @libsql/darwin-x64 me skript të veçantë (bypass i EBADPLATFORM).
+        run: npm run libsql:mac-both
+
       - name: Build React frontend
         run: npm run build
 
