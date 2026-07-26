@@ -182,8 +182,202 @@ function updaterLog(msg) {
   console.log('[updater]', msg);
 }
 
+// ─── Custom Mac updater ────────────────────────────────────────────────────
+// electron-updater refuzon të bëjë auto-update në Mac për aplikacione të pafirmosura
+// (verifikon signature-in e Developer ID). Meqë s'kemi Apple Developer cert,
+// implementojmë vetë flow-un: fetch nga GitHub API → download DMG → mount me
+// hdiutil → kopjo .app te /Applications → run xattr për të hequr quarantine →
+// relaunch.
+
+// Krahaso versione X.Y.Z si numra (mjafton për 1.0.NN formatin tonë).
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+// Shkarko një URL në file me streaming (evitohet mbajtja 100+MB në RAM).
+// Ndjek redirect-e (GitHub asset URLs redirect-ojnë te S3).
+function downloadFile(url, destPath, onProgress) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const doRequest = (u, redirectCount = 0) => {
+      if (redirectCount > 5) return reject(new Error('too many redirects'));
+      https.get(u, { headers: { 'User-Agent': 'ChamShopUpdater/1.0' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return doRequest(res.headers.location, redirectCount + 1);
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode}`));
+        }
+        const total = parseInt(res.headers['content-length']) || 0;
+        let downloaded = 0;
+        const file = fs.createWriteStream(destPath);
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (onProgress) onProgress(downloaded, total);
+        });
+        res.pipe(file);
+        file.on('finish', () => file.close(() => resolve()));
+        file.on('error', reject);
+      }).on('error', reject);
+    };
+    doRequest(url);
+  });
+}
+
+let macUpdateInProgress = false;
+async function checkForUpdateMac(manual = false) {
+  if (process.platform !== 'darwin') return;
+  if (macUpdateInProgress) { updaterLog('Mac updater: already in progress'); return; }
+  macUpdateInProgress = true;
+  try {
+    updaterLog('Mac updater: checking GitHub...');
+    const apiUrl = 'https://api.github.com/repos/vasilirigels/inventory-app-releases/releases/latest';
+    const res = await fetch(apiUrl, { headers: { 'User-Agent': 'ChamShopUpdater/1.0' } });
+    if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}`);
+    const data = await res.json();
+    const latestVersion = String(data.tag_name || '').replace(/^v/, '');
+    const currentVersion = app.getVersion();
+    updaterLog(`Mac updater: current=v${currentVersion}, latest=v${latestVersion}`);
+
+    if (compareVersions(latestVersion, currentVersion) <= 0) {
+      if (manual) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info', title: 'Nuk ka update',
+          message: `Je te versioni më i fundit (v${currentVersion}).`,
+        });
+      }
+      return;
+    }
+
+    // Zgjidh DMG-në për arch-un aktual (arm64 për Apple Silicon, x64 për Intel).
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const dmgName = `ChamShop-${latestVersion}-${arch}.dmg`;
+    const dmgAsset = (data.assets || []).find(a => a.name === dmgName);
+    if (!dmgAsset) {
+      updaterLog(`Mac updater: DMG not found for ${arch} (kërkohej ${dmgName})`);
+      if (manual) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'warning', title: 'DMG nuk u gjet',
+          message: `Nuk u gjet DMG për arkitekturën ${arch}.`,
+          detail: `Kërkoj: ${dmgName}\nAsete: ${(data.assets || []).map(a => a.name).join(', ')}`,
+        });
+      }
+      return;
+    }
+
+    const sizeMB = Math.round(dmgAsset.size / 1024 / 1024);
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Version i ri i disponueshëm',
+      message: `Version i ri: v${latestVersion}`,
+      detail: `Version-i aktual: v${currentVersion}\n\nDo të shkarkohet ~${sizeMB} MB dhe do të instalohet automatikisht kur ta pranosh.`,
+      buttons: ['Shkarko dhe instalo', 'Më vonë'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) { updaterLog('Mac updater: user cancelled'); return; }
+
+    const dmgPath = path.join(app.getPath('temp'), dmgName);
+    updaterLog(`Mac updater: downloading ${dmgAsset.browser_download_url} → ${dmgPath}`);
+    let lastLogged = 0;
+    await downloadFile(dmgAsset.browser_download_url, dmgPath, (done, total) => {
+      const pct = total ? Math.round(done / total * 100) : 0;
+      if (pct >= lastLogged + 10) { updaterLog(`Mac updater: download ${pct}%`); lastLogged = pct; }
+    });
+    updaterLog('Mac updater: download complete');
+
+    // Përcakto path-in e .app-it që po ekzekuton: process.execPath =
+    // /Applications/Cham Shop.app/Contents/MacOS/Cham Shop → 3 nivele lart.
+    const appBundlePath = path.dirname(path.dirname(path.dirname(process.execPath)));
+    const appParentDir = path.dirname(appBundlePath);
+    updaterLog(`Mac updater: current bundle=${appBundlePath}`);
+
+    const { response: r2 } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Shkarkimi u plotësua',
+      message: `Version v${latestVersion} u shkarkua.`,
+      detail: `Aplikacioni do të mbyllet, të instalohet update-i, dhe të rihapet automatikisht.\n\n(vendndodhja: ${appBundlePath})`,
+      buttons: ['Rinis dhe instalo', 'Më vonë'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (r2 !== 0) { updaterLog('Mac updater: user postponed install'); return; }
+
+    // Shkruaj script-in që bën install-in pasi app-i mbyllet. Kryhet detached
+    // që të vazhdojë edhe pasi vdes electron process-i i tanishëm.
+    const scriptPath = path.join(app.getPath('temp'), `cham-shop-install-${Date.now()}.sh`);
+    const script = `#!/bin/bash
+set -e
+LOG="${path.join(app.getPath('userData'), 'updater.log').replace(/"/g, '\\"')}"
+echo "[$(date -Iseconds)] installer: waiting for app to quit" >> "$LOG"
+sleep 3
+MOUNT_OUTPUT=$(hdiutil attach "${dmgPath}" -nobrowse -noautoopen 2>&1)
+echo "[$(date -Iseconds)] installer: mount output: $MOUNT_OUTPUT" >> "$LOG"
+MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep -o "/Volumes/[^	]*" | tail -1)
+if [ -z "$MOUNT_POINT" ]; then
+  echo "[$(date -Iseconds)] installer: ERROR — could not detect mount point" >> "$LOG"
+  osascript -e 'display alert "Cham Shop Update" message "Nuk u mount DMG. Instalimi u anulua."'
+  exit 1
+fi
+echo "[$(date -Iseconds)] installer: mounted at $MOUNT_POINT" >> "$LOG"
+NEW_APP=$(find "$MOUNT_POINT" -maxdepth 2 -name "*.app" -type d | head -1)
+if [ -z "$NEW_APP" ]; then
+  echo "[$(date -Iseconds)] installer: ERROR — no .app in DMG" >> "$LOG"
+  hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+  osascript -e 'display alert "Cham Shop Update" message "S\\'u gjet .app në DMG."'
+  exit 1
+fi
+echo "[$(date -Iseconds)] installer: copying $NEW_APP → ${appParentDir}" >> "$LOG"
+rm -rf "${appBundlePath}"
+cp -R "$NEW_APP" "${appParentDir}/"
+xattr -cr "${appBundlePath}" 2>/dev/null || true
+hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+rm -f "${dmgPath}"
+echo "[$(date -Iseconds)] installer: done, relaunching" >> "$LOG"
+open "${appBundlePath}"
+`;
+    fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+    updaterLog(`Mac updater: wrote installer script ${scriptPath}`);
+
+    const { spawn } = require('child_process');
+    const child = spawn('/bin/bash', [scriptPath], {
+      detached: true, stdio: 'ignore',
+    });
+    child.unref();
+    updaterLog('Mac updater: spawned installer, quitting app');
+    setTimeout(() => app.quit(), 500);
+  } catch (err) {
+    updaterLog(`Mac updater ERROR: ${err?.message || err}`);
+    if (manual) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'error', title: 'Gabim update',
+        message: 'Nuk u kontrollua dot për update.',
+        detail: String(err?.message || err),
+      });
+    }
+  } finally {
+    macUpdateInProgress = false;
+  }
+}
+
 let manualUpdateCheck = false;
 function setupAutoUpdate() {
+  // Mac s'mbështetet nga electron-updater pa Developer ID signing. Përdorim
+  // custom flow-in tonë (checkForUpdateMac) që manaxhon DMG download + install
+  // me hdiutil pa kërkuar signature validation.
+  if (process.platform === 'darwin') {
+    updaterLog(`Mac custom updater init — aktuali: v${app.getVersion()}, arch: ${process.arch}`);
+    checkForUpdateMac(false);
+    setInterval(() => checkForUpdateMac(false), 60 * 60 * 1000);
+    return;
+  }
   // Portable s'mund të mbivendosë vetveten ndërsa është duke ekzekutuar (s'ka
   // NSIS uninstaller/installer për të thirrur). Fikim autoDownload që të mos
   // shkarkojë kot dhe në update-available shfaqim dialog me linkun për download.
@@ -283,16 +477,20 @@ function buildAppMenu() {
         {
           label: 'Kontrollo për Update',
           click: () => {
-            manualUpdateCheck = true;
             updaterLog('manual check triggered from menu');
-            autoUpdater.checkForUpdates().catch(err => {
-              updaterLog(`manual check failed: ${err?.message || err}`);
-              dialog.showMessageBox(mainWindow, {
-                type: 'error', title: 'Gabim',
-                message: 'Nuk u kontrollua dot për update.',
-                detail: String(err?.message || err),
+            if (process.platform === 'darwin') {
+              checkForUpdateMac(true);
+            } else {
+              manualUpdateCheck = true;
+              autoUpdater.checkForUpdates().catch(err => {
+                updaterLog(`manual check failed: ${err?.message || err}`);
+                dialog.showMessageBox(mainWindow, {
+                  type: 'error', title: 'Gabim',
+                  message: 'Nuk u kontrollua dot për update.',
+                  detail: String(err?.message || err),
+                });
               });
-            });
+            }
           },
         },
         {
