@@ -6204,8 +6204,18 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
 // to this server; the block below is a no-op because dist/ doesn't exist yet.
 const distDir = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
+  // Hashed asset filenames (index-XYZ.js) mund të cache-ohen përgjithmonë,
+  // por index.html duhet të ridownload-ohet gjithmonë që pas update-it të
+  // reflektohet versioni i ri (përndryshe Chromium mban HTML-në e vjetër).
+  app.use(express.static(distDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    },
+  }));
   app.get(/^\/(?!api|uploads).*/, (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(distDir, 'index.html'));
   });
 }
