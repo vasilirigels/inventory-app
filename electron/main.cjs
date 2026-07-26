@@ -1,7 +1,7 @@
 // Electron main process. Owns the app window and, in production, the Express
 // server subprocess. In dev we assume `npm run dev` is already running Vite
 // (5173) + the Express server (3001) — Electron just points at Vite.
-const { app, BrowserWindow, shell, dialog, Menu } = require('electron');
+const { app, BrowserWindow, shell, dialog, Menu, session } = require('electron');
 const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
@@ -458,7 +458,16 @@ function setupAutoUpdate() {
       defaultId: 0,
       cancelId: 1,
     });
-    if (response === 0) autoUpdater.quitAndInstall();
+    if (response === 0) {
+      // Vrit serverin eksplicitisht para quitAndInstall — before-quit
+      // duhet ta bënte, por për të qenë 100% i sigurt që porti 3001 lirohet
+      // para se NSIS installer-i të nisë procesin e ri.
+      if (serverProcess) {
+        try { serverProcess.kill('SIGKILL'); } catch (_) {}
+        serverProcess = null;
+      }
+      autoUpdater.quitAndInstall();
+    }
   });
   autoUpdater.on('error', (err) => {
     const msg = err?.message || String(err);
@@ -599,6 +608,14 @@ app.whenReady().then(async () => {
       }
       fs.writeFileSync(versionFile, current);
       if (previous && previous !== current) {
+        // Pastro Chromium HTTP cache dhe storage-in — kështu s'ka mundësi që
+        // JS bundle-i ose index.html i vjetër të mbetet i cache-uar pas update-it.
+        // No-cache header-at te index.html duhet ta pengojnë këtë, por bëjmë
+        // edhe belt-and-suspenders për të gjitha platformat.
+        session.defaultSession.clearCache().catch(() => {});
+        session.defaultSession.clearStorageData({
+          storages: ['shadercache', 'cachestorage', 'serviceworkers'],
+        }).catch(() => {});
         setTimeout(() => {
           dialog.showMessageBox(mainWindow, {
             type: 'info',
