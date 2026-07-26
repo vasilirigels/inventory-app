@@ -15,7 +15,7 @@
     "electron:build": "vite build && electron-builder",
     "electron:build:win": "vite build && electron-builder --win",
     "electron:build:mac": "vite build && electron-builder --mac",
-    "libsql:mac-both": "npm i @libsql/darwin-x64@0.5.29 --no-save --force --os=darwin --cpu=x64 && npm i @libsql/darwin-arm64@0.5.29 --no-save --force --os=darwin --cpu=arm64",
+    "libsql:mac-both": "node scripts/install-libsql-mac.mjs",
     "release:win": "vite build && dotenv -e .env -- electron-builder --win --publish always",
     "release:mac": "npm run libsql:mac-both && vite build && dotenv -e .env -- electron-builder --mac --x64 --arm64 --publish always"
   },
