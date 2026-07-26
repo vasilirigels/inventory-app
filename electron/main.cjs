@@ -1,7 +1,7 @@
 // Electron main process. Owns the app window and, in production, the Express
 // server subprocess. In dev we assume `npm run dev` is already running Vite
 // (5173) + the Express server (3001) — Electron just points at Vite.
-const { app, BrowserWindow, shell, dialog } = require('electron');
+const { app, BrowserWindow, shell, dialog, Menu } = require('electron');
 const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
@@ -147,13 +147,47 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+// Log-o çdo event të updater-it te fajl (userData/updater.log) që të mund të
+// diagnostikohet post-mortem pse s'erdhi një update. Gjithashtu ekspozohet
+// menu-ja "Kontrollo për Update" për trigger manual.
+let updaterLogPath = null;
+function updaterLog(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try {
+    if (!updaterLogPath) updaterLogPath = path.join(app.getPath('userData'), 'updater.log');
+    fs.appendFileSync(updaterLogPath, line);
+  } catch (_) {}
+  console.log('[updater]', msg);
+}
+
+let manualUpdateCheck = false;
 function setupAutoUpdate() {
   autoUpdater.autoDownload = true;
-  autoUpdater.on('update-downloaded', async () => {
+  autoUpdater.logger = { info: updaterLog, warn: updaterLog, error: updaterLog, debug: () => {} };
+
+  autoUpdater.on('checking-for-update', () => updaterLog('checking-for-update'));
+  autoUpdater.on('update-available', (info) => {
+    updaterLog(`update-available: v${info?.version}`);
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    updaterLog(`update-not-available (aktuali: v${app.getVersion()}, i fundit: v${info?.version || '?'})`);
+    if (manualUpdateCheck) {
+      manualUpdateCheck = false;
+      dialog.showMessageBox(mainWindow, {
+        type: 'info', title: 'Nuk ka update',
+        message: `Je te versioni më i fundit (v${app.getVersion()}).`,
+      });
+    }
+  });
+  autoUpdater.on('download-progress', (p) => {
+    updaterLog(`download-progress: ${Math.round(p.percent || 0)}% (${p.transferred}/${p.total})`);
+  });
+  autoUpdater.on('update-downloaded', async (info) => {
+    updaterLog(`update-downloaded: v${info?.version}`);
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Përditësim i ri',
-      message: 'Një version i ri i aplikacionit u shkarkua. Rinis tani për ta instaluar?',
+      message: `Versioni v${info?.version} u shkarkua. Rinis tani për ta instaluar?`,
       buttons: ['Rinis dhe instalo', 'Më vonë'],
       defaultId: 0,
       cancelId: 1,
@@ -161,9 +195,60 @@ function setupAutoUpdate() {
     if (response === 0) autoUpdater.quitAndInstall();
   });
   autoUpdater.on('error', (err) => {
-    console.warn('[updater] error:', err?.message || err);
+    const msg = err?.message || String(err);
+    updaterLog(`ERROR: ${msg}`);
+    if (manualUpdateCheck) {
+      manualUpdateCheck = false;
+      dialog.showMessageBox(mainWindow, {
+        type: 'error', title: 'Gabim update',
+        message: 'Nuk u kontrollua dot për update.',
+        detail: `${msg}\n\nLog: ${updaterLogPath || 'userData/updater.log'}`,
+      });
+    }
   });
-  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+
+  updaterLog(`autoUpdater init — aktuali: v${app.getVersion()}, feed: ${JSON.stringify(autoUpdater.getFeedURL?.() || 'default')}`);
+  autoUpdater.checkForUpdatesAndNotify().catch(err => updaterLog(`check failed: ${err?.message || err}`));
+}
+
+// Menu me opsion manual për të kontrolluar update-in (Help → Kontrollo për Update).
+function buildAppMenu() {
+  const template = [
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+    {
+      label: 'Ndihmë',
+      submenu: [
+        {
+          label: 'Kontrollo për Update',
+          click: () => {
+            manualUpdateCheck = true;
+            updaterLog('manual check triggered from menu');
+            autoUpdater.checkForUpdates().catch(err => {
+              updaterLog(`manual check failed: ${err?.message || err}`);
+              dialog.showMessageBox(mainWindow, {
+                type: 'error', title: 'Gabim',
+                message: 'Nuk u kontrollua dot për update.',
+                detail: String(err?.message || err),
+              });
+            });
+          },
+        },
+        {
+          label: 'Hap log-un e update-it',
+          click: () => {
+            if (updaterLogPath && fs.existsSync(updaterLogPath)) shell.openPath(updaterLogPath);
+            else dialog.showMessageBox(mainWindow, { type: 'info', message: 'Log-u i update-it nuk ekziston ende.' });
+          },
+        },
+        { type: 'separator' },
+        { label: `Versioni: v${app.getVersion()}`, enabled: false },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function showServerErrorInWindow(err) {
@@ -213,7 +298,10 @@ app.whenReady().then(async () => {
     }
   }
   createWindow();
-  if (!isDev) setupAutoUpdate();
+  if (!isDev) {
+    buildAppMenu();
+    setupAutoUpdate();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
