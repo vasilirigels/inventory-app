@@ -353,7 +353,22 @@ async function checkForUpdateMac(manual = false) {
       try { fs.unlinkSync(dmgPath); } catch (_) {}
 
       updaterLog('Mac updater: install complete, relaunching');
-      // app.relaunch() cakton që të hapet përsëri pas quit; app.quit() e mbyll.
+      // KRITIKE: app.exit(0) nuk fajron before-quit → server subprocess mbetet
+      // gjallë, mban portin 3001, dhe pas relaunch-it Electron-i i ri
+      // hyn te SERVERI I VJETËR që serve-on JS bundle-in e vjetër. Vrisim
+      // server-in explicitisht që porti të lirohet.
+      if (serverProcess) {
+        try { serverProcess.kill('SIGKILL'); } catch (_) {}
+        serverProcess = null;
+      }
+      // Ruaj versionin që sapo u instalua për ta krahasuar pas relaunch-it
+      // dhe treguar dialog konfirmimi user-it.
+      try {
+        fs.writeFileSync(
+          path.join(app.getPath('userData'), 'pending-update.json'),
+          JSON.stringify({ version: latestVersion, at: new Date().toISOString() }),
+        );
+      } catch (_) {}
       app.relaunch();
       app.exit(0);
     } catch (installErr) {
@@ -579,6 +594,25 @@ app.whenReady().then(async () => {
   if (!isDev) {
     buildAppMenu();
     setupAutoUpdate();
+    // Kontrollo nëse sapo u bë update — nëse po, shfaq konfirmim me versionin e ri.
+    try {
+      const pendingPath = path.join(app.getPath('userData'), 'pending-update.json');
+      if (fs.existsSync(pendingPath)) {
+        const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+        fs.unlinkSync(pendingPath);
+        const current = app.getVersion();
+        if (pending.version === current) {
+          setTimeout(() => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Update i suksesshëm',
+              message: `App-i u përditësua me sukses`,
+              detail: `Tani je te versioni v${current}.`,
+            });
+          }, 1500);
+        }
+      }
+    } catch (_) {}
   }
 
   app.on('activate', () => {
