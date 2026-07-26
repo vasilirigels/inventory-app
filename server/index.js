@@ -1442,7 +1442,7 @@ async function fetchBSHRates() {
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GoldShopApp/1.0)' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChamShopApp/1.0)' },
       });
       if (!res.ok) continue;
       const html = await res.text();

@@ -63,9 +63,9 @@ jobs:
               --notes "Automated build from private inventory-app CI."
           fi
           gh release upload "$TAG" \
-            release/AriShop-Setup-*.exe \
-            release/AriShop-Setup-*.exe.blockmap \
-            release/AriShop-Portable-*.exe \
+            release/ChamShop-Setup-*.exe \
+            release/ChamShop-Setup-*.exe.blockmap \
+            release/ChamShop-Portable-*.exe \
             release/latest.yml \
             --repo "$RELEASES_REPO" \
             --clobber

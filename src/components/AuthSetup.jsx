@@ -45,7 +45,7 @@ export default function AuthSetup({ onDone }) {
       <div className="card w-full max-w-lg">
         <div className="text-center mb-6">
           <div className="text-4xl mb-2">💍</div>
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Gold Shop — Konfigurim Fillestar</h1>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Cham Shop — Konfigurim Fillestar</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Krijo dy përdorues: admin dhe shitës. Ky ekran shfaqet vetëm një herë.</p>
         </div>
         <form onSubmit={submit} className="space-y-6">

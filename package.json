@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
-  "productName": "Ari Shop",
-  "version": "1.0.18",
+  "productName": "Cham Shop",
+  "version": "1.0.19",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -52,7 +52,7 @@
   },
   "build": {
     "appId": "com.arishop.inventory",
-    "productName": "Ari Shop",
+    "productName": "Cham Shop",
     "directories": {
       "output": "release"
     },
@@ -94,23 +94,25 @@
           ]
         }
       ],
-      "artifactName": "AriShop-Setup-${version}.${ext}"
+      "artifactName": "ChamShop-Setup-${version}.${ext}"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Ari Shop"
+      "shortcutName": "Cham Shop"
     },
     "portable": {
-      "artifactName": "AriShop-Portable-${version}.${ext}",
+      "artifactName": "ChamShop-Portable-${version}.${ext}",
       "unicode": true
     },
     "mac": {
       "target": "dmg",
       "category": "public.app-category.business",
-      "artifactName": "AriShop-${version}.${ext}"
+      "artifactName": "ChamShop-${version}.${ext}"
     },
     "publish": [
       {

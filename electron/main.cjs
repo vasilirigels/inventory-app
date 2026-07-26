@@ -18,10 +18,32 @@ const PROD_URL = `http://localhost:${PORT}`;
 // pranë saj që sesioni të vijë me USB-në dhe të mos lërë gjurmë në PC.
 const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
 if (portableDir) {
-  const userDataDir = path.join(portableDir, 'AriShop-Data');
-  try { fs.mkdirSync(userDataDir, { recursive: true }); } catch (_) {}
-  app.setPath('userData', userDataDir);
-  app.setPath('sessionData', userDataDir);
+  const newDir = path.join(portableDir, 'ChamShop-Data');
+  const oldDir = path.join(portableDir, 'AriShop-Data');
+  // Migration nga emri i vjetër Ari Shop → Cham Shop (rebrand). Nëse ekziston
+  // folder-i i vjetër dhe i riu jo, riemërtoje që të ruhen DB + settings.
+  try {
+    if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
+      fs.renameSync(oldDir, newDir);
+    }
+  } catch (_) {}
+  try { fs.mkdirSync(newDir, { recursive: true }); } catch (_) {}
+  app.setPath('userData', newDir);
+  app.setPath('sessionData', newDir);
+}
+
+// Installed mode (Windows/Mac/Linux): electron përdor productName si emër
+// folder-i te %APPDATA% / ~/Library / ~/.config. Meqë e ndryshuam nga
+// "Ari Shop" → "Cham Shop", migro folder-in që user-i të mos humbë DB-në.
+if (!portableDir) {
+  try {
+    const appDataRoot = app.getPath('appData');
+    const oldInstalled = path.join(appDataRoot, 'Ari Shop');
+    const newInstalled = path.join(appDataRoot, 'Cham Shop');
+    if (fs.existsSync(oldInstalled) && !fs.existsSync(newInstalled)) {
+      fs.renameSync(oldInstalled, newInstalled);
+    }
+  } catch (_) {}
 }
 
 let mainWindow = null;
@@ -130,7 +152,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Ari Shop',
+    title: 'Cham Shop',
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -168,6 +190,16 @@ function setupAutoUpdate() {
   autoUpdater.on('checking-for-update', () => updaterLog('checking-for-update'));
   autoUpdater.on('update-available', (info) => {
     updaterLog(`update-available: v${info?.version}`);
+    // Njofto user-in menjëherë kur zbulohet version i ri (para se të mbarojë
+    // shkarkimi). Dialog jo-modal që të mos bllokojë punën — thjesht informoi.
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Version i ri i disponueshëm',
+      message: `Version i ri: v${info?.version}`,
+      detail: `Version-i aktual: v${app.getVersion()}\n\nPo shkarkohet automatikisht në sfond. Kur të mbarojë, do të të pyesim nëse do të rinisësh për ta instaluar.`,
+      buttons: ['Në rregull'],
+      defaultId: 0,
+    });
   });
   autoUpdater.on('update-not-available', (info) => {
     updaterLog(`update-not-available (aktuali: v${app.getVersion()}, i fundit: v${info?.version || '?'})`);
@@ -209,6 +241,13 @@ function setupAutoUpdate() {
 
   updaterLog(`autoUpdater init — aktuali: v${app.getVersion()}, feed: ${JSON.stringify(autoUpdater.getFeedURL?.() || 'default')}`);
   autoUpdater.checkForUpdatesAndNotify().catch(err => updaterLog(`check failed: ${err?.message || err}`));
+
+  // Rikontrollo çdo orë ndërsa app-i është hapur. Nëse user-i s'e mbyll për
+  // ditë të tëra, do të marrë update-in që del ndërkohë pa iu dashur rifillim.
+  setInterval(() => {
+    updaterLog('periodic re-check (1h)');
+    autoUpdater.checkForUpdates().catch(err => updaterLog(`periodic check failed: ${err?.message || err}`));
+  }, 60 * 60 * 1000);
 }
 
 // Menu me opsion manual për të kontrolluar update-in (Help → Kontrollo për Update).
@@ -254,7 +293,7 @@ function buildAppMenu() {
 function showServerErrorInWindow(err) {
   // Në vend të dialog-ut, hap një dritare me output-in e server-it dhe hap
   // DevTools automatikisht që user-i të mund të kopjojë tekstin lehtë.
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Ari Shop — Server Error</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Cham Shop — Server Error</title>
 <style>
   body { font-family: -apple-system, Segoe UI, sans-serif; background: #1e293b; color: #f1f5f9; padding: 24px; margin: 0; }
   h1 { color: #f87171; margin: 0 0 16px; font-size: 20px; }
@@ -277,7 +316,7 @@ function showServerErrorInWindow(err) {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 700,
-    title: 'Ari Shop — Server Error',
+    title: 'Cham Shop — Server Error',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });

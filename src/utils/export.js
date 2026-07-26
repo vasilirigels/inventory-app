@@ -78,7 +78,7 @@ export function exportToPdf(title, sections) {
 </head>
 <body>
   <h1>${escapeHtml(title)}</h1>
-  <div class="header-meta">Gjeneruar: ${new Date().toLocaleString('sq-AL')} · Gold Shop — Sistem Inventari</div>
+  <div class="header-meta">Gjeneruar: ${new Date().toLocaleString('sq-AL')} · Cham Shop — Sistem Inventari</div>
   ${sectionsHtml}
   <div class="footer">— Fund i Raportit —</div>
   <script>

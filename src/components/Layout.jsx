@@ -235,7 +235,7 @@ export default function Layout({
             </div>
             <div>
               <h1 className="text-slate-800 dark:text-white font-bold text-base leading-tight tracking-tight">
-                Gold Shop
+                Cham Shop
               </h1>
               <p className="text-slate-500 dark:text-slate-400 text-xs">Sistem Inventari</p>
             </div>

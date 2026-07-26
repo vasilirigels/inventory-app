@@ -34,7 +34,7 @@ export default function AuthLogin({ onLoggedIn }) {
       <div className="card w-full max-w-sm">
         <div className="text-center mb-6">
           <div className="text-4xl mb-2">💍</div>
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Gold Shop</h1>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Cham Shop</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Hyr në llogari</p>
         </div>
         <form onSubmit={submit} className="space-y-3">
