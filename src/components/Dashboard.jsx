@@ -274,6 +274,9 @@ export default function Dashboard({ date, onNavigate }) {
   const purchasesToday = CURS
     .map(c => ({ cur: c, v: n(arkaToday?.purchase_cash?.[c]) }))
     .filter(x => x.v > 0.005)
+  const debtRepaymentsToday = CURS
+    .map(c => ({ cur: c, v: n(arkaToday?.debt_repayments?.[c]) }))
+    .filter(x => x.v > 0.005)
 
   // ── Borxhe të hapura (të përmbledhura nga /api/client-debts/summary dhe /supplier-debts)
   // Rreshtat vijnë të ndara sipas monedhës — për krye shfaqim total (LEK ekuivalent
@@ -407,6 +410,42 @@ export default function Dashboard({ date, onNavigate }) {
           )
         })()}
       </button>
+
+      {/* Mbetur në Arkë pas Mbylljes — vetëm nëse dita është mbyllur (ka closeout).
+          Shfaq shumën për çdo monedhë që nuk u kalua në kasafortë dhe që bartet
+          si gjendje fillestare për ditën pasardhëse. */}
+      {isSingleDay && (() => {
+        const anyCloseout = CURS.some(c => n(arkaToday?.closeout_to_safe?.[c]) > 0.005)
+        if (!anyCloseout) return null
+        const carryItems = CURS
+          .map(c => ({ cur: c, carry: n(arkaToday?.carryover_next_day?.[c]), closeout: n(arkaToday?.closeout_to_safe?.[c]) }))
+          .filter(x => x.carry > 0.005 || x.closeout > 0.005)
+        return (
+          <div className="card bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800">
+            <div className="mb-3">
+              <h3 className="text-sm md:text-base font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                <span className="text-xl">💼</span> Mbetur në Arkë pas Mbylljes
+              </h3>
+              <p className="text-[10px] md:text-xs text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+                Shuma që nuk u kalua në kasafortë — bartet si gjendje fillestare për ditën pasardhëse.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {carryItems.map(({ cur, carry, closeout }) => (
+                <div key={cur} className="bg-white dark:bg-slate-900 rounded-lg px-3 py-2 border border-amber-100 dark:border-amber-800/50">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">{cur}</div>
+                  <div className={`text-lg md:text-xl font-extrabold tabular-nums ${carry > 0.005 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400 dark:text-slate-500'}`}>
+                    {fmt(carry)}
+                  </div>
+                  <div className="text-[9px] text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
+                    në kasafortë: <span className="font-semibold">{fmt(closeout)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Rreshti 2 — Xhiro + Detyrime */}
       <div className={`grid grid-cols-1 gap-3 md:gap-4 ${isSales ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
@@ -558,13 +597,15 @@ export default function Dashboard({ date, onNavigate }) {
         </div>
       )}
 
-      {/* Detaje ditore: shpenzime + blerje kesh + borxh (multi-currency) */}
-      {(expensesToday.length > 0 || purchasesToday.length > 0 || dueToday.length > 0) && (
+      {/* Detaje ditore (multi-currency): shpenzime + [blerje kesh (admin) / kthim borxhi (shitës)] + borxh */}
+      {(expensesToday.length > 0 || (!isSales && purchasesToday.length > 0) || (isSales && debtRepaymentsToday.length > 0) || dueToday.length > 0) && (
         <div className="card bg-slate-50 dark:bg-slate-900">
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-2">Sot — Dalje &amp; Borxh (sipas monedhës)</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <MiniList label="Shpenzime"   items={expensesToday}   color="orange" />
-            <MiniList label="Blerje Kesh" items={purchasesToday}  color="amber"  />
+            {isSales
+              ? <MiniList label="Kthim Borxhi" items={debtRepaymentsToday} color="emerald" />
+              : <MiniList label="Blerje Kesh"  items={purchasesToday}      color="amber"   />}
             <MiniList label="Borxh sot"   items={dueToday}        color="rose"   />
           </div>
         </div>

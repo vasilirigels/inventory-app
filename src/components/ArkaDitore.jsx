@@ -73,17 +73,21 @@ export default function ArkaDitore({ date, onNavigate }) {
     const payload = {}
     for (const c of CURS) payload[c] = parseFloat(values[c]) || 0
     try {
-      await fetch(`/api/arka-ditore/${date}/physical`, {
+      const resp = await fetch(`/api/arka-ditore/${date}/physical`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ physical_cash: payload }),
       })
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${resp.status}`)
+      }
       // Rifreskim që të përditësohen difference-ët
       const fresh = await fetch(`/api/arka-ditore/${date}`).then(r => r.json())
       setData(fresh)
       setSavedMsg('Ruajtur ✓'); setTimeout(() => setSavedMsg(''), 1200)
     } catch (e) {
-      setSavedMsg('⚠ Gabim'); setTimeout(() => setSavedMsg(''), 2000)
+      setSavedMsg(`⚠ ${e.message || 'Gabim'}`); setTimeout(() => setSavedMsg(''), 2500)
     }
   }
 
@@ -110,18 +114,20 @@ export default function ArkaDitore({ date, onNavigate }) {
     }
     setClosingOut(true)
     try {
-      const r = await fetch(`/api/arka-ditore/${date}/closeout`, {
+      const resp = await fetch(`/api/arka-ditore/${date}/closeout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to_safe: toSafe }),
-      }).then(r => r.json())
+      })
+      const r = await resp.json().catch(() => ({}))
+      if (!resp.ok) throw new Error(r.error || `HTTP ${resp.status}`)
       const fresh = await fetch(`/api/arka-ditore/${date}`).then(r => r.json())
       setData(fresh)
       setCloseoutMsg(`✓ Mbyllur për ${r.next_date}`)
       setTimeout(() => setCloseoutMsg(''), 3000)
     } catch (e) {
-      setCloseoutMsg('⚠ Gabim në mbyllje')
-      setTimeout(() => setCloseoutMsg(''), 3000)
+      setCloseoutMsg(`⚠ Gabim në mbyllje: ${e.message || ''}`)
+      setTimeout(() => setCloseoutMsg(''), 4000)
     } finally { setClosingOut(false) }
   }
 

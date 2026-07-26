@@ -272,6 +272,9 @@ const SALES_WRITE_ALLOW = [
   { method: 'POST', pattern: /^\/api\/safe-conversions$/ },
   // Hurda (konvertim / blerje hurda)
   { method: 'POST', pattern: /^\/api\/hurda-purchases$/ },
+  // Arka Ditore — gjendja fizike + mbyllja e ditës (veprim ditor i shitësit)
+  { method: 'POST', pattern: /^\/api\/arka-ditore\/[\d-]+\/physical$/ },
+  { method: 'POST', pattern: /^\/api\/arka-ditore\/[\d-]+\/closeout$/ },
 ];
 
 // Komentet / chat — të gjithë userat (admin & sales) mund të shkruajnë,
@@ -1136,7 +1139,7 @@ app.get('/api/products/search', async (req, res) => {
     if (!q) return res.json([]);
     const like = `%${q}%`;
     const rows = await queryAll(
-      `SELECT id, name, sku, barcode, category, sell_price, vat_rate, stock, image_path, gram,
+      `SELECT id, name, sku, barcode, category, sell_price, cost_price, vat_rate, stock, image_path, gram,
               is_promotion, promo_discount_pct, serial_no, purchase_price_no_vat
          FROM products
         WHERE active = 1
@@ -5643,9 +5646,14 @@ app.get('/api/marketing-entries/:date', async (req, res) => {
     const { date } = req.params;
     const rows = await queryAll(
       `SELECT m.*, c.name AS category_name,
+              p.name AS product_name, p.barcode AS product_barcode,
+              p.cost_price AS product_cost_price, p.stock AS product_stock,
+              p.serial_no AS product_serial_no, p.gram AS product_gram,
+              p.vat_rate AS product_vat_rate, p.sell_price AS product_sell_price,
               (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
        FROM marketing_expenses m
        LEFT JOIN marketing_categories c ON c.id = m.category_id
+       LEFT JOIN products p ON p.id = m.product_id
        WHERE m.date = ?
        ORDER BY m.id ASC`,
       [date]
@@ -5662,8 +5670,62 @@ app.get('/api/marketing-entries/:date', async (req, res) => {
 
 app.post('/api/marketing-entries', async (req, res) => {
   try {
-    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
+    const { date, category_id, description, currency, amount, exchange_rate,
+            product_id, product_qty } = req.body || {};
     if (!date) return res.status(400).json({ error: 'date required' });
+
+    // Marketing "in kind" — një produkt merret nga inventari (dhuratë/mostër/promo).
+    // Nuk krijohet faturë shitjeje (pra nuk hyn te xhiro), por stoku ulet dhe
+    // regjistrimi mbetet i dukshëm te historiku i marketingut.
+    if (product_id) {
+      const pid = parseInt(product_id);
+      const qty = Math.max(1, parseInt(product_qty) || 1);
+      const prod = await queryOne(
+        'SELECT id, name, cost_price, sell_price, stock FROM products WHERE id = ?', [pid]
+      );
+      if (!prod) return res.status(404).json({ error: 'product not found' });
+      if ((prod.stock || 0) < qty) {
+        return res.status(400).json({ error: `insufficient stock (aktual: ${prod.stock || 0})` });
+      }
+      // Vlera në EUR: nëse klienti dërgon `amount` (llogaritur si te Fatura Shitje —
+      // sell_price × qty × (1 - disc%/100) × (1 + vat%/100)), përdore atë; përndryshe
+      // fallback te sell_price × qty ose cost_price × qty.
+      const cur = 'EUR';
+      const providedAmt = parseFloat(amount);
+      const sellPrice = parseFloat(prod.sell_price) || 0;
+      const costPrice = parseFloat(prod.cost_price) || 0;
+      const amt = providedAmt > 0
+        ? +providedAmt.toFixed(2)
+        : +((sellPrice || costPrice) * qty).toFixed(2);
+      const rate = parseFloat(exchange_rate) > 0 ? parseFloat(exchange_rate) : 1;
+      await run(
+        `INSERT INTO marketing_expenses (date, category_id, description, currency, amount, exchange_rate,
+           amount_lek, amount_eur, amount_usd, product_id, product_qty)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          date, category_id || null,
+          description || '',
+          cur, amt, rate,
+          0, amt, 0,
+          pid, qty,
+        ]
+      );
+      await run('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, pid]);
+      const row = await queryOne(
+        `SELECT m.*, c.name AS category_name,
+                p.name AS product_name, p.barcode AS product_barcode,
+              p.cost_price AS product_cost_price, p.stock AS product_stock,
+              p.serial_no AS product_serial_no, p.gram AS product_gram,
+              p.vat_rate AS product_vat_rate, p.sell_price AS product_sell_price,
+                (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
+         FROM marketing_expenses m
+         LEFT JOIN marketing_categories c ON c.id = m.category_id
+         LEFT JOIN products p ON p.id = m.product_id
+         ORDER BY m.id DESC LIMIT 1`
+      );
+      return res.json(row);
+    }
+
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
@@ -5684,8 +5746,14 @@ app.post('/api/marketing-entries', async (req, res) => {
     );
     const row = await queryOne(
       `SELECT m.*, c.name AS category_name,
+              p.name AS product_name, p.barcode AS product_barcode,
+              p.cost_price AS product_cost_price, p.stock AS product_stock,
+              p.serial_no AS product_serial_no, p.gram AS product_gram,
+              p.vat_rate AS product_vat_rate, p.sell_price AS product_sell_price,
               (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
-       FROM marketing_expenses m LEFT JOIN marketing_categories c ON c.id = m.category_id
+       FROM marketing_expenses m
+       LEFT JOIN marketing_categories c ON c.id = m.category_id
+       LEFT JOIN products p ON p.id = m.product_id
        ORDER BY m.id DESC LIMIT 1`
     );
     res.json(row);
@@ -5695,9 +5763,89 @@ app.post('/api/marketing-entries', async (req, res) => {
 app.put('/api/marketing-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
-    const existing = await queryOne('SELECT date FROM marketing_expenses WHERE id = ?', [id]);
+    const { date, category_id, description, currency, amount, exchange_rate,
+            product_id, product_qty } = req.body || {};
+    const existing = await queryOne(
+      'SELECT date, product_id, product_qty FROM marketing_expenses WHERE id = ?', [id]
+    );
     if (!existing) return res.status(404).json({ error: 'not found' });
+
+    // Nëse regjistrimi është (ose bëhet) tip PRODUKT, bëj diferencën e stokut:
+    // riktheji stokun e vjetër dhe zbrit atë të riun. Kështu ndryshimi funksionon
+    // edhe kur ndryshon produkti ose sasia.
+    const wasProduct = !!existing.product_id;
+    const isProduct = !!product_id;
+    if (wasProduct || isProduct) {
+      const oldPid = existing.product_id;
+      const oldQty = existing.product_qty || 0;
+      const newPid = isProduct ? parseInt(product_id) : null;
+      const newQty = isProduct ? Math.max(1, parseInt(product_qty) || 1) : 0;
+
+      if (oldPid) {
+        await run('UPDATE products SET stock = stock + ? WHERE id = ?', [oldQty, oldPid]);
+      }
+      let newAmtFromProduct = 0;
+      if (newPid) {
+        const prod = await queryOne(
+          'SELECT id, name, cost_price, sell_price, stock FROM products WHERE id = ?', [newPid]
+        );
+        if (!prod) {
+          if (oldPid) await run('UPDATE products SET stock = stock - ? WHERE id = ?', [oldQty, oldPid]);
+          return res.status(404).json({ error: 'product not found' });
+        }
+        if ((prod.stock || 0) < newQty) {
+          if (oldPid) await run('UPDATE products SET stock = stock - ? WHERE id = ?', [oldQty, oldPid]);
+          return res.status(400).json({ error: `insufficient stock (aktual: ${prod.stock || 0})` });
+        }
+        await run('UPDATE products SET stock = stock - ? WHERE id = ?', [newQty, newPid]);
+        // Preferohet amount i dërguar nga UI (llogaritur si Fatura Shitje).
+        const sellPrice = parseFloat(prod.sell_price) || 0;
+        const costPrice = parseFloat(prod.cost_price) || 0;
+        newAmtFromProduct = +((sellPrice || costPrice) * newQty).toFixed(2);
+      }
+
+      const cur = isProduct ? 'EUR' : pickCurrency(currency);
+      const providedAmt = parseFloat(amount);
+      const amt = isProduct
+        ? (providedAmt > 0 ? +providedAmt.toFixed(2) : newAmtFromProduct)
+        : (parseFloat(amount) || 0);
+      const rate = isProduct
+        ? (parseFloat(exchange_rate) > 0 ? parseFloat(exchange_rate) : 1)
+        : (cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0));
+      if (!isProduct && cur !== 'LEK' && rate <= 0) {
+        // Rollback stock changes nëse tranzicioni dështon.
+        if (newPid) await run('UPDATE products SET stock = stock + ? WHERE id = ?', [newQty, newPid]);
+        if (oldPid) await run('UPDATE products SET stock = stock - ? WHERE id = ?', [oldQty, oldPid]);
+        return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+      }
+
+      await run(
+        `UPDATE marketing_expenses SET date = ?, category_id = ?, description = ?,
+           currency = ?, amount = ?, exchange_rate = ?,
+           amount_lek = ?, amount_eur = ?, amount_usd = ?,
+           product_id = ?, product_qty = ?
+         WHERE id = ?`,
+        [
+          date || existing.date, category_id || null, description || '',
+          cur, amt, rate,
+          cur === 'LEK' ? amt : 0,
+          cur === 'EUR' ? amt : 0,
+          cur === 'USD' ? amt : 0,
+          newPid, newQty, id,
+        ]
+      );
+      return res.json(await queryOne(
+        `SELECT m.*, c.name AS category_name,
+                p.name AS product_name, p.barcode AS product_barcode,
+                p.cost_price AS product_cost_price, p.stock AS product_stock,
+                (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
+         FROM marketing_expenses m
+         LEFT JOIN marketing_categories c ON c.id = m.category_id
+         LEFT JOIN products p ON p.id = m.product_id
+         WHERE m.id = ?`, [id]
+      ));
+    }
+
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
@@ -5730,7 +5878,17 @@ app.put('/api/marketing-entries/:id', async (req, res) => {
 app.delete('/api/marketing-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await queryOne(
+      'SELECT product_id, product_qty FROM marketing_expenses WHERE id = ?', [id]
+    );
     await run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
+    // Nëse ishte një produkt nga inventari, riktheje stokun te produkti.
+    if (existing?.product_id && existing.product_qty > 0) {
+      await run(
+        'UPDATE products SET stock = stock + ? WHERE id = ?',
+        [existing.product_qty, existing.product_id]
+      );
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -5753,9 +5911,14 @@ app.get('/api/reports/marketing', async (req, res) => {
 
     const entries = await queryAll(
       `SELECT m.*, c.name AS category_name,
+              p.name AS product_name, p.barcode AS product_barcode,
+              p.cost_price AS product_cost_price, p.stock AS product_stock,
+              p.serial_no AS product_serial_no, p.gram AS product_gram,
+              p.vat_rate AS product_vat_rate, p.sell_price AS product_sell_price,
               (COALESCE(m.amount, 0) * COALESCE(m.exchange_rate, 1)) AS total_lek
        FROM marketing_expenses m
        LEFT JOIN marketing_categories c ON c.id = m.category_id
+       LEFT JOIN products p ON p.id = m.product_id
        WHERE ${where}
        ORDER BY m.date ASC, m.id ASC`,
       params

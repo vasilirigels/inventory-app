@@ -648,6 +648,11 @@ const MIGRATIONS = [
   "ALTER TABLE marketing_expenses ADD COLUMN currency TEXT DEFAULT 'LEK'",
   "ALTER TABLE marketing_expenses ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE marketing_expenses ADD COLUMN exchange_rate REAL DEFAULT 1",
+  // Marketing "in kind" — një produkt nga inventari përdoret për marketing
+  // (dhuratë, mostër, promovim). Kur product_id është NOT NULL, stoku ulet me
+  // product_qty në kohën e krijimit dhe rikthehet në kohën e fshirjes.
+  "ALTER TABLE marketing_expenses ADD COLUMN product_id INTEGER",
+  "ALTER TABLE marketing_expenses ADD COLUMN product_qty INTEGER DEFAULT 0",
 
   // Splits pagese për Fatura Blerje — pasqyrim i invoice_payment_splits për
   // shitje. Lejon që një blerje të paguhet me disa metoda (cash + bankë) dhe
