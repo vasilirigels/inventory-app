@@ -184,14 +184,34 @@ function updaterLog(msg) {
 
 let manualUpdateCheck = false;
 function setupAutoUpdate() {
-  autoUpdater.autoDownload = true;
+  // Portable s'mund të mbivendosë vetveten ndërsa është duke ekzekutuar (s'ka
+  // NSIS uninstaller/installer për të thirrur). Fikim autoDownload që të mos
+  // shkarkojë kot dhe në update-available shfaqim dialog me linkun për download.
+  const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR;
+  autoUpdater.autoDownload = !isPortable;
   autoUpdater.logger = { info: updaterLog, warn: updaterLog, error: updaterLog, debug: () => {} };
+  updaterLog(`mode: ${isPortable ? 'portable (notify-only)' : 'installer (auto-download)'}`);
 
   autoUpdater.on('checking-for-update', () => updaterLog('checking-for-update'));
-  autoUpdater.on('update-available', (info) => {
+  autoUpdater.on('update-available', async (info) => {
     updaterLog(`update-available: v${info?.version}`);
-    // Njofto user-in menjëherë kur zbulohet version i ri (para se të mbarojë
-    // shkarkimi). Dialog jo-modal që të mos bllokojë punën — thjesht informoi.
+    if (isPortable) {
+      // Portable — s'mund të instalojmë vetvetiu; hap browser-in te faqja e
+      // release-it që user-i të shkarkojë manualisht dhe të zëvendësojë .exe-në.
+      const releaseUrl = `https://github.com/vasilirigels/inventory-app-releases/releases/tag/v${info?.version}`;
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Version i ri i disponueshëm',
+        message: `Version i ri: v${info?.version}`,
+        detail: `Version-i aktual: v${app.getVersion()}\n\nMeqë je te versioni portable (USB), nuk mund të instalohet vetvetiu. Kliko "Shkarko" për të hapur faqen e release-it në browser dhe zëvendëso .exe-në në USB.`,
+        buttons: ['Shkarko', 'Më vonë'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response === 0) shell.openExternal(releaseUrl);
+      return;
+    }
+    // NSIS installed — dialog informues; shkarkimi vazhdon në sfond automatikisht.
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Version i ri i disponueshëm',
