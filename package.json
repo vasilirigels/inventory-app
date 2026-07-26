@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Cham Shop",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -112,7 +112,18 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.business",
-      "artifactName": "ChamShop-${version}-${arch}.${ext}"
+      "artifactName": "ChamShop-${version}-${arch}.${ext}",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "sign": false,
+      "writeUpdateInfo": true,
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
     },
     "publish": [
       {
