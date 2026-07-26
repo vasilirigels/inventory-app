@@ -312,46 +312,92 @@ async function checkForUpdateMac(manual = false) {
 
     // Shkruaj script-in që bën install-in pasi app-i mbyllet. Kryhet detached
     // që të vazhdojë edhe pasi vdes electron process-i i tanishëm.
+    // - Përdorim mountpoint eksplicit që të mos parse-ojmë output-in e hdiutil
+    // - Redirect-ojmë të gjithë stdout/stderr te log-u që të kapim çdo gabim
+    // - Pa `set -e` që një error i vogël (p.sh. detach) të mos ndalë të gjithë flow-in
     const scriptPath = path.join(app.getPath('temp'), `cham-shop-install-${Date.now()}.sh`);
+    const logPath = path.join(app.getPath('userData'), 'updater.log');
+    const mountPoint = path.join(app.getPath('temp'), `chamshop-mount-${Date.now()}`);
     const script = `#!/bin/bash
-set -e
-LOG="${path.join(app.getPath('userData'), 'updater.log').replace(/"/g, '\\"')}"
-echo "[$(date -Iseconds)] installer: waiting for app to quit" >> "$LOG"
-sleep 3
-MOUNT_OUTPUT=$(hdiutil attach "${dmgPath}" -nobrowse -noautoopen 2>&1)
-echo "[$(date -Iseconds)] installer: mount output: $MOUNT_OUTPUT" >> "$LOG"
-MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep -o "/Volumes/[^	]*" | tail -1)
-if [ -z "$MOUNT_POINT" ]; then
-  echo "[$(date -Iseconds)] installer: ERROR — could not detect mount point" >> "$LOG"
-  osascript -e 'display alert "Cham Shop Update" message "Nuk u mount DMG. Instalimi u anulua."'
+LOG=${JSON.stringify(logPath)}
+DMG=${JSON.stringify(dmgPath)}
+MOUNT=${JSON.stringify(mountPoint)}
+APP_BUNDLE=${JSON.stringify(appBundlePath)}
+APP_PARENT=${JSON.stringify(appParentDir)}
+
+exec >> "$LOG" 2>&1
+
+echo ""
+echo "===== installer.sh: $(date) ====="
+echo "DMG=$DMG"
+echo "MOUNT=$MOUNT"
+echo "APP_BUNDLE=$APP_BUNDLE"
+echo "APP_PARENT=$APP_PARENT"
+
+echo "waiting 4s for app to fully quit..."
+sleep 4
+
+echo "creating mount directory..."
+mkdir -p "$MOUNT"
+
+echo "attaching DMG at $MOUNT..."
+hdiutil attach "$DMG" -nobrowse -noautoopen -mountpoint "$MOUNT"
+if [ $? -ne 0 ]; then
+  echo "ERROR: hdiutil attach failed"
+  osascript -e 'display alert "Cham Shop Update" message "Nuk u mount DMG."'
   exit 1
 fi
-echo "[$(date -Iseconds)] installer: mounted at $MOUNT_POINT" >> "$LOG"
-NEW_APP=$(find "$MOUNT_POINT" -maxdepth 2 -name "*.app" -type d | head -1)
-if [ -z "$NEW_APP" ]; then
-  echo "[$(date -Iseconds)] installer: ERROR — no .app in DMG" >> "$LOG"
-  hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
-  osascript -e 'display alert "Cham Shop Update" message "S\\'u gjet .app në DMG."'
+
+NEW_APP="$MOUNT/Cham Shop.app"
+if [ ! -d "$NEW_APP" ]; then
+  echo "Cham Shop.app not at expected path, searching..."
+  NEW_APP=$(find "$MOUNT" -maxdepth 2 -name "*.app" -type d | head -1)
+  echo "found: $NEW_APP"
+fi
+if [ ! -d "$NEW_APP" ]; then
+  echo "ERROR: no .app in DMG"
+  hdiutil detach "$MOUNT" -force 2>/dev/null
+  osascript -e 'display alert "Cham Shop Update" message "S'"'"'u gjet .app në DMG."'
   exit 1
 fi
-echo "[$(date -Iseconds)] installer: copying $NEW_APP → ${appParentDir}" >> "$LOG"
-rm -rf "${appBundlePath}"
-cp -R "$NEW_APP" "${appParentDir}/"
-xattr -cr "${appBundlePath}" 2>/dev/null || true
-hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
-rm -f "${dmgPath}"
-echo "[$(date -Iseconds)] installer: done, relaunching" >> "$LOG"
-open "${appBundlePath}"
+
+echo "removing old app at $APP_BUNDLE..."
+rm -rf "$APP_BUNDLE"
+
+echo "copying new app to $APP_PARENT..."
+cp -R "$NEW_APP" "$APP_PARENT/"
+if [ $? -ne 0 ]; then
+  echo "ERROR: cp failed"
+  hdiutil detach "$MOUNT" -force 2>/dev/null
+  osascript -e 'display alert "Cham Shop Update" message "Kopjimi dështoi. Ndoshta nuk ke leje te destinacioni."'
+  exit 1
+fi
+
+echo "removing quarantine attribute..."
+xattr -cr "$APP_BUNDLE" 2>&1 || echo "(xattr warning, vazhdojmë)"
+
+echo "detaching DMG..."
+hdiutil detach "$MOUNT" -force 2>&1 || echo "(detach warning)"
+
+echo "removing tmp files..."
+rm -rf "$MOUNT"
+rm -f "$DMG"
+
+echo "opening new app..."
+open "$APP_BUNDLE"
+
+echo "===== installer.sh: done ====="
 `;
     fs.writeFileSync(scriptPath, script, { mode: 0o755 });
     updaterLog(`Mac updater: wrote installer script ${scriptPath}`);
+    updaterLog(`Mac updater: mount point will be ${mountPoint}`);
 
     const { spawn } = require('child_process');
     const child = spawn('/bin/bash', [scriptPath], {
       detached: true, stdio: 'ignore',
     });
     child.unref();
-    updaterLog('Mac updater: spawned installer, quitting app');
+    updaterLog(`Mac updater: spawned installer PID=${child.pid}, quitting app in 500ms`);
     setTimeout(() => app.quit(), 500);
   } catch (err) {
     updaterLog(`Mac updater ERROR: ${err?.message || err}`);
