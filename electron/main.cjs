@@ -7,11 +7,27 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 
 const isDev = !app.isPackaged;
 const PORT = 3001;
 const DEV_URL = 'http://localhost:5173';
 const PROD_URL = `http://localhost:${PORT}`;
+
+// Bllokon nisjen e dytë të njëkohshme (p.sh. dy klikime te .exe portable ose
+// installed + portable të hapura njëkohësisht). Pa këtë, instanca e dytë
+// dështon te startServer() sepse porti 3001 është i zënë → dialog i pafat
+// "Server-i i brendshëm nuk u nis". Kur bllokohet, e reja fokuson të vjetrën.
+if (!isDev && !app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 // Portable mode: electron-builder-i portable seton PORTABLE_EXECUTABLE_DIR te
 // direktoria ku ndodhet .exe-ja në USB. Ruajmë userData (sesion, cache, logs)
@@ -50,21 +66,55 @@ let mainWindow = null;
 let serverProcess = null;
 
 // Load .env manually so we can forward vars to the server child regardless of
-// what cwd Electron was launched with.
+// what cwd Electron was launched with. Provo disa vendndodhje sepse në portable
+// asar-i ekstraktohet në temp dhe rruga mund të ndryshojë.
 function loadEnv() {
-  const envPath = isDev
-    ? path.join(__dirname, '..', '.env')
-    : path.join(process.resourcesPath, 'app.asar', '.env');
-  if (!fs.existsSync(envPath)) {
-    console.warn('[electron] .env not found at', envPath);
-    return {};
+  const candidates = isDev
+    ? [path.join(__dirname, '..', '.env')]
+    : [
+        path.join(process.resourcesPath, 'app.asar', '.env'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', '.env'),
+        path.join(process.resourcesPath, '.env'),
+        path.join(app.getAppPath(), '.env'),
+        path.join(path.dirname(process.execPath), '.env'),
+      ];
+  let envPath = null;
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) { envPath = c; break; } } catch (_) {}
   }
-  const out = {};
+  if (!envPath) {
+    console.warn('[electron] .env not found. Tried:', candidates.join(' | '));
+    return { __missing: candidates };
+  }
+  const out = { __path: envPath };
   for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
     if (m) out[m[1]] = m[2];
   }
   return out;
+}
+
+// Kontrollo nëse porti 3001 është i zënë; kthen 'free' | 'chamshop' | 'other'.
+// 'chamshop' → një instancë Cham Shop tashmë po vraga te ky port; hapim thjesht
+// dritaren dhe e riprovim. 'other' → një app tjetër e ka zënë; s'mund të nisim.
+async function probePort() {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', async (err) => {
+      if (err.code !== 'EADDRINUSE') return resolve('other');
+      // Provo të flasim me atë që dëgjon — nëse është Cham Shop, do të përgjigjet.
+      try {
+        const r = await new Promise((res) => {
+          const req = http.get(`${PROD_URL}/api/products`, (r) => { r.resume(); res(r.statusCode); });
+          req.on('error', () => res(0));
+          req.setTimeout(1500, () => { req.destroy(); res(0); });
+        });
+        resolve(r > 0 ? 'chamshop' : 'other');
+      } catch (_) { resolve('other'); }
+    });
+    server.once('listening', () => { server.close(() => resolve('free')); });
+    server.listen(PORT, '127.0.0.1');
+  });
 }
 
 // Buffer i outputit të server-it (memory) që të mund ta tregojmë te dialog
@@ -75,6 +125,10 @@ let serverExitCode = null;
 function startServer() {
   const serverPath = path.join(__dirname, '..', 'server', 'index.js');
   const envLoaded = loadEnv();
+  const envPathUsed = envLoaded.__path;
+  const envMissingList = envLoaded.__missing;
+  delete envLoaded.__path;
+  delete envLoaded.__missing;
   // Folderi për upload-e produktesh — brenda userData që të mos përpiqet të
   // shkruajë brenda app.asar (read-only) dhe të ruhet me user-in.
   const uploadDir = path.join(app.getPath('userData'), 'uploads', 'products');
@@ -88,8 +142,10 @@ function startServer() {
     UPLOAD_DIR: uploadDir,
   };
   serverOutput = `[env keys]: ${Object.keys(envLoaded).join(', ') || '(none)'}\n`;
+  serverOutput += `[env source]: ${envPathUsed || `NOT FOUND. tried: ${(envMissingList || []).join(' | ')}`}\n`;
   serverOutput += `[server path]: ${serverPath}\n`;
-  serverOutput += `[exec path]: ${process.execPath}\n\n`;
+  serverOutput += `[exec path]: ${process.execPath}\n`;
+  serverOutput += `[portable]: ${portableDir ? `yes (${portableDir})` : 'no'}\n\n`;
   // Provo edhe log-un në skedar (backup), por parësor është buffer-i memory.
   const logDir = path.join(app.getPath('userData'), 'logs');
   let logStream = null;
@@ -582,14 +638,33 @@ function showServerErrorInWindow(err) {
 
 app.whenReady().then(async () => {
   if (!isDev) {
-    startServer();
-    try { await waitForServer(); }
-    catch (err) {
-      // Prit deri në 500ms që stdout/stderr të shterojë para hapjes së dritares.
-      await new Promise(r => setTimeout(r, 500));
-      showServerErrorInWindow(err);
+    // Kontrollo portin para se të spawn-ojmë — nëse është i zënë nga një
+    // proces tjetër jo-Cham Shop, s'ka kuptim të provojmë (thjesht do dështojë).
+    // Nëse është i zënë nga një Cham Shop tjetër (p.sh. instancë e vjetër që
+    // s'u mbyll), përdorim atë server dhe hapim vetëm dritaren.
+    const state = await probePort();
+    if (state === 'other') {
+      dialog.showMessageBoxSync({
+        type: 'error',
+        title: 'Cham Shop — Porti është i zënë',
+        message: `Porti ${PORT} është i zënë nga një aplikacion tjetër.`,
+        detail: 'Mbylle aplikacionin që përdor portin 3001 (mund të jetë një instancë tjetër e Cham Shop që s\'u mbyll siç duhet, ose një program tjetër) dhe provo sërish.\n\nKëshillë: Rihap kompjuterin nëse s\'ke siguri cili proces e ka zënë.',
+      });
+      app.quit();
       return;
     }
+    if (state === 'free') {
+      startServer();
+      try { await waitForServer(); }
+      catch (err) {
+        // Prit deri në 500ms që stdout/stderr të shterojë para hapjes së dritares.
+        await new Promise(r => setTimeout(r, 500));
+        showServerErrorInWindow(err);
+        return;
+      }
+    }
+    // state === 'chamshop' → server-i i një instance tjetër Cham Shop po
+    // punon; hap thjesht dritaren që të lidhet me atë.
   }
   createWindow();
   if (!isDev) {
