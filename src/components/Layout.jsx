@@ -168,6 +168,7 @@ function findParentId(childId) {
 export default function Layout({
   children, page, currentDate,
   onNavigate, onDateChange, user,
+  canGoBack, onGoBack,
 }) {
   const isSales = user?.role === 'sales'
   const NAV = isSales
@@ -367,6 +368,18 @@ export default function Layout({
             >
               <span className="text-xl leading-none">☰</span>
             </button>
+            {canGoBack && (
+              <button
+                type="button"
+                onClick={onGoBack}
+                className="flex items-center gap-1 px-2 md:px-3 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-xs md:text-sm font-medium flex-shrink-0"
+                title="Kthehu te faqja e mëparshme"
+                aria-label="Kthehu Mbrapa"
+              >
+                <span className="text-base leading-none">←</span>
+                <span className="hidden sm:inline">Kthehu Mbrapa</span>
+              </button>
+            )}
             <h2 className="text-sm md:text-base font-bold text-slate-800 dark:text-slate-100 truncate">{headerTitle}</h2>
 
             {/* Daily date nav — show on any date-driven page */}

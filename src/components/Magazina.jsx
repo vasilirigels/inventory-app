@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -676,7 +677,9 @@ export default function Magazina({ kind, date }) {
 
   const deleteFlete = async (id, ref) => {
     const verb = kind === 'hyrje' ? 'rritur' : 'zbritur'
-    if (!confirm(`Fshi fletën ${ref}? Stoku që ishte ${verb} do të kthehet.`)) return
+    if (!(await showConfirm(`Fshi fletën ${ref}? Stoku që ishte ${verb} do të kthehet.`, {
+      title: 'Fshi fletën', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/magazina-${kind}/${id}`, { method: 'DELETE' })
     setRefreshKey(k => k + 1)
   }

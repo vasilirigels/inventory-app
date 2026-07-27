@@ -1,8 +1,136 @@
 import { useState, useEffect, useRef } from 'react'
 import { generateBarcode, printLabels } from '../lib/barcode.js'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
+
+// Zgjedhës kategorie materiali me krijim/editim/fshirje inline. Slug ruhet te
+// products.material dhe label te products.category kur admin zgjedh një
+// kategori. Kategoritë built_in (flori/diamant/ora) mbrohen nga fshirja.
+function MaterialCategoryPicker({ value, onChange, categories, onChanged }) {
+  const [mode, setMode] = useState('view') // 'view' | 'create' | 'edit'
+  const [name, setName] = useState('')
+  const [icon, setIcon] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const selected = categories.find(c => c.slug === value)
+
+  const onSelectChange = (e) => {
+    const v = e.target.value
+    if (v === '__new__') { setMode('create'); setName(''); setIcon('') }
+    else onChange(v)
+  }
+
+  const startEdit = () => {
+    if (!selected) return
+    setMode('edit'); setName(selected.label); setIcon(selected.icon || '')
+  }
+
+  const saveCreate = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/material-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: trimmed, icon: icon.trim() }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      const created = await res.json()
+      await onChanged?.()
+      if (created?.slug) onChange(created.slug)
+      setMode('view'); setName(''); setIcon('')
+    } finally { setSaving(false) }
+  }
+
+  const saveEdit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving || !selected) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/material-categories/${selected.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: trimmed, icon: icon.trim(), active: 1 }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      await onChanged?.()
+      setMode('view'); setName(''); setIcon('')
+    } finally { setSaving(false) }
+  }
+
+  const doDelete = async () => {
+    if (!selected) return
+    if (selected.built_in) { alert('Kategoria bazë nuk mund të fshihet.'); return }
+    if (!(await showConfirm(`Fshi kategorinë "${selected.label}"?`, {
+      title: 'Fshi kategorinë', confirmLabel: 'Fshi', danger: true,
+    }))) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/material-categories/${selected.id}`, { method: 'DELETE' })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      onChange('')
+      await onChanged?.()
+    } finally { setSaving(false) }
+  }
+
+  if (mode === 'create' || mode === 'edit') {
+    const submit = mode === 'edit' ? saveEdit : saveCreate
+    return (
+      <div className="flex gap-1">
+        <input
+          type="text" value={icon} maxLength={2}
+          onChange={e => setIcon(e.target.value)}
+          className="input-field w-12 text-center"
+          placeholder="🏷️"
+          title="Emoji opsional"
+        />
+        <input
+          type="text" autoFocus value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); submit() }
+            else if (e.key === 'Escape') { e.preventDefault(); setMode('view') }
+          }}
+          className="input-field flex-1"
+          placeholder={mode === 'edit' ? 'Riemërto kategorinë...' : 'Emri i kategorisë (p.sh. Argjend)...'}
+        />
+        <button type="button" onClick={submit} disabled={saving || !name.trim()}
+          className="px-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-sm font-semibold disabled:opacity-50"
+          title="Ruaj">✓</button>
+        <button type="button" onClick={() => setMode('view')}
+          className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm"
+          title="Anulo">✕</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex gap-1">
+      <select value={value || ''} onChange={onSelectChange} className="input-field flex-1">
+        <option value="">— pa kategori —</option>
+        {categories.map(c => (
+          <option key={c.id} value={c.slug}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>
+        ))}
+        <option value="__new__">➕ Krijo kategori të re...</option>
+      </select>
+      {selected && (
+        <>
+          <button type="button" onClick={startEdit} disabled={saving}
+            className="px-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-sm font-semibold disabled:opacity-50"
+            title={`Riemërto "${selected.label}"`}>✏️</button>
+          {!selected.built_in && (
+            <button type="button" onClick={doDelete} disabled={saving}
+              className="px-2 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 dark:text-red-300 text-sm font-semibold disabled:opacity-50"
+              title={`Fshi "${selected.label}"`}>✕</button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -725,6 +853,15 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const [allRates, setAllRates] = useState({ LEK: 1 })
   const [showImport, setShowImport] = useState(false)
   const [bulkPromoPct, setBulkPromoPct] = useState('20')
+  const [materialCategories, setMaterialCategories] = useState([])
+
+  const loadMaterialCategories = async () => {
+    try {
+      const rows = await fetch('/api/material-categories').then(r => r.json())
+      setMaterialCategories(Array.isArray(rows) ? rows : [])
+    } catch { setMaterialCategories([]) }
+  }
+  useEffect(() => { loadMaterialCategories() }, [])
 
   useEffect(() => {
     let cancel = false
@@ -767,7 +904,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           }
           setNotes(inv.notes || '')
           const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
-          const mats = invItems.map(it => it.material).filter(m => m === 'flori' || m === 'diamant' || m === 'ora')
+          const mats = invItems.map(it => it.material).filter(Boolean)
           setCategory(mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : '')
           setItems(invItems)
         } else {
@@ -820,7 +957,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   // ruhet fatura. Në produktet e reja, mbetet vetëm në state deri në ruajtje.
   const generateForRow = async (idx) => {
     const it = items[idx]
-    if (it.barcode && !confirm('Ky rresht ka tashmë një barkod. Zëvendëso me një të ri?')) return
+    if (it.barcode && !(await showConfirm('Ky rresht ka tashmë një barkod. Zëvendëso me një të ri?', {
+      title: 'Zëvendëso barkodin', confirmLabel: 'Zëvendëso',
+    }))) return
     const code = generateBarcode()
     setItem(idx, { barcode: code })
     if (it.product_id) {
@@ -840,7 +979,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   // si "seed" (p.sh. "PRE00001" → prefiks "PRE", numër fillestar 1, padding 5).
   // Rreshtat pa barkod pas seed-it marrin automatikisht numrat pasues (PRE00002,
   // PRE00003, ...). Rreshtat me barkod nuk preken.
-  const continueBarcodeSequence = () => {
+  const continueBarcodeSequence = async () => {
     const seedIdx = items.findIndex(it => it.barcode && String(it.barcode).trim())
     if (seedIdx === -1) {
       alert('Shkruaj një barkod si "PRE00001" te rreshti i parë, pastaj kliko përsëri.')
@@ -862,7 +1001,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
       alert('S\'ka rreshta bosh pas seed-it për të plotësuar.')
       return
     }
-    if (!confirm(`Plotëso ${targets.length} rreshta me sekuencën ${prefix}${String(start + 1).padStart(padding, '0')} … ${prefix}${String(start + targets.length).padStart(padding, '0')}?`)) return
+    if (!(await showConfirm(
+      `Plotëso ${targets.length} rreshta me sekuencën ${prefix}${String(start + 1).padStart(padding, '0')} … ${prefix}${String(start + targets.length).padStart(padding, '0')}?`,
+      { title: 'Plotëso sekuencën', confirmLabel: 'Plotëso' }
+    ))) return
     setItems(prev => prev.map((it, i) => {
       const t = targets.find(x => x.i === i)
       if (!t) return it
@@ -876,7 +1018,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
       .map((it, i) => ({ it, i }))
       .filter(({ it }) => !it.barcode || !String(it.barcode).trim())
     if (targets.length === 0) { alert('Të gjithë rreshtat kanë tashmë barkod.'); return }
-    if (!confirm(`Gjenero barkod për ${targets.length} rreshta bosh?`)) return
+    if (!(await showConfirm(`Gjenero barkod për ${targets.length} rreshta bosh?`, {
+      title: 'Gjenero barkod', confirmLabel: 'Gjenero',
+    }))) return
     // Gjenero lokalisht të gjithë; shto në state njëherësh që të mos përplasen
     // update-t sekuenciale.
     const codes = targets.map(() => generateBarcode())
@@ -1146,12 +1290,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
         </div>
         <div>
           <label className="form-label">Kategoria</label>
-          <select value={category} onChange={e => setCategory(e.target.value)} className="input-field">
-            <option value="">— pa kategori —</option>
-            <option value="flori">🟡 Flori</option>
-            <option value="diamant">💎 Diamant</option>
-            <option value="ora">⌚ Ora</option>
-          </select>
+          <MaterialCategoryPicker
+            value={category}
+            onChange={setCategory}
+            categories={materialCategories}
+            onChanged={loadMaterialCategories}
+          />
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Aplikohet për të gjithë artikujt e faturës</p>
         </div>
         <div className="col-span-2 md:col-span-4">
@@ -1273,7 +1417,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <th className="px-2 py-2 text-left font-semibold w-40">Barkodi</th>
                 <th className="px-2 py-2 text-left font-semibold w-28">Nr Serie</th>
                 <th className="px-2 py-2 text-left font-semibold w-56">Pershkrimi</th>
-                <th className="px-2 py-2 text-left font-semibold w-28">Kategoria</th>
                 <th className="px-2 py-2 text-left font-semibold w-16">Njesi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
@@ -1320,11 +1463,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                     </td>
                     <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
-                    </td>
-                    <td className="px-1 py-1">
-                      <input type="text" value={it.category || ''}
-                        onChange={e => setItem(idx, { category: e.target.value })}
-                        className="input-field-sm" placeholder="—" />
                     </td>
                     <td className="px-1 py-1">
                       <input type="text" value={it.unit || ''}
@@ -1427,13 +1565,15 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             >🖨️ Printo Barkod</button>
             <select
               value=""
-              onChange={e => {
+              onChange={async e => {
                 const m = parseFloat(e.target.value)
                 e.target.selectedIndex = 0
                 if (!m) return
                 const eligible = items.filter(it => n(it.purchase_price_no_vat) > 0).length
                 if (eligible === 0) { alert('Asnjë rresht me Çm. Blerje > 0.'); return }
-                if (!confirm(`Vendos Çm. Shitje = Çm. Blerje × ${m} për ${eligible} rreshta?`)) return
+                if (!(await showConfirm(`Vendos Çm. Shitje = Çm. Blerje × ${m} për ${eligible} rreshta?`, {
+                  title: 'Apliko shumëzuesin', confirmLabel: 'Apliko',
+                }))) return
                 setItems(prev => prev.map(it => ({
                   ...it,
                   sell_price: +(n(it.purchase_price_no_vat) * m).toFixed(2),
@@ -1465,11 +1605,13 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 title="Zbritja % që do aplikohet për të gjitha produktet e faturës"
               />
               <button
-                onClick={() => {
+                onClick={async () => {
                   const pct = Math.max(0, Math.min(100, parseFloat(bulkPromoPct) || 0))
                   const eligible = items.filter(it => it.product_id).length
                   if (eligible === 0) { alert('Asnjë rresht me produkt të lidhur. Zgjidh një produkt ekzistues për çdo rresht.'); return }
-                  if (!confirm(`Vër ${eligible} produkte në promocion me ${pct}% ulje?`)) return
+                  if (!(await showConfirm(`Vër ${eligible} produkte në promocion me ${pct}% ulje?`, {
+                    title: 'Vër në promocion', confirmLabel: 'Apliko',
+                  }))) return
                   setItems(prev => prev.map(it => it.product_id
                     ? { ...it, is_promotion: true, promo_discount_pct: pct }
                     : it))
@@ -1478,10 +1620,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 title="Shënoji të gjitha produktet e lidhur si promocion me % e mësipërme"
               >🏷️ Vër të gjitha</button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const eligible = items.filter(it => it.is_promotion).length
                   if (eligible === 0) return
-                  if (!confirm(`Hiq ${eligible} produkte nga promocioni?`)) return
+                  if (!(await showConfirm(`Hiq ${eligible} produkte nga promocioni?`, {
+                    title: 'Hiq nga promocioni', confirmLabel: 'Hiq', danger: true,
+                  }))) return
                   setItems(prev => prev.map(it => it.is_promotion
                     ? { ...it, is_promotion: false, promo_discount_pct: 0 }
                     : it))
@@ -1528,7 +1672,9 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen }) {
   const onSaved     = ()   => { setRefreshKey(k => k + 1); backToList() }
 
   const deleteInvoice = async (id, no) => {
-    if (!confirm(`Fshi faturën e blerjes ${no}? Stoku do të zbritet.`)) return
+    if (!(await showConfirm(`Fshi faturën e blerjes ${no}? Stoku do të zbritet.`, {
+      title: 'Fshi faturën', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/purchase-invoices/${id}`, { method: 'DELETE' })
     setRefreshKey(k => k + 1)
   }

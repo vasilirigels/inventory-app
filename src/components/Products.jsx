@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import { loadXLSX } from '../lib/xlsx.js'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 // ── Image upload helpers ───────────────────────────────────────────────────────
 function ProductImage({ product, onUploaded }) {
@@ -990,6 +991,49 @@ export default function Products() {
     return matchSearch && matchCat && matchDate
   })
 
+  // Përmbledhëse e produkteve — bazuar te lista aktuale (filtruar). Vlerat në €
+  // llogariten si stock × çmimi (kosto ose shitje). Kategoritë grupohen për
+  // një pamje të shpejtë të inventarit.
+  const summary = useMemo(() => {
+    const s = {
+      count: filtered.length,
+      totalStock: 0,
+      totalGram: 0,
+      totalCostValue: 0,
+      totalSellValue: 0,
+      lowStock: 0,
+      outOfStock: 0,
+      byCategory: {},
+    }
+    filtered.forEach(p => {
+      const stock = parseFloat(p.stock) || 0
+      const gramPer = parseFloat(p.gram) || 0
+      const cost = parseFloat(p.cost_price) || 0
+      const sell = parseFloat(p.sell_price) || 0
+      const gramTotal = gramPer * stock
+      const costV = cost * stock
+      const sellV = sell * stock
+      s.totalStock += stock
+      s.totalGram += gramTotal
+      s.totalCostValue += costV
+      s.totalSellValue += sellV
+      if (stock <= 0) s.outOfStock += 1
+      else if (p.min_stock != null && stock <= parseFloat(p.min_stock)) s.lowStock += 1
+      const cat = p.category || 'Tjeter'
+      if (!s.byCategory[cat]) s.byCategory[cat] = { count: 0, stock: 0, gram: 0, cost: 0, sell: 0 }
+      s.byCategory[cat].count += 1
+      s.byCategory[cat].stock += stock
+      s.byCategory[cat].gram += gramTotal
+      s.byCategory[cat].cost += costV
+      s.byCategory[cat].sell += sellV
+    })
+    s.profit = s.totalSellValue - s.totalCostValue
+    return s
+  }, [filtered])
+  const isFiltered = !!(search || filterCat !== 'Të gjitha' || fromDate || toDate)
+  const fmtEur = (v) => `€${(v || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const fmtNum = (v) => (v || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })
+
   const handleSave = async data => {
     try {
       if (data.id) {
@@ -1054,7 +1098,9 @@ export default function Products() {
     const msg =
       `Vendos Çm. Shitje = Kosto × ${m} për ${eligible.length} produkte ${scope}` +
       (skipped > 0 ? `\n(${skipped} pa kosto u anashkalohen)` : '') + '?'
-    if (!confirm(msg)) return
+    if (!(await showConfirm(msg, {
+      title: 'Përditësim masiv i çmimeve', confirmLabel: 'Aplikoji',
+    }))) return
     setBulkApplying(true)
     try {
       await Promise.all(eligible.map(p => {
@@ -1408,6 +1454,113 @@ export default function Products() {
             </tbody>
           </table>
           </div>
+        </div>
+      )}
+
+      {/* ── Përmbledhëse e Produkteve ── */}
+      {filtered.length > 0 && (
+        <div className="card space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              📊 Përmbledhëse e Produkteve
+              {isFiltered && (
+                <span className="text-[10px] font-normal text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
+                  filtruar
+                </span>
+              )}
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Vlerat në € llogariten si <span className="font-mono">stock × çmim</span>
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Produkte</p>
+              <p className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{summary.count}</p>
+              {(summary.lowStock > 0 || summary.outOfStock > 0) && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  {summary.lowStock > 0 && <span className="text-amber-600 dark:text-amber-400">{summary.lowStock} të ulët</span>}
+                  {summary.lowStock > 0 && summary.outOfStock > 0 && <span> · </span>}
+                  {summary.outOfStock > 0 && <span className="text-red-600 dark:text-red-400">{summary.outOfStock} pa stok</span>}
+                </p>
+              )}
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Sasia Totale</p>
+              <p className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmtNum(summary.totalStock)}</p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Gramatura</p>
+              <p className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmtNum(summary.totalGram)} <span className="text-xs font-normal text-slate-500">gr</span></p>
+            </div>
+            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+              <p className="text-[10px] text-blue-700 dark:text-blue-300 uppercase font-semibold">Vlera në Kosto</p>
+              <p className="text-lg font-bold text-blue-800 dark:text-blue-200 tabular-nums">{fmtEur(summary.totalCostValue)}</p>
+            </div>
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+              <p className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase font-semibold">Vlera në Shitje</p>
+              <p className="text-lg font-bold text-emerald-800 dark:text-emerald-200 tabular-nums">{fmtEur(summary.totalSellValue)}</p>
+            </div>
+            <div className={`p-3 rounded-xl border ${summary.profit >= 0 ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'}`}>
+              <p className={`text-[10px] uppercase font-semibold ${summary.profit >= 0 ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>Fitim Potencial</p>
+              <p className={`text-lg font-bold tabular-nums ${summary.profit >= 0 ? 'text-amber-800 dark:text-amber-200' : 'text-red-800 dark:text-red-200'}`}>{fmtEur(summary.profit)}</p>
+            </div>
+          </div>
+
+          {Object.keys(summary.byCategory).length > 1 && (
+            <div>
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-2">Sipas Kategorisë</p>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Kategoria</th>
+                      <th className="px-3 py-2 text-right font-semibold">Produkte</th>
+                      <th className="px-3 py-2 text-right font-semibold">Sasi</th>
+                      <th className="px-3 py-2 text-right font-semibold">Gram</th>
+                      <th className="px-3 py-2 text-right font-semibold">Kosto €</th>
+                      <th className="px-3 py-2 text-right font-semibold">Shitje €</th>
+                      <th className="px-3 py-2 text-right font-semibold">Fitim €</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(summary.byCategory)
+                      .sort(([, a], [, b]) => b.sell - a.sell)
+                      .map(([cat, v]) => {
+                        const profit = v.sell - v.cost
+                        return (
+                          <tr key={cat} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="px-3 py-1.5">
+                              <span className={`badge text-xs ${CAT_COLORS[cat] || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>
+                                {CAT_ICONS[cat] || '📦'} {cat}
+                              </span>
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{v.count}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtNum(v.stock)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{v.gram > 0 ? fmtNum(v.gram) : '—'}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-300">{v.cost > 0 ? fmtEur(v.cost) : '—'}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{v.sell > 0 ? fmtEur(v.sell) : '—'}</td>
+                            <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${profit >= 0 ? 'text-amber-700 dark:text-amber-300' : 'text-red-600 dark:text-red-400'}`}>{profit !== 0 ? fmtEur(profit) : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                  </tbody>
+                  <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-700">
+                    <tr className="font-bold text-xs">
+                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200 uppercase">Totali</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{summary.count}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalStock)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalGram)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200">{fmtEur(summary.totalCostValue)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-800 dark:text-emerald-200">{fmtEur(summary.totalSellValue)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${summary.profit >= 0 ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'}`}>{fmtEur(summary.profit)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

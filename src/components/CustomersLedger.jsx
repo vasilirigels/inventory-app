@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const CUR = ['lek', 'eur', 'usd', 'gbp', 'chf']
 const CUR_LABEL = { lek: 'LEK', eur: 'EUR', usd: 'USD', gbp: 'GBP', chf: 'CHF' }
@@ -124,7 +125,9 @@ export default function CustomersLedger({ initialFilter, onNavigate }) {
   }
 
   const deleteTx = async id => {
-    if (!confirm('Fshi këtë transaksion?')) return
+    if (!(await showConfirm('Fshi këtë transaksion?', {
+      title: 'Fshi transaksionin', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/debts/${id}`, { method: 'DELETE' })
     await load()
     if (active) await openDrawer(active.name)

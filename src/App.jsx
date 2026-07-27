@@ -1,6 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 import AuthGate from './components/AuthGate.jsx'
 import Layout from './components/Layout.jsx'
+import ConfirmDialog from './components/ConfirmDialog.jsx'
 import { SECTION_CONFIGS } from './components/sections/sectionConfigs.js'
 import { initRealtime } from './utils/realtime.js'
 
@@ -105,6 +106,7 @@ function AppInner({ user }) {
   const [currentDate, setCurrentDate] = useState(getToday())
   const [openInvoiceId, setOpenInvoiceId] = useState(null)
   const [openNewInvoice, setOpenNewInvoice] = useState(false)
+  const [pageHistory, setPageHistory] = useState([])
 
   const isSales = user?.role === 'sales'
   // Nëse 'sales' arrin në një faqe që s'duhet, ridrejto te dashboard.
@@ -122,11 +124,23 @@ function AppInner({ user }) {
   const navigateTo = (pg, opts = {}) => {
     // Bllok navigimi për 'sales' nëse faqja s'lejohet.
     if (isSales && !SALES_ALLOWED_PAGES.has(pg)) return
+    if (pg !== page) setPageHistory(h => [...h, page])
     setPage(pg)
     if (opts.date)      setCurrentDate(opts.date)
     if (opts.invoiceId !== undefined) setOpenInvoiceId(opts.invoiceId)
     if (opts.newInvoice) setOpenNewInvoice(true)
     const expected = `#/${pg}`
+    if (window.location.hash !== expected) {
+      window.history.pushState(null, '', expected)
+    }
+  }
+
+  const goBack = () => {
+    if (pageHistory.length === 0) return
+    const prev = pageHistory[pageHistory.length - 1]
+    setPageHistory(h => h.slice(0, -1))
+    setPage(prev)
+    const expected = `#/${prev}`
     if (window.location.hash !== expected) {
       window.history.pushState(null, '', expected)
     }
@@ -222,6 +236,8 @@ function AppInner({ user }) {
       onNavigate={navigateTo}
       onDateChange={setCurrentDate}
       user={user}
+      canGoBack={pageHistory.length > 0}
+      onGoBack={goBack}
     >
       <Suspense fallback={<PageFallback />}>
         {renderPage()}
@@ -231,7 +247,12 @@ function AppInner({ user }) {
 }
 
 function App() {
-  return <AuthGate>{user => <AppInner user={user} />}</AuthGate>
+  return (
+    <>
+      <AuthGate>{user => <AppInner user={user} />}</AuthGate>
+      <ConfirmDialog />
+    </>
+  )
 }
 
 export default App

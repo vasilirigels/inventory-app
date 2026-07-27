@@ -245,6 +245,8 @@ const ADMIN_ONLY_PATH_REGEX = [
   /^\/api\/invoice-payments/,
   // Marketing — admin
   /^\/api\/marketing-expenses/,
+  // Kategoritë e materialit (Fatura Blerje) — admin
+  /^\/api\/material-categories/,
 ];
 
 const SALES_WRITE_ALLOW = [
@@ -257,10 +259,14 @@ const SALES_WRITE_ALLOW = [
   { method: 'POST', pattern: /^\/api\/invoices\/\d+\/payments$/ },
   // Update i statusit të porosisë online — quick-action nga lista
   { method: 'PATCH', pattern: /^\/api\/invoices\/\d+\/order-status$/ },
-  // Shpenzime ditore
-  { method: 'POST', pattern: /^\/api\/expense-entries$/ },
-  // Zër i ri shpenzimi — krijohet inline gjatë shtimit të shpenzimit
-  { method: 'POST', pattern: /^\/api\/expense-categories$/ },
+  // Shpenzime ditore — shitësi mund të shtojë, editojë dhe fshijë
+  // shpenzime dhe zëra (veprim i përditshëm në dyqan, jo administrativ).
+  { method: 'POST',   pattern: /^\/api\/expense-entries$/ },
+  { method: 'PUT',    pattern: /^\/api\/expense-entries\/\d+$/ },
+  { method: 'DELETE', pattern: /^\/api\/expense-entries\/\d+$/ },
+  { method: 'POST',   pattern: /^\/api\/expense-categories$/ },
+  { method: 'PUT',    pattern: /^\/api\/expense-categories\/\d+$/ },
+  { method: 'DELETE', pattern: /^\/api\/expense-categories\/\d+$/ },
   // Shpenzime Marketingu — të njëjtin flow si shpenzimet
   { method: 'POST', pattern: /^\/api\/marketing-entries$/ },
   { method: 'POST', pattern: /^\/api\/marketing-categories$/ },
@@ -2548,6 +2554,17 @@ async function adjustPurchaseStock(items, sign) {
 
 async function applyProductPrices(items) {
   // Update each product's cost_price + sell_price from the purchase line
+  // Ndërto një mape slug → label nga tabela material_categories që slug-jet
+  // e reja (jo vetëm flori/diamant/ora) të ruajnë label-in e duhur te
+  // products.category. Kërkimi bëhet një herë për të gjithë items.
+  const materialSlugs = [...new Set(items.map(it => it.material).filter(Boolean))];
+  const materialMap = {};
+  if (materialSlugs.length > 0) {
+    for (const slug of materialSlugs) {
+      const row = await queryOne('SELECT label FROM material_categories WHERE slug = ?', [slug]);
+      if (row) materialMap[slug] = row.label;
+    }
+  }
   for (const it of items) {
     if (!it.product_id) continue;
     const updates = [];
@@ -2570,12 +2587,11 @@ async function applyProductPrices(items) {
       updates.push('vat_rate = ?');
       params.push(parseFloat(it.vat_rate) || 0);
     }
-    if (it.material === 'flori' || it.material === 'diamant' || it.material === 'ora') {
+    if (it.material && materialMap[it.material]) {
       updates.push('material = ?');
       params.push(it.material);
-      const CATEGORY_BY_MATERIAL = { flori: 'Flori', diamant: 'Diamant', ora: 'Ora' };
       updates.push('category = ?');
-      params.push(CATEGORY_BY_MATERIAL[it.material]);
+      params.push(materialMap[it.material]);
     }
     // Nga fatura e blerjes, promocioni vetëm shtohet — heqja bëhet nga faqja
     // Produkte Promocion ose Products (për të mos rrëzuar padashur promocionet
@@ -5637,6 +5653,76 @@ app.put('/api/marketing-categories/:id', async (req, res) => {
 app.delete('/api/marketing-categories/:id', async (req, res) => {
   try {
     await run('DELETE FROM marketing_categories WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// KATEGORITË E MATERIALIT (Fatura Blerje) — CRUD me built_in
+// Slug ruhet te products.material dhe label te products.category kur admin
+// zgjedh një kategori për të gjithë rreshtat e faturës. Kategoritë built_in
+// (flori/diamant/ora) mbrohen nga fshirja/ndryshimi i slug — sepse raportet
+// bazë varen nga këto vlera.
+// ============================================================
+function slugify(s) {
+  return String(s || '').trim().toLowerCase()
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+app.get('/api/material-categories', async (req, res) => {
+  try {
+    const includeInactive = req.query.all === '1';
+    const where = includeInactive ? '' : 'WHERE COALESCE(active, 1) = 1';
+    res.json(await queryAll(
+      `SELECT * FROM material_categories ${where}
+       ORDER BY built_in DESC, label COLLATE NOCASE ASC`
+    ));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/material-categories', async (req, res) => {
+  try {
+    const { label, icon } = req.body || {};
+    if (!label || !label.trim()) return res.status(400).json({ error: 'label required' });
+    let slug = slugify(label);
+    if (!slug) return res.status(400).json({ error: 'slug invalid' });
+    // Nëse slug ekziston, shtoj një sufiks numerik për të shmangur konfliktin.
+    const existing = await queryOne('SELECT id FROM material_categories WHERE slug = ?', [slug]);
+    if (existing) {
+      let i = 2;
+      while (await queryOne('SELECT id FROM material_categories WHERE slug = ?', [`${slug}-${i}`])) i++;
+      slug = `${slug}-${i}`;
+    }
+    await run(
+      `INSERT INTO material_categories (slug, label, icon, built_in, active) VALUES (?, ?, ?, 0, 1)`,
+      [slug, label.trim(), (icon || '').trim()]
+    );
+    res.json(await queryOne('SELECT * FROM material_categories WHERE slug = ?', [slug]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/material-categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { label, icon, active } = req.body || {};
+    if (!label || !label.trim()) return res.status(400).json({ error: 'label required' });
+    const row = await queryOne('SELECT * FROM material_categories WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await run(
+      `UPDATE material_categories SET label = ?, icon = ?, active = ? WHERE id = ?`,
+      [label.trim(), (icon || '').trim(), active === 0 ? 0 : 1, id]
+    );
+    res.json(await queryOne('SELECT * FROM material_categories WHERE id = ?', [id]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/material-categories/:id', async (req, res) => {
+  try {
+    const row = await queryOne('SELECT * FROM material_categories WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    if (row.built_in) return res.status(400).json({ error: 'Kategoria bazë nuk mund të fshihet' });
+    await run('DELETE FROM material_categories WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

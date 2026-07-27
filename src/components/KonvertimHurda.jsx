@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -527,7 +528,9 @@ export default function KonvertimHurda({ date }) {
   const onSaved      = ()   => { setRefreshKey(k => k + 1); backToList() }
 
   const deletePurchase = async (id, no) => {
-    if (!confirm(`Fshi blerjen e hurdës ${no}?`)) return
+    if (!(await showConfirm(`Fshi blerjen e hurdës ${no}?`, {
+      title: 'Fshi blerjen', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/hurda-purchases/${id}`, { method: 'DELETE' })
     setRefreshKey(k => k + 1)
   }

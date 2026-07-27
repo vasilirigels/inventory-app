@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -541,7 +542,9 @@ export default function BlerjeHas({ date }) {
   const onSaved      = ()   => { setRefreshKey(k => k + 1); backToList() }
 
   const deletePurchase = async (id, no) => {
-    if (!confirm(`Fshi blerjen HAS ${no}?`)) return
+    if (!(await showConfirm(`Fshi blerjen HAS ${no}?`, {
+      title: 'Fshi blerjen', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/has-purchases/${id}`, { method: 'DELETE' })
     setRefreshKey(k => k + 1)
   }

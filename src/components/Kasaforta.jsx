@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -274,7 +275,10 @@ function ConvertModal({ balance, onClose, onSaved }) {
     const toN   = parseFloat(toAmt)   || 0
     if (fromN <= 0 || toN <= 0) { setErr('Vendos shuma > 0.'); return }
     if (fromN > (balance[fromCur] || 0)) {
-      if (!confirm(`Shuma ${fromN} ${fromCur} tejkalon gjendjen aktuale (${fmt(balance[fromCur] || 0)} ${fromCur}). Vazhdo gjithsesi?`)) return
+      if (!(await showConfirm(
+        `Shuma ${fromN} ${fromCur} tejkalon gjendjen aktuale (${fmt(balance[fromCur] || 0)} ${fromCur}). Vazhdo gjithsesi?`,
+        { title: 'Kujdes: gjendje e pamjaftueshme', confirmLabel: 'Vazhdo', danger: true }
+      ))) return
     }
     setSaving(true)
     try {

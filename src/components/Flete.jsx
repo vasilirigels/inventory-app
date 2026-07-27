@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 // Shared component for both Fletë Hyrje (kind='hyrje', adds stock) and Fletë Dalje
 // (kind='dalje', removes stock). Each note has a number, date, optional notes, and
@@ -381,7 +382,9 @@ export default function Flete({ kind, date }) {
 
   const deleteFlete = async (id, ref) => {
     const verb = kind === 'hyrje' ? 'rritur' : 'zbritur'
-    if (!confirm(`Fshi fletën ${ref}? Stoku që ishte ${verb} do të kthehet.`)) return
+    if (!(await showConfirm(`Fshi fletën ${ref}? Stoku që ishte ${verb} do të kthehet.`, {
+      title: 'Fshi fletën', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/flete-${kind}/${id}`, { method: 'DELETE' })
     setRefreshKey(k => k + 1)
   }

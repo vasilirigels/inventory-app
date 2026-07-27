@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { exportToExcel, exportToPdf, formatNum } from '../utils/export.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -217,7 +218,10 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     const amtToCharge = payCurrency === inv.currency
       ? `${fmt(due)} ${inv.currency}`
       : `${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
-    if (!confirm(`Të mbyllet borxhi ndaj furnitorit plotësisht me ${amtToCharge} (${method === 'bank' ? 'Bankë' : 'Cash'}, datë ${date})?`)) return
+    if (!(await showConfirm(
+      `Të mbyllet borxhi ndaj furnitorit plotësisht me ${amtToCharge} (${method === 'bank' ? 'Bankë' : 'Cash'}, datë ${date})?`,
+      { title: 'Mbyll borxhin', confirmLabel: 'Mbyll' }
+    ))) return
     const ccyNote = payCurrency !== inv.currency
       ? `Mbyllje me ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
       : 'Mbyllje e plotë e borxhit'
@@ -230,7 +234,9 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
   }
 
   const removePayment = async (id) => {
-    if (!confirm('Fshi këtë pagesë?')) return
+    if (!(await showConfirm('Fshi këtë pagesë?', {
+      title: 'Fshi pagesën', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/purchase-payments/${id}`, { method: 'DELETE' })
     await load()
     onSaved?.()

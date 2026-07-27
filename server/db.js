@@ -674,6 +674,24 @@ const MIGRATIONS = [
     FOREIGN KEY (purchase_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE
   )`,
   "CREATE INDEX IF NOT EXISTS idx_purchase_invoice_payment_splits_purchase ON purchase_invoice_payment_splits(purchase_id)",
+
+  // Kategoritë e materialit për Fatura Blerje — më parë hardcoded (flori/
+  // diamant/ora). Tani CRUD me tabelë të veçantë. Slug ruhet te
+  // products.material dhe label te products.category kur zgjidhet një kategori
+  // për të gjithë rreshtat e faturës. Ruhet built_in=1 për 3 defaults që të
+  // mos fshihen aksidentalisht (raportet varen nga slugs).
+  `CREATE TABLE IF NOT EXISTS material_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    icon TEXT DEFAULT '',
+    built_in INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "INSERT OR IGNORE INTO material_categories (slug, label, icon, built_in, active) VALUES ('flori', 'Flori', '🟡', 1, 1)",
+  "INSERT OR IGNORE INTO material_categories (slug, label, icon, built_in, active) VALUES ('diamant', 'Diamant', '💎', 1, 1)",
+  "INSERT OR IGNORE INTO material_categories (slug, label, icon, built_in, active) VALUES ('ora', 'Ora', '⌚', 1, 1)",
 ];
 
 async function initDB() {

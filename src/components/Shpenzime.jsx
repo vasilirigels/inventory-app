@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
-import { getUser } from '../lib/auth.js'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 // Zgjedhës i zërit të shpenzimit me krijim/editim/fshirje inline.
 // - `➕ Krijo zër të ri` → kthen picker-in në modalitet krijimi
@@ -65,7 +65,10 @@ function ExpenseCategoryPicker({
 
   const doDelete = async () => {
     if (!selected) return
-    if (!confirm(`Fshi zërin "${selected.name}"?\nShpenzimet ekzistuese mbeten, por pa zër të lidhur.`)) return
+    if (!(await showConfirm(
+      `Fshi zërin "${selected.name}"?\nShpenzimet ekzistuese mbeten, por pa zër të lidhur.`,
+      { title: 'Fshi zërin', confirmLabel: 'Fshi', danger: true }
+    ))) return
     setSaving(true)
     try {
       const res = await fetch(`/api/expense-categories/${selected.id}`, { method: 'DELETE' })
@@ -141,7 +144,6 @@ function emptyDraft() {
 }
 
 export default function Shpenzime({ date, onNavigate }) {
-  const canManageCategories = getUser()?.role !== 'sales'
   const [categories, setCategories] = useState([])
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -257,7 +259,9 @@ export default function Shpenzime({ date, onNavigate }) {
   }
 
   const removeEntry = async (id) => {
-    if (!confirm('Fshi këtë zë shpenzimi?')) return
+    if (!(await showConfirm('Fshi këtë zë shpenzimi?', {
+      title: 'Fshi shpenzimin', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/expense-entries/${id}`, { method: 'DELETE' })
     if (editingId === id) cancelEdit()
     load()
@@ -363,12 +367,7 @@ export default function Shpenzime({ date, onNavigate }) {
               className="input-field text-right tabular-nums"
             />
           </div>
-          <div className="md:col-span-6 flex items-center justify-between">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Total LEK: <span className="font-bold text-blue-700 dark:text-blue-300 tabular-nums">
-                {fmt(n(draft.amount) * (draft.currency === 'LEK' ? 1 : n(draft.exchange_rate)))}
-              </span>
-            </p>
+          <div className="md:col-span-6 flex items-center justify-end">
             <button
               onClick={addEntry}
               disabled={saving || categories.length === 0}
@@ -398,13 +397,11 @@ export default function Shpenzime({ date, onNavigate }) {
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Shpenzimet e Regjistruara</h3>
-            {canManageCategories && (
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                {rangeActive
-                  ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
-                  : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
-              </p>
-            )}
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              {rangeActive
+                ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
+                : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
+            </p>
           </div>
           <span className="text-xs text-slate-500 dark:text-slate-400">
             {visibleRows.length} {visibleRows.length === 1 ? 'rresht' : 'rreshta'}
@@ -549,20 +546,16 @@ export default function Shpenzime({ date, onNavigate }) {
                       {fmt(totalLek)}
                     </td>
                     <td className="px-2 py-1 text-center whitespace-nowrap">
-                      {canManageCategories && (
-                        <>
-                          <button
-                            onClick={() => startEdit(r)}
-                            className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-medium mr-1"
-                            title="Edito"
-                          >✏️</button>
-                          <button
-                            onClick={() => removeEntry(r.id)}
-                            className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
-                            title="Fshi"
-                          >✕</button>
-                        </>
-                      )}
+                      <button
+                        onClick={() => startEdit(r)}
+                        className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-medium mr-1"
+                        title="Edito"
+                      >✏️</button>
+                      <button
+                        onClick={() => removeEntry(r.id)}
+                        className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
+                        title="Fshi"
+                      >✕</button>
                     </td>
                   </tr>
                 )

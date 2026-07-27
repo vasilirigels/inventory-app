@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { loadXLSX } from '../lib/xlsx.js'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -308,7 +309,9 @@ export default function SalesSection({ date, type, onSaleChange }) {
   }
 
   const deleteSale = async (id) => {
-    if (!confirm('Fshij këtë rresht?')) return
+    if (!(await showConfirm('Fshij këtë rresht?', {
+      title: 'Fshi rreshtin', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/sales/${id}`, { method: 'DELETE' })
     await loadSales(); onSaleChange?.()
   }

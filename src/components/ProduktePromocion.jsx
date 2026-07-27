@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getUser } from '../lib/auth.js'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const CAT_ICONS = {
   'Unazë': '💍', 'Vathë': '✨', 'Byzylyk': '📿',
@@ -40,7 +41,9 @@ export default function ProduktePromocion({ onNavigate }) {
   useEffect(() => { load() }, [])
 
   const remove = async (id) => {
-    if (!confirm('Hiqe produktin nga promocioni?')) return
+    if (!(await showConfirm('Hiqe produktin nga promocioni?', {
+      title: 'Hiq nga promocioni', confirmLabel: 'Hiq', danger: true,
+    }))) return
     setBusyId(id)
     try {
       await fetch(`/api/products/${id}/promotion`, {

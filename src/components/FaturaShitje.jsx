@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getUser } from '../lib/auth.js'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -716,6 +717,25 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
   }, {})
   const currenciesInList = Object.keys(totalsByCur).sort()
 
+  // Totalet e pagesave sipas monedhës REALE (nga splits) — jo nga monedha e
+  // faturës. P.sh. një faturë në EUR e paguar pjesërisht në GBP/CHF do të shfaqë
+  // shumat e sakta për secilën monedhë. Për faturat pa splits (legacy),
+  // përdoret monedha e faturës si fallback.
+  const paidByRealCurrency = list.reduce((acc, inv) => {
+    const splits = parseSplitsSummary(inv.splits_summary)
+    if (splits.length === 0) {
+      const cur = inv.currency || 'LEK'
+      const paid = truePaidCashPos(inv)
+      if (paid > 0.005) acc[cur] = (acc[cur] || 0) + paid
+    } else {
+      splits.forEach(s => {
+        if (s.amount > 0.005) acc[s.currency] = (acc[s.currency] || 0) + s.amount
+      })
+    }
+    return acc
+  }, {})
+  const realPaymentCurrencies = Object.keys(paidByRealCurrency).sort()
+
   const filtersActive = fc || fCurrency !== 'all' || fPayment !== 'all' || fType !== 'all' || fMaterial || fCategory
 
   // Statuset e porosisë online — pills në krye kur online.
@@ -1004,9 +1024,21 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                         = {fmt(initPaid * rate)} LEK
                       </div>
                     )}
-                    {pm === 'mikse' && (() => {
+                    {(() => {
                       const splits = parseSplitsSummary(inv.splits_summary)
                       if (splits.length === 0) return null
+                      // Fshi breakdown-in vetëm kur është krejt i tepërt: një split
+                      // i vetëm në të njëjtën monedhë me faturën dhe metodë
+                      // klasike (cash ose bank/POS) — dmth "Shuma e Paguar" + badge-i
+                      // i monedhës e komunikojnë të njëjtin informacion. Për çdo
+                      // rast tjetër (mikse ose monedhë e ndryshme nga fatura),
+                      // shfaqim ndarjen që përdoruesi të shohë çdo monedhë reale.
+                      const invCur = inv.currency || 'LEK'
+                      const isRedundant =
+                        pm !== 'mikse' &&
+                        splits.length === 1 &&
+                        splits[0].currency === invCur
+                      if (isRedundant) return null
                       return (
                         <div className="mt-0.5 flex flex-wrap gap-0.5 justify-end">
                           {splits.map((s, i) => (
@@ -1114,6 +1146,35 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
           </div>
         )}
       </div>
+
+      {/* ── Pagesa sipas Monedhës Reale — panel me madhësi mesatare ── */}
+      {realPaymentCurrencies.length > 0 && (
+        <div className="rounded-xl border-2 border-emerald-300 dark:border-emerald-700 bg-emerald-50/70 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-4 flex-wrap shadow-sm">
+          <span className="text-sm font-bold text-emerald-800 dark:text-emerald-200 uppercase tracking-wide flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-lg">🏦</span> Pagesa sipas Monedhës
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {realPaymentCurrencies.map(cur => {
+              const palette = {
+                EUR: 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700',
+                LEK: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/40 dark:text-red-200 dark:border-red-700',
+                USD: 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/40 dark:text-green-200 dark:border-green-700',
+                GBP: 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-700',
+                CHF: 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700',
+              }[cur] || 'bg-slate-100 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600'
+              return (
+                <span
+                  key={cur}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 text-sm font-bold tabular-nums shadow-sm ${palette}`}
+                  title={`Shuma totale e paguar në ${cur}`}
+                >
+                  <span className="text-base">💵</span> {fmt(paidByRealCurrency[cur])} <span className="text-xs opacity-80">{cur}</span>
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1876,7 +1937,9 @@ export default function FaturaShitje({ date, openInvoiceId, onConsumeOpen, openN
   }
 
   const deleteInvoice = async (id, no) => {
-    if (!confirm(`Fshi faturën ${no}? Stoku do të kthehet në inventar.`)) return
+    if (!(await showConfirm(`Fshi faturën ${no}? Stoku do të kthehet në inventar.`, {
+      title: 'Fshi faturën', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' })
     setRefreshKey(k => k + 1)
   }

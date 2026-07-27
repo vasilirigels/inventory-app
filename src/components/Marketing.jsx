@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 // Zgjedhës produkti — I NJËJTI stil me ProductPickerCell të Fatura Shitje:
 // input i vetëm me emrin e produktit; kur shkruan, hapet dropdown me rezultate
@@ -149,7 +150,10 @@ function MarketingCategoryPicker({
 
   const doDelete = async () => {
     if (!selected) return
-    if (!confirm(`Fshi zërin "${selected.name}"?\nShpenzimet ekzistuese mbeten, por pa zër të lidhur.`)) return
+    if (!(await showConfirm(
+      `Fshi zërin "${selected.name}"?\nShpenzimet ekzistuese mbeten, por pa zër të lidhur.`,
+      { title: 'Fshi zërin', confirmLabel: 'Fshi', danger: true }
+    ))) return
     setSaving(true)
     try {
       const res = await fetch(`/api/marketing-categories/${selected.id}`, { method: 'DELETE' })
@@ -465,7 +469,9 @@ export default function Marketing({ date }) {
   }
 
   const removeEntry = async (id) => {
-    if (!confirm('Fshi këtë zë marketingu?')) return
+    if (!(await showConfirm('Fshi këtë zë marketingu?', {
+      title: 'Fshi shpenzimin', confirmLabel: 'Fshi', danger: true,
+    }))) return
     await fetch(`/api/marketing-entries/${id}`, { method: 'DELETE' })
     if (editingId === id) cancelEdit()
     load()
@@ -613,6 +619,7 @@ export default function Marketing({ date }) {
                       <th className="px-2 py-1 text-left w-28">Barkodi</th>
                       <th className="px-2 py-1 text-right w-16">Sasia</th>
                       <th className="px-2 py-1 text-right w-20">Gramatura</th>
+                      <th className="px-2 py-1 text-right w-24">Kosto €</th>
                       <th className="px-2 py-1 text-right w-24">Çmimi €</th>
                       <th className="px-2 py-1 text-right w-24">Zbritje €</th>
                       <th className="px-2 py-1 text-right w-16">Zbritje %</th>
@@ -648,6 +655,13 @@ export default function Marketing({ date }) {
                       </td>
                       <td className="px-1 py-1">
                         <input type="text" value={gram ? gram.toFixed(3) : ''} readOnly
+                          className="input-field-sm text-right tabular-nums bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
+                          placeholder="—" />
+                      </td>
+                      <td className="px-1 py-1">
+                        <input type="text"
+                          value={p && Number(p.cost_price) > 0 ? Number(p.cost_price).toFixed(2) : ''}
+                          readOnly
                           className="input-field-sm text-right tabular-nums bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
                           placeholder="—" />
                       </td>
@@ -837,6 +851,7 @@ export default function Marketing({ date }) {
                                   <th className="px-2 py-1 text-left w-28">Barkodi</th>
                                   <th className="px-2 py-1 text-right w-16">Sasia</th>
                                   <th className="px-2 py-1 text-right w-20">Gramatura</th>
+                                  <th className="px-2 py-1 text-right w-24">Kosto €</th>
                                   <th className="px-2 py-1 text-right w-24">Çmimi €</th>
                                   <th className="px-2 py-1 text-right w-24">Zbritje €</th>
                                   <th className="px-2 py-1 text-right w-16">Zbritje %</th>
@@ -869,6 +884,13 @@ export default function Marketing({ date }) {
                                   <td className="px-1 py-1">
                                     <input type="text" value={p?.gram ? Number(p.gram).toFixed(3) : ''} readOnly
                                       className="input-field-sm text-right tabular-nums bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300" placeholder="—" />
+                                  </td>
+                                  <td className="px-1 py-1">
+                                    <input type="text"
+                                      value={p && Number(p.cost_price) > 0 ? Number(p.cost_price).toFixed(2) : ''}
+                                      readOnly
+                                      className="input-field-sm text-right tabular-nums bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
+                                      placeholder="—" />
                                   </td>
                                   <td className="px-1 py-1">
                                     <MoneyInput value={editDraft.unit_price}
