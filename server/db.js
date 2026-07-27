@@ -1,5 +1,10 @@
 import 'dotenv/config';
-import { createClient } from '@libsql/client';
+// Përdor variantin `/web` që flet vetëm HTTP/WS me Turso — pa varësi te
+// native binding-u `libsql` (@libsql/win32-x64-msvc / darwin-arm64 etj.).
+// Entry-pointi default `@libsql/client` ngarkon `libsql` për skenarë `file:`
+// lokale; për ne është vetëm Turso remote, kështu që `/web` mjafton dhe evitohet
+// crashi "Cannot find module '@libsql/win32-x64-msvc'" te portable Windows.
+import { createClient } from '@libsql/client/web';
 
 const TURSO_URL = process.env.TURSO_URL;
 const TURSO_TOKEN = process.env.TURSO_TOKEN;
