@@ -1,22 +1,36 @@
 import { useState, useEffect, useCallback } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
+import { getUser } from '../lib/auth.js'
 
-// Zgjedhës i zërit të shpenzimit me krijim inline: kur user zgjedh "+ Krijo zër
-// të ri..." nga dropdown-i, kontrolli kthehet në një input të vogël që POST-on
-// direkt te /api/expense-categories dhe pastaj zgjedh të riun automatikisht.
-function ExpenseCategoryPicker({ value, onChange, categories, onCreated, disabled, className = 'input-field' }) {
-  const [creating, setCreating] = useState(false)
+// Zgjedhës i zërit të shpenzimit me krijim/editim/fshirje inline.
+// - `➕ Krijo zër të ri` → kthen picker-in në modalitet krijimi
+// - ✏️ pranë select-it → riemërto zërin ekzistues (kur është zgjedhur)
+// - ✕ pranë select-it → fshi zërin ekzistues (me konfirmim)
+// `canManage=false` fsheh krijimin/editimin/fshirjen e zërave (për rolin 'sales').
+function ExpenseCategoryPicker({
+  value, onChange, categories, onCreated, onUpdated, onDeleted,
+  disabled, canManage = true, className = 'input-field',
+}) {
+  const [mode, setMode] = useState('view') // 'view' | 'create' | 'edit'
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const selectedId = value ? parseInt(value) : null
+  const selected = categories.find(c => c.id === selectedId)
+
   const onSelectChange = (e) => {
     const v = e.target.value
-    if (v === '__new__') { setCreating(true); setName('') }
+    if (v === '__new__') { setMode('create'); setName('') }
     else onChange(v)
   }
 
-  const save = async () => {
+  const startEdit = () => {
+    if (!selected) return
+    setMode('edit'); setName(selected.name)
+  }
+
+  const saveCreate = async () => {
     const trimmed = name.trim()
     if (!trimmed || saving) return
     setSaving(true)
@@ -29,28 +43,56 @@ function ExpenseCategoryPicker({ value, onChange, categories, onCreated, disable
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
       const created = await res.json()
       if (created?.id) await onCreated?.(created.id)
-      setCreating(false)
-      setName('')
+      setMode('view'); setName('')
     } finally { setSaving(false) }
   }
 
-  if (creating) {
+  const saveEdit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving || !selected) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/expense-categories/${selected.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, description: selected.description || '', active: 1 }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      await onUpdated?.()
+      setMode('view'); setName('')
+    } finally { setSaving(false) }
+  }
+
+  const doDelete = async () => {
+    if (!selected) return
+    if (!confirm(`Fshi zërin "${selected.name}"?\nShpenzimet ekzistuese mbeten, por pa zër të lidhur.`)) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/expense-categories/${selected.id}`, { method: 'DELETE' })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      onChange('')
+      await onDeleted?.()
+    } finally { setSaving(false) }
+  }
+
+  if (mode === 'create' || mode === 'edit') {
+    const submit = mode === 'edit' ? saveEdit : saveCreate
     return (
       <div className="flex gap-1">
         <input
           type="text" autoFocus value={name}
           onChange={e => setName(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Enter') { e.preventDefault(); save() }
-            else if (e.key === 'Escape') { e.preventDefault(); setCreating(false); setName('') }
+            if (e.key === 'Enter') { e.preventDefault(); submit() }
+            else if (e.key === 'Escape') { e.preventDefault(); setMode('view'); setName('') }
           }}
           className={`${className} flex-1`}
-          placeholder="Emri i zërit të ri (p.sh. Qera)..."
+          placeholder={mode === 'edit' ? 'Riemërto zërin...' : 'Emri i zërit të ri (p.sh. Qera)...'}
         />
-        <button type="button" onClick={save} disabled={saving || !name.trim()}
+        <button type="button" onClick={submit} disabled={saving || !name.trim()}
           className="px-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-sm font-semibold disabled:opacity-50"
           title="Ruaj zërin">✓</button>
-        <button type="button" onClick={() => { setCreating(false); setName('') }}
+        <button type="button" onClick={() => { setMode('view'); setName('') }}
           className="px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm"
           title="Anulo">✕</button>
       </div>
@@ -58,13 +100,25 @@ function ExpenseCategoryPicker({ value, onChange, categories, onCreated, disable
   }
 
   return (
-    <select value={value || ''} onChange={onSelectChange} disabled={disabled} className={className}>
-      <option value="">— zgjidh —</option>
-      {categories.map(c => (
-        <option key={c.id} value={c.id}>{c.name}</option>
-      ))}
-      <option value="__new__">➕ Krijo zër të ri...</option>
-    </select>
+    <div className="flex gap-1">
+      <select value={value || ''} onChange={onSelectChange} disabled={disabled} className={`${className} flex-1`}>
+        <option value="">— zgjidh —</option>
+        {categories.map(c => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+        {canManage && <option value="__new__">➕ Krijo zër të ri...</option>}
+      </select>
+      {canManage && selected && (
+        <>
+          <button type="button" onClick={startEdit} disabled={disabled || saving}
+            className="px-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-sm font-semibold disabled:opacity-50"
+            title={`Riemërto "${selected.name}"`}>✏️</button>
+          <button type="button" onClick={doDelete} disabled={disabled || saving}
+            className="px-2 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 dark:text-red-300 text-sm font-semibold disabled:opacity-50"
+            title={`Fshi "${selected.name}"`}>✕</button>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -87,6 +141,7 @@ function emptyDraft() {
 }
 
 export default function Shpenzime({ date, onNavigate }) {
+  const canManageCategories = getUser()?.role !== 'sales'
   const [categories, setCategories] = useState([])
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -267,6 +322,8 @@ export default function Shpenzime({ date, onNavigate }) {
                 await load()
                 setDraft(d => ({ ...d, category_id: String(newId) }))
               }}
+              onUpdated={load}
+              onDeleted={() => { setDraft(d => ({ ...d, category_id: '' })); return load() }}
             />
           </div>
           <div className="md:col-span-2">
@@ -341,11 +398,13 @@ export default function Shpenzime({ date, onNavigate }) {
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Shpenzimet e Regjistruara</h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-              {rangeActive
-                ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
-                : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
-            </p>
+            {canManageCategories && (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                {rangeActive
+                  ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
+                  : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
+              </p>
+            )}
           </div>
           <span className="text-xs text-slate-500 dark:text-slate-400">
             {visibleRows.length} {visibleRows.length === 1 ? 'rresht' : 'rreshta'}
@@ -404,6 +463,8 @@ export default function Shpenzime({ date, onNavigate }) {
                             await load()
                             setEditDraft(d => ({ ...d, category_id: String(newId) }))
                           }}
+                          onUpdated={load}
+                          onDeleted={() => { setEditDraft(d => ({ ...d, category_id: '' })); return load() }}
                           className="input-field-sm"
                         />
                       </td>
@@ -488,16 +549,20 @@ export default function Shpenzime({ date, onNavigate }) {
                       {fmt(totalLek)}
                     </td>
                     <td className="px-2 py-1 text-center whitespace-nowrap">
-                      <button
-                        onClick={() => startEdit(r)}
-                        className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-medium mr-1"
-                        title="Edito"
-                      >✏️</button>
-                      <button
-                        onClick={() => removeEntry(r.id)}
-                        className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
-                        title="Fshi"
-                      >✕</button>
+                      {canManageCategories && (
+                        <>
+                          <button
+                            onClick={() => startEdit(r)}
+                            className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-medium mr-1"
+                            title="Edito"
+                          >✏️</button>
+                          <button
+                            onClick={() => removeEntry(r.id)}
+                            className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
+                            title="Fshi"
+                          >✕</button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 )
