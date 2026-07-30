@@ -307,27 +307,31 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
 
   const fetchSpot = async (force = false) => {
     setSpotLoading(true); setSpotError('')
+    // Timeout 5s që promise-i të mos mbetet kurrë pending nëse rrjeti/firewall-i
+    // e bllokon lidhjen dalëse (Windows Defender p.sh. ka bllokuar në raste).
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 5000)
     try {
       const url = `/api/gold-spot-price${force ? '?force=1' : ''}`
-      const d = await fetch(url).then(r => r.ok ? r.json() : Promise.reject(r))
+      const d = await fetch(url, { signal: ctrl.signal }).then(r => r.ok ? r.json() : Promise.reject(r))
       setSpotEurPerGram(n(d.eur_per_gram) || null)
       setSpotUpdatedAt(d.updated_at || '')
       return n(d.eur_per_gram) || null
     } catch {
       setSpotError('nuk arritëm çmimin online')
       return null
-    } finally { setSpotLoading(false) }
+    } finally { clearTimeout(timer); setSpotLoading(false) }
   }
 
   useEffect(() => {
     let cancel = false
     async function init() {
       try {
-        const ratesRes = await fetch(`/api/exchange-rates/${date}`).then(r => r.json())
+        const ratesRes = await fetch(`/api/exchange-rates/${date}`).then(r => r.json()).catch(() => ({}))
         if (cancel) return
         setAllRates(ratesRes.rates || { LEK: 1 })
         if (purchaseId) {
-          const p = await fetch(`/api/hurda-purchases/${purchaseId}`).then(r => r.json())
+          const p = await fetch(`/api/hurda-purchases/${purchaseId}`).then(r => r.json()).catch(() => ({}))
           if (cancel) return
           setPurchaseNo(p.purchase_no || '')
           setPurchaseDate(p.date || date)
@@ -339,7 +343,7 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
           setNotes(p.notes || '')
         } else {
           setPurchaseDate(date)
-          const r = await fetch(`/api/hurda-purchases/next-no?date=${date}`).then(r => r.json())
+          const r = await fetch(`/api/hurda-purchases/next-no?date=${date}`).then(r => r.json()).catch(() => ({}))
           if (cancel) return
           setPurchaseNo(r.purchase_no || '')
         }
@@ -454,14 +458,20 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
           <label className="form-label">Sasia (Gram)</label>
           <input type="number" step="0.001" min="0"
             value={gram}
-            onChange={async e => {
+            onChange={e => {
               const v = e.target.value
               setGram(v)
-              // Auto-mbush çmimin/gram me spot-in kur futet gram për herë të parë
+              // Auto-mbush çmimin/gram me spot-in kur futet gram për herë të parë.
+              // E mbajmë handler-in sinkron (pa async/await) që të mos ngatërrohemi
+              // me event-et e focus-it — spot-i vjen në sfond me .then().
               if (!purchaseId && !spotAutoApplied.current && v && n(v) > 0 && !pricePerGram) {
                 spotAutoApplied.current = true
-                const cached = spotEurPerGram ?? await fetchSpot()
-                if (cached) setPricePerGram(String(cached))
+                const applyCached = spotEurPerGram
+                if (applyCached) {
+                  setPricePerGram(String(applyCached))
+                } else {
+                  fetchSpot().then(cached => { if (cached) setPricePerGram(String(cached)) })
+                }
               }
             }}
             className="input-field tabular-nums font-semibold text-amber-700 dark:text-amber-300" placeholder="0.00" />

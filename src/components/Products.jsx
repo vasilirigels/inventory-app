@@ -95,6 +95,8 @@ const EMPTY = {
   brand: '', description: '', cost_price: '', sell_price: '',
   stock: '', min_stock: '5', vat_rate: '0', gram: '',
   serial_no: '', purchase_price_no_vat: '',
+  // Blerje në gram HAS (peshë floriri të pastër) + kursi EUR/gram HAS te blerja
+  has_gram: '', has_currency: 'HAS', has_rate: '',
 }
 
 const VAT_OPTIONS = [0, 6, 10, 20]
@@ -696,6 +698,9 @@ function ProductModal({ product, onClose, onSave }) {
           gram:        product.gram !== undefined && product.gram !== null ? String(product.gram) : '',
           serial_no:   product.serial_no || '',
           purchase_price_no_vat: product.purchase_price_no_vat != null ? String(product.purchase_price_no_vat) : '',
+          has_gram:     product.has_gram != null ? String(product.has_gram) : '',
+          has_currency: product.has_currency || 'HAS',
+          has_rate:     product.has_rate != null ? String(product.has_rate) : '',
           is_promotion: !!product.is_promotion,
           promo_discount_pct: product.promo_discount_pct != null
             ? String(product.promo_discount_pct)
@@ -724,6 +729,9 @@ function ProductModal({ product, onClose, onSave }) {
       gram:       parseFloat(form.gram) || 0,
       serial_no:  form.serial_no || '',
       purchase_price_no_vat: parseFloat(form.purchase_price_no_vat) || 0,
+      has_gram:     parseFloat(form.has_gram) || 0,
+      has_currency: form.has_currency || 'HAS',
+      has_rate:     parseFloat(form.has_rate) || 0,
       is_promotion: form.is_promotion ? 1 : 0,
       promo_discount_pct: form.is_promotion
         ? Math.max(0, Math.min(100, parseFloat(form.promo_discount_pct) || 0))
@@ -834,6 +842,32 @@ function ProductModal({ product, onClose, onSave }) {
                 <input type="number" step="0.001" min="0" value={form.gram} onChange={e => set('gram', e.target.value)}
                   className="input-field" placeholder="0.000" />
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Do të plotësohet automatikisht në faturat e shitjes.</p>
+              </div>
+              <div className="col-span-2 grid grid-cols-3 gap-3 p-3 rounded-xl bg-amber-50/60 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/50">
+                <div className="col-span-3 text-[11px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                  🟡 Blerje në gram HAS
+                </div>
+                <div>
+                  <label className="form-label">Blerje Ne Monedhe</label>
+                  <input type="number" step="0.001" min="0" value={form.has_gram}
+                    onChange={e => set('has_gram', e.target.value)}
+                    className="input-field" placeholder="0.000" />
+                </div>
+                <div>
+                  <label className="form-label">Monedha</label>
+                  <input type="text" value={form.has_currency}
+                    onChange={e => set('has_currency', e.target.value)}
+                    className="input-field font-mono" placeholder="HAS" />
+                </div>
+                <div>
+                  <label className="form-label">Kursi (EUR/g)</label>
+                  <MoneyInput value={form.has_rate}
+                    onChange={v => set('has_rate', String(v))}
+                    className="input-field tabular-nums" placeholder="0.00" />
+                </div>
+                <p className="col-span-3 text-[10px] text-amber-700 dark:text-amber-300">
+                  Mbushet automatikisht nga fatura e blerjes; këtu mund ta korrigjosh manualisht.
+                </p>
               </div>
               <div className="col-span-2">
                 <label className="form-label">TVSH %</label>
@@ -1367,7 +1401,7 @@ export default function Products() {
       {filtered.length > 0 && view === 'list' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1200px]">
+          <table className="w-full text-sm min-w-[1500px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
@@ -1378,6 +1412,9 @@ export default function Products() {
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Njesi</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Mon</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="EUR / gram HAS në kohën e blerjes">Kursi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmimi PA</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
@@ -1407,6 +1444,15 @@ export default function Products() {
                   <td className="px-3 py-2 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
                     {p.gram > 0 ? `${Number(p.gram).toLocaleString('sq-AL', { maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-700 dark:text-amber-300 bg-amber-50/40 dark:bg-amber-900/10">
+                    {p.has_gram > 0 ? Number(p.has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-center text-[11px] font-mono font-semibold text-amber-700 dark:text-amber-300 bg-amber-50/40 dark:bg-amber-900/10">
+                    {p.has_gram > 0 ? (p.has_currency || 'HAS') : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-amber-800 dark:text-amber-200 bg-amber-50/40 dark:bg-amber-900/10">
+                    {p.has_rate > 0 ? Number(p.has_rate).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{p.purchase_price_no_vat ? `€${Number(p.purchase_price_no_vat).toLocaleString()}` : '—'}</td>
                   <td className="px-3 py-2 text-center text-xs text-slate-600 dark:text-slate-300">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>

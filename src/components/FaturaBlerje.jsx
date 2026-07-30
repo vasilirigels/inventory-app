@@ -144,6 +144,9 @@ function emptyItem() {
     qty: 1, purchase_price_no_vat: 0, cost_price: 0, discount_percent: 0,
     vat_rate: 20, sell_price: 0, material: '',
     is_promotion: false, promo_discount_pct: 0,
+    // Blerje në gram HAS (peshë floriri të pastër) + kursi EUR/gram HAS që
+    // mbushet automatikisht nga /api/gold-spot-price kur hapet editori.
+    has_gram: 0, has_currency: 'HAS', has_rate: 0,
   }
 }
 
@@ -854,6 +857,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const [showImport, setShowImport] = useState(false)
   const [bulkPromoPct, setBulkPromoPct] = useState('20')
   const [materialCategories, setMaterialCategories] = useState([])
+  // Kursi aktual EUR / gram HAS (nga /api/gold-spot-price). Ruhet globalisht
+  // për të gjithë rreshtat e faturës — çdo rresht mund ta shohë por kursi
+  // vjen njësoj se blerja bëhet në të njëjtën ditë.
+  const [hasRate, setHasRate]           = useState(0)
+  const [hasRateLoading, setHasRateLoading] = useState(false)
 
   const loadMaterialCategories = async () => {
     try {
@@ -862,6 +870,36 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
     } catch { setMaterialCategories([]) }
   }
   useEffect(() => { loadMaterialCategories() }, [])
+
+  // Merr kursin aktual EUR/gram HAS nga /api/gold-spot-price. Timeout 5s që
+  // të mos ngec në Windows nëse firewall-i bllokon lidhjen dalëse.
+  const fetchHasRate = async () => {
+    setHasRateLoading(true)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 5000)
+    try {
+      const d = await fetch('/api/gold-spot-price', { signal: ctrl.signal })
+        .then(r => r.ok ? r.json() : Promise.reject(r))
+      const rate = n(d.eur_per_gram)
+      if (rate > 0) setHasRate(rate)
+      return rate
+    } catch {
+      return 0
+    } finally { clearTimeout(timer); setHasRateLoading(false) }
+  }
+  useEffect(() => { fetchHasRate() }, [])
+
+  // Auto-mbush has_rate te çdo rresht që ende s'ka kurs të vetin, kur hasRate
+  // vjen nga API-ja. Nuk mbishkruajmë kursin që erdhi tashmë me faturën ekzistuese.
+  // Fire edhe kur items ndryshojnë (p.sh. fatura ekzistuese ngarkohet pas hasRate).
+  useEffect(() => {
+    if (!hasRate) return
+    setItems(prev => {
+      if (!prev.some(it => !(n(it.has_rate) > 0))) return prev
+      return prev.map(it => n(it.has_rate) > 0 ? it : { ...it, has_rate: hasRate })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRate, items.length])
 
   useEffect(() => {
     let cancel = false
@@ -948,7 +986,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   const setItem = (idx, patch) =>
     setItems(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it))
 
-  const addItem = () => setItems(prev => [...prev, emptyItem()])
+  const addItem = () => setItems(prev => [...prev, { ...emptyItem(), has_rate: hasRate || 0 }])
   const removeItem = (idx) =>
     setItems(prev => prev.length === 1 ? [emptyItem()] : prev.filter((_, i) => i !== idx))
 
@@ -1410,7 +1448,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
 
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs min-w-[1400px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">Nr.</th>
@@ -1420,6 +1458,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                 <th className="px-2 py-2 text-left font-semibold w-16">Njesi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
+                <th className="px-2 py-2 text-center font-semibold w-12 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">Mon</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="EUR / gram HAS — mbushet automatikisht nga çmimi aktual i florit">Kursi</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmimi PA</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Kosto €</th>
@@ -1478,6 +1519,21 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                       <input type="number" step="0.001" min="0" value={it.gram}
                         onChange={e => setItem(idx, { gram: e.target.value })}
                         className="input-field-sm text-right" />
+                    </td>
+                    <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+                      <input type="number" step="0.001" min="0" value={it.has_gram || ''}
+                        onChange={e => setItem(idx, { has_gram: e.target.value })}
+                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                        placeholder="0.00" />
+                    </td>
+                    <td className="px-1 py-1 text-center bg-amber-50/40 dark:bg-amber-900/10 text-[10px] font-mono font-semibold text-amber-700 dark:text-amber-300">
+                      {it.has_currency || 'HAS'}
+                    </td>
+                    <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+                      <MoneyInput value={it.has_rate}
+                        onChange={v => setItem(idx, { has_rate: v })}
+                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                        placeholder={hasRateLoading ? '…' : '0.00'} />
                     </td>
                     <td className="px-1 py-1">
                       <MoneyInput value={it.purchase_price_no_vat}

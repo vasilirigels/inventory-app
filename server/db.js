@@ -692,6 +692,19 @@ const MIGRATIONS = [
   "INSERT OR IGNORE INTO material_categories (slug, label, icon, built_in, active) VALUES ('flori', 'Flori', '🟡', 1, 1)",
   "INSERT OR IGNORE INTO material_categories (slug, label, icon, built_in, active) VALUES ('diamant', 'Diamant', '💎', 1, 1)",
   "INSERT OR IGNORE INTO material_categories (slug, label, icon, built_in, active) VALUES ('ora', 'Ora', '⌚', 1, 1)",
+
+  // Blerje në gram HAS — për çdo artikull në faturë blerje ruhet grami HAS
+  // (pesha e florit të pastër), monedha e njësisë (default 'HAS') dhe kursi
+  // aktual EUR/gram HAS në kohën e blerjes (auto nga /api/gold-spot-price).
+  // Kopjohen edhe te tabela products që të mbeten historikisht të lidhura me
+  // produktin edhe pas kalimit në inventar; te produkti mbajmë kursin e
+  // blerjes së fundit (updated on each new purchase).
+  "ALTER TABLE purchase_items ADD COLUMN has_gram REAL DEFAULT 0",
+  "ALTER TABLE purchase_items ADD COLUMN has_currency TEXT DEFAULT 'HAS'",
+  "ALTER TABLE purchase_items ADD COLUMN has_rate REAL DEFAULT 0",
+  "ALTER TABLE products ADD COLUMN has_gram REAL DEFAULT 0",
+  "ALTER TABLE products ADD COLUMN has_currency TEXT DEFAULT 'HAS'",
+  "ALTER TABLE products ADD COLUMN has_rate REAL DEFAULT 0",
 ];
 
 async function initDB() {
