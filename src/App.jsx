@@ -246,12 +246,87 @@ function AppInner({ user }) {
   )
 }
 
+// Prit derisa server-i i brendshëm të ketë mbaruar DB init-in (Turso remote,
+// ~10-30s në portable / lidhje të ngadaltë). Pa këtë, login-i shfaqet menjëherë
+// dhe request-i i parë /api/* pezullohet nga middleware-i i server-it derisa
+// init të mbarojë — user-i sheh një "hangje" pa feedback. Splash screen këtu
+// polls /healthz dhe kalon te login-i vetëm kur `dbReady = true`.
+function ServerReadyGate({ children }) {
+  const [status, setStatus] = useState('checking') // 'checking' | 'ready' | 'error'
+  const [errorDetail, setErrorDetail] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const startedAt = Date.now()
+    const tick = setInterval(() => {
+      if (!cancelled) setElapsed(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    const poll = async () => {
+      while (!cancelled) {
+        try {
+          const res = await fetch('/healthz', { cache: 'no-store' })
+          const data = await res.json()
+          if (cancelled) return
+          if (data.dbReady) { setStatus('ready'); return }
+          if (data.error)   { setStatus('error'); setErrorDetail(data.error); return }
+        } catch (_) { /* server ende s'është arritshëm — riprovo */ }
+        await new Promise(r => setTimeout(r, 500))
+      }
+    }
+    poll()
+    return () => { cancelled = true; clearInterval(tick) }
+  }, [])
+
+  if (status === 'ready') return children
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100 z-50">
+      <div className="text-center max-w-md px-6">
+        {status === 'checking' && (
+          <>
+            <div className="text-6xl mb-4 animate-pulse">🔌</div>
+            <h1 className="text-2xl font-bold mb-2">Duke u lidhur me serverin...</h1>
+            <p className="text-sm text-slate-400 mb-6">Po inicializohet baza e të dhënave Turso</p>
+            <div className="w-64 h-1.5 mx-auto bg-slate-700 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 animate-pulse rounded-full" style={{ width: '60%' }} />
+            </div>
+            {elapsed > 5 && (
+              <p className="text-xs text-slate-500 mt-4">
+                {elapsed}s · nëse zgjat shumë, kontrollo lidhjen e internetit
+              </p>
+            )}
+          </>
+        )}
+        {status === 'error' && (
+          <>
+            <div className="text-6xl mb-4">⚠️</div>
+            <h1 className="text-2xl font-bold mb-2 text-red-400">Lidhja me DB dështoi</h1>
+            <p className="text-sm text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-lg font-mono text-left break-all">
+              {errorDetail || 'Nuk u lidh dot me Turso'}
+            </p>
+            <p className="text-xs text-slate-400 mb-4">
+              Kontrollo internetin dhe provo përsëri. Nëse vazhdon, kontakto administratorin.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold"
+            >
+              🔄 Provo Përsëri
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function App() {
   return (
-    <>
+    <ServerReadyGate>
       <AuthGate>{user => <AppInner user={user} />}</AuthGate>
       <ConfirmDialog />
-    </>
+    </ServerReadyGate>
   )
 }
 
