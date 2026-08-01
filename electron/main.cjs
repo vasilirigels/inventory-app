@@ -617,10 +617,13 @@ function showServerErrorInWindow(err) {
   .meta { color: #94a3b8; font-size: 13px; margin-bottom: 16px; }
   pre { background: #0f172a; padding: 16px; border-radius: 8px; overflow: auto; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
   .hint { margin-top: 20px; padding: 12px; background: #334155; border-left: 4px solid #60a5fa; font-size: 13px; border-radius: 4px; }
+  .update-banner { margin-top: 16px; padding: 14px 16px; background: #1e40af; border-left: 4px solid #60a5fa; border-radius: 6px; font-size: 14px; color: #e0e7ff; }
+  .update-banner b { color: #ffffff; }
 </style></head>
 <body>
   <h1>⚠️ Server-i i brendshëm nuk u nis</h1>
   <div class="meta">Gabim: ${err.message.replace(/</g, '&lt;')} · Exit code: ${serverExitCode ?? 'ende po funksionon'}</div>
+  <div class="update-banner">🔍 <b>Duke kontrolluar për version të ri...</b><br><span style="font-size:12px;opacity:0.85">Nëse ka një version më të ri që rregullon këtë problem, do të shfaqet automatikisht një dialog për ta shkarkuar dhe instaluar.</span></div>
   <pre id="log"></pre>
   <div class="hint">Kopjo tekstin më sipër dhe dërgoja programuesit. DevTools është hapur automatikisht — mund të përdorësh Console për debug.</div>
 <script>
@@ -640,6 +643,12 @@ function showServerErrorInWindow(err) {
   mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   mainWindow.webContents.openDevTools({ mode: 'bottom' });
   mainWindow.on('closed', () => { mainWindow = null; });
+  // Edhe kur server-i dështon, sill auto-updater-in aty — kështu nëse ka një
+  // version i ri që rregullon problemin, user-i e sheh dialog-un për ta
+  // instaluar direkt nga këtu, pa iu dashur të shkojë manualisht te GitHub.
+  // Mac përdor custom updater (checkForUpdateMac); Windows electron-updater.
+  try { setupAutoUpdate(); }
+  catch (e) { updaterLog(`setupAutoUpdate në error-window dështoi: ${e?.message || e}`); }
 }
 
 app.whenReady().then(async () => {
