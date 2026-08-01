@@ -102,10 +102,11 @@ async function probePort() {
     const server = net.createServer();
     server.once('error', async (err) => {
       if (err.code !== 'EADDRINUSE') return resolve('other');
-      // Provo të flasim me atë që dëgjon — nëse është Cham Shop, do të përgjigjet.
+      // Provo të flasim me atë që dëgjon — nëse është Cham Shop, /healthz
+      // përgjigjet menjëherë (pa varësi nga DB init).
       try {
         const r = await new Promise((res) => {
-          const req = http.get(`${PROD_URL}/api/products`, (r) => { r.resume(); res(r.statusCode); });
+          const req = http.get(`${PROD_URL}/healthz`, (r) => { r.resume(); res(r.statusCode); });
           req.on('error', () => res(0));
           req.setTimeout(1500, () => { req.destroy(); res(0); });
         });
@@ -181,11 +182,16 @@ function startServer() {
   });
 }
 
-function waitForServer(timeoutMs = 30000) {
+// Prit vetëm që port-i të hapet — server-i tani listen-on menjëherë dhe
+// bën DB init në sfond. /healthz nuk kërkon DB, kështu që kalon menjëherë
+// pavarësisht sa e ngadalshme është lidhja me Turso. Frontend-i shfaq
+// "connecting..." nëse /api/* dorëzojnë me vonesë nga middleware-i që i
+// mban në pritje derisa DB të jetë gati.
+function waitForServer(timeoutMs = 60000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     const check = () => {
-      const req = http.get(`${PROD_URL}/api/products`, (res) => {
+      const req = http.get(`${PROD_URL}/healthz`, (res) => {
         res.resume();
         resolve();
       });

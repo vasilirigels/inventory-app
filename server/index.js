@@ -136,8 +136,34 @@ app.use((req, res, next) => {
   next();
 });
 
-// Initialize DB before starting server
-await initDB();
+// Nis DB init në sfond — MOS `await` këtu që porti të hapet menjëherë dhe
+// Electron `waitForServer()` të kalojë brenda millisekondave. Middleware-i
+// më poshtë e mban /api/* në pritje derisa init të mbarojë. Kjo shmang
+// dialogun "Server-i nuk u nis" kur Turso është i ngadaltë (portable/USB).
+let dbReady = false;
+let dbError = null;
+const dbReadyPromise = initDB()
+  .then(() => { dbReady = true; })
+  .catch(err => { dbError = err; console.error('[db init failed]', err); });
+
+// Health check — hapet menjëherë, s'ka nevojë për DB. Electron e përdor
+// për të konfirmuar që porti është hapur.
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, dbReady, error: dbError ? String(dbError.message || dbError) : null });
+});
+
+// Bllokon çdo /api/* derisa initDB të mbarojë. Kur mbaron, kalon tutje.
+app.use('/api', async (req, res, next) => {
+  if (dbReady) return next();
+  if (dbError) return res.status(503).json({ error: 'db_init_failed', detail: String(dbError.message || dbError) });
+  try {
+    await dbReadyPromise;
+    if (dbError) return res.status(503).json({ error: 'db_init_failed', detail: String(dbError.message || dbError) });
+    next();
+  } catch (err) {
+    res.status(503).json({ error: 'db_init_failed', detail: String(err?.message || err) });
+  }
+});
 
 // ============================================================
 // AUTH ENDPOINTS
@@ -2560,6 +2586,50 @@ async function adjustPurchaseStock(items, sign) {
   }
 }
 
+// Kur user-i shton në faturë blerje një rresht të ri pa e lidhur me një produkt
+// (pra pa përdorur importin nga Excel ose pickerin), krijojmë automatikisht një
+// produkt të ri që ai të shfaqet menjëherë te Produkte / Inventar dhe që
+// azhurnimi i stokut e i çmimeve në flow-un e blerjes të funksionojë.
+// Mutate: seton it.product_id për çdo rresht që nuk e ka pasur.
+async function ensurePurchaseProducts(items) {
+  for (const it of items) {
+    if (it.product_id) continue;
+    const name = String(it.name || '').trim();
+    if (!name) continue;
+    const barcode   = String(it.barcode || '').trim();
+    const serial_no = String(it.serial_no || '').trim();
+    let existing = null;
+    if (barcode)              existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
+    if (!existing && serial_no) existing = await queryOne('SELECT id FROM products WHERE serial_no = ? LIMIT 1', [serial_no]);
+    if (existing) { it.product_id = existing.id; continue; }
+    // Krijo produkt të ri me stock=0 — adjustPurchaseStock e shton sasinë e faturës më pas.
+    await run(
+      `INSERT INTO products (name, sku, barcode, category, brand, description,
+         cost_price, sell_price, stock, min_stock,
+         serial_no, purchase_price_no_vat, vat_rate, unit, gram,
+         has_gram, has_currency, has_rate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name, '', barcode,
+        it.category || 'Tjeter', '', '',
+        parseFloat(it.cost_price) || parseFloat(it.purchase_price_no_vat) || 0,
+        parseFloat(it.sell_price) || 0,
+        0, 5,
+        serial_no,
+        parseFloat(it.purchase_price_no_vat) || 0,
+        it.vat_rate != null && it.vat_rate !== '' ? parseFloat(it.vat_rate) : 20,
+        it.unit || 'copë',
+        parseFloat(it.gram) || 0,
+        parseFloat(it.has_gram) || 0,
+        it.has_currency || 'HAS',
+        parseFloat(it.has_rate) || 0,
+      ]
+    );
+    const row = await queryOne('SELECT last_insert_rowid() AS id');
+    if (row?.id) it.product_id = row.id;
+  }
+}
+
 async function applyProductPrices(items) {
   // Update each product's cost_price + sell_price from the purchase line
   // Ndërto një mape slug → label nga tabela material_categories që slug-jet
@@ -2752,6 +2822,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
         [newId, s.method, s.currency, s.amount, s.exchange_rate]
       );
     }
+    await ensurePurchaseProducts(items);
     for (const it of items) {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
@@ -2847,6 +2918,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     }
     await adjustPurchaseStock(oldItems, -1);
     await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    await ensurePurchaseProducts(items);
     for (const it of items) {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,

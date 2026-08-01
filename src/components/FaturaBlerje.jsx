@@ -386,6 +386,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
   const [loading, setLoading] = useState(true)
   const [fromDate, setFromDate] = useState(date)
   const [toDate, setToDate]     = useState(date)
+  const [eurByDate, setEurByDate] = useState({})
 
   useEffect(() => { setFromDate(date); setToDate(date) }, [date])
 
@@ -401,6 +402,25 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
       .catch(() => { setList([]); setLoading(false) })
   }, [fromDate, toDate, refreshKey])
 
+  // Convert per-invoice LEK subtotals into EUR: need EUR rate for each invoice's date.
+  useEffect(() => {
+    const dates = Array.from(new Set(list.map(inv => inv.date).filter(Boolean)))
+    const missing = dates.filter(d => eurByDate[d] == null)
+    if (missing.length === 0) return
+    let cancelled = false
+    Promise.all(missing.map(d =>
+      fetch(`/api/exchange-rates/${d}`).then(r => r.json()).then(res => [d, n(res?.rates?.EUR) || 0]).catch(() => [d, 0])
+    )).then(pairs => {
+      if (cancelled) return
+      setEurByDate(prev => {
+        const next = { ...prev }
+        for (const [d, r] of pairs) next[d] = r
+        return next
+      })
+    })
+    return () => { cancelled = true }
+  }, [list])
+
   const rangeActive = fromDate !== date || toDate !== date
 
   // Daily snapshot — use the amount paid AT INVOICE CREATION TIME (not current state).
@@ -408,6 +428,9 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
   // must NOT shift the daily totals on the purchase invoice list.
   const totals = list.reduce((acc, inv) => {
     const rate = n(inv.exchange_rate) || 1
+    const eurRate = n(eurByDate[inv.date]) || 0
+    // value_EUR = value_original * (invoice→LEK rate) / (EUR→LEK rate)
+    const toEur = eurRate > 0 ? (rate / eurRate) : 0
     const initPaid = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
     const initDue  = Math.max(0, n(inv.total_with_vat) - initPaid)
     const gross = n(inv.subtotal_no_vat) + n(inv.total_discount)
@@ -419,17 +442,17 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
     acc.tot += n(inv.total_with_vat)
     acc.paid += initPaid
     acc.due  += initDue
-    acc.grossLek += gross * rate
-    acc.discLek  += n(inv.total_discount) * rate
-    acc.subLek   += n(inv.subtotal_no_vat) * rate
-    acc.vatLek   += n(inv.total_vat) * rate
-    acc.totLek   += n(inv.total_with_vat) * rate
-    acc.paidLek  += initPaid * rate
-    acc.dueLek   += initDue * rate
+    acc.grossEur += gross * toEur
+    acc.discEur  += n(inv.total_discount) * toEur
+    acc.subEur   += n(inv.subtotal_no_vat) * toEur
+    acc.vatEur   += n(inv.total_vat) * toEur
+    acc.totEur   += n(inv.total_with_vat) * toEur
+    acc.paidEur  += initPaid * toEur
+    acc.dueEur   += initDue * toEur
     return acc
   }, {
     count: 0, gross: 0, sub: 0, disc: 0, vat: 0, tot: 0, paid: 0, due: 0,
-    grossLek: 0, discLek: 0, subLek: 0, vatLek: 0, totLek: 0, paidLek: 0, dueLek: 0,
+    grossEur: 0, discEur: 0, subEur: 0, vatEur: 0, totEur: 0, paidEur: 0, dueEur: 0,
   })
 
   return (
@@ -608,18 +631,18 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
             <tfoot className="bg-emerald-50 dark:bg-emerald-900/30 border-t-2 border-emerald-300">
               <tr>
                 <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
-                  💵 TOTAL CASH (LEK) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
+                  💵 TOTAL CASH (EUR) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossLek)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossEur)}</td>
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
-                  {totals.discLek > 0.005 ? `-${fmt(totals.discLek)}` : '—'}
+                  {totals.discEur > 0.005 ? `-${fmt(totals.discEur)}` : '—'}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.subLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.vatLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(totals.totLek)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(totals.paidLek)}</td>
-                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueLek > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
-                  {totals.dueLek > 0.005 ? fmt(totals.dueLek) : '✓'}
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.subEur)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.vatEur)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(totals.totEur)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(totals.paidEur)}</td>
+                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueEur > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                  {totals.dueEur > 0.005 ? fmt(totals.dueEur) : '✓'}
                 </td>
                 <td></td>
               </tr>
