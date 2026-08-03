@@ -4,6 +4,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import https from 'https';
+import net from 'net';
+import dns from 'dns/promises';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { WebSocketServer } from 'ws';
@@ -143,27 +146,134 @@ app.use((req, res, next) => {
 let dbReady = false;
 let dbError = null;
 let dbReadyPromise = null;
+let dbDiagnostic = { stage: 'idle', dns: null, tcp: null, tls: null, http: null, attempts: 0 };
 const DB_INIT_TIMEOUT_MS = 60_000;
+const DB_INIT_MAX_RETRIES = 3;
 
-function kickoffDbInit() {
+// Diagnostikë shtresore për të identifikuar SAKTËSISHT ku bllokohet lidhja me
+// Turso: DNS resolve → TCP connect → TLS handshake → HTTP POST. Kthen një objekt
+// me statusin e çdo shtrese që të shfaqet te splash-i.
+async function probeTursoConnectivity() {
+  const out = { stage: 'starting', dns: null, tcp: null, tls: null, http: null };
+  const tursoUrl = process.env.TURSO_URL || '';
+  const tursoToken = process.env.TURSO_TOKEN || '';
+  const host = tursoUrl.replace(/^(libsql|https?):\/\//, '').split('/')[0];
+  if (!host) {
+    out.stage = 'config';
+    out.error = 'TURSO_URL mungon te .env';
+    return out;
+  }
+
+  // 1) DNS
+  out.stage = 'dns';
+  try {
+    const addrs = await Promise.race([
+      dns.lookup(host, { all: true }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+    ]);
+    out.dns = { ok: true, addresses: addrs.map(a => a.address) };
+  } catch (err) {
+    out.dns = { ok: false, error: err.message };
+    out.error = `DNS s'e zgjidhi dot ${host}: ${err.message}`;
+    return out;
+  }
+
+  // 2) TCP
+  out.stage = 'tcp';
+  const tcpResult = await new Promise((resolve) => {
+    const sock = net.createConnection({ host, port: 443 });
+    const tim = setTimeout(() => { sock.destroy(); resolve({ ok: false, error: 'timeout pas 5s' }); }, 5000);
+    sock.once('connect', () => { clearTimeout(tim); sock.end(); resolve({ ok: true }); });
+    sock.once('error', (err) => { clearTimeout(tim); resolve({ ok: false, error: err.message }); });
+  });
+  out.tcp = tcpResult;
+  if (!tcpResult.ok) {
+    out.error = `TCP dështoi drejt ${host}:443 — ${tcpResult.error}. Firewall/router po e bllokon.`;
+    return out;
+  }
+
+  // 3) TLS + 4) HTTP (bashkë përmes një POST-i të vërtetë)
+  out.stage = 'http';
+  const httpResult = await new Promise((resolve) => {
+    const req = https.request({
+      host, port: 443, path: '/v2/pipeline', method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tursoToken}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 10_000,
+    }, (res) => {
+      let body = '';
+      res.on('data', d => body += d);
+      res.on('end', () => resolve({ ok: res.statusCode < 500, status: res.statusCode, body: body.slice(0, 200) }));
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'HTTP timeout pas 10s' }); });
+    req.write(JSON.stringify({ requests: [{ type: 'execute', stmt: { sql: 'SELECT 1' } }] }));
+    req.end();
+  });
+  out.tls = { ok: httpResult.ok || httpResult.status != null };
+  out.http = httpResult;
+  if (!httpResult.ok) {
+    out.error = httpResult.error
+      ? `TLS/HTTP dështoi: ${httpResult.error}`
+      : `Turso përgjigjet HTTP ${httpResult.status}: ${httpResult.body}`;
+    return out;
+  }
+  out.stage = 'done';
+  return out;
+}
+
+async function kickoffDbInit() {
   dbReady = false;
   dbError = null;
-  const timeoutErr = new Error(
-    `Lidhja me Turso timeout pas ${DB_INIT_TIMEOUT_MS / 1000}s. Kontrollo internetin ose kredencialet TURSO_URL/TURSO_TOKEN.`
-  );
-  dbReadyPromise = Promise.race([
-    initDB(),
-    new Promise((_, rej) => setTimeout(() => rej(timeoutErr), DB_INIT_TIMEOUT_MS)),
-  ])
-    .then(() => { dbReady = true; dbError = null; })
-    .catch(err => { dbError = err; console.error('[db init failed]', err); });
+  for (let attempt = 1; attempt <= DB_INIT_MAX_RETRIES; attempt++) {
+    dbDiagnostic = { ...dbDiagnostic, stage: 'probe', attempts: attempt };
+    const probe = await probeTursoConnectivity();
+    dbDiagnostic = { ...probe, attempts: attempt };
+    if (!probe.error) {
+      // Konektiviteti OK — provo init-in aktual.
+      dbDiagnostic.stage = 'init';
+      try {
+        await Promise.race([
+          initDB(),
+          new Promise((_, rej) => setTimeout(
+            () => rej(new Error(`Init timeout pas ${DB_INIT_TIMEOUT_MS / 1000}s`)),
+            DB_INIT_TIMEOUT_MS
+          )),
+        ]);
+        dbReady = true;
+        dbError = null;
+        dbDiagnostic.stage = 'ready';
+        return;
+      } catch (err) {
+        dbError = err;
+        dbDiagnostic.stage = 'init_failed';
+        dbDiagnostic.error = err.message;
+        console.error(`[db init attempt ${attempt}/${DB_INIT_MAX_RETRIES} failed]`, err.message);
+      }
+    } else {
+      dbError = new Error(probe.error);
+      console.error(`[db probe attempt ${attempt}/${DB_INIT_MAX_RETRIES}]`, probe.error);
+    }
+    if (attempt < DB_INIT_MAX_RETRIES) {
+      const backoffMs = 3000 * attempt;
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+  }
 }
-kickoffDbInit();
+dbReadyPromise = kickoffDbInit();
 
 // Health check — hapet menjëherë, s'ka nevojë për DB. Electron e përdor
-// për të konfirmuar që porti është hapur.
+// për të konfirmuar që porti është hapur. Splash-i lexon `diagnostic` që të
+// tregojë shtresat DNS/TCP/TLS/HTTP.
 app.get('/healthz', (req, res) => {
-  res.json({ ok: true, dbReady, error: dbError ? String(dbError.message || dbError) : null });
+  res.json({
+    ok: true,
+    dbReady,
+    error: dbError ? String(dbError.message || dbError) : null,
+    diagnostic: dbDiagnostic,
+  });
 });
 
 // Riprovo init-in pa restart. E vendosim JASHTË /api/* middleware-it që të
@@ -171,7 +281,7 @@ app.get('/healthz', (req, res) => {
 // butoni "🔄 Provo Përsëri" te splash-i.
 app.post('/reinit', (req, res) => {
   if (dbReady) return res.json({ ok: true, message: 'already_ready' });
-  kickoffDbInit();
+  dbReadyPromise = kickoffDbInit();
   res.json({ ok: true, message: 'reinit_triggered' });
 });
 

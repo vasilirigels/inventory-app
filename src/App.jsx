@@ -256,17 +256,16 @@ function ServerReadyGate({ children }) {
   const [errorDetail, setErrorDetail] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const [retryToken, setRetryToken] = useState(0)
+  const [diagnostic, setDiagnostic] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     const startedAt = Date.now()
-    const CLIENT_TIMEOUT_S = 90
+    const CLIENT_TIMEOUT_S = 120
     const tick = setInterval(() => {
       if (cancelled) return
       const s = Math.floor((Date.now() - startedAt) / 1000)
       setElapsed(s)
-      // Nëse server-i s'ka thënë as ready as error brenda 90s, force error —
-      // ka të ngjarë Turso i bllokuar nga firewall ose kredenciale të pavlefshme.
       if (s >= CLIENT_TIMEOUT_S) {
         setStatus(cur => cur === 'checking' ? 'error' : cur)
         setErrorDetail(cur => cur || `Server-i s'u përgjigj brenda ${CLIENT_TIMEOUT_S}s. Kontrollo internetin ose kredencialet Turso.`)
@@ -278,6 +277,7 @@ function ServerReadyGate({ children }) {
           const res = await fetch('/healthz', { cache: 'no-store' })
           const data = await res.json()
           if (cancelled) return
+          if (data.diagnostic) setDiagnostic(data.diagnostic)
           if (data.dbReady) { setStatus('ready'); return }
           if (data.error)   { setStatus('error'); setErrorDetail(data.error); return }
         } catch (_) { /* server ende s'është arritshëm — riprovo */ }
@@ -300,7 +300,7 @@ function ServerReadyGate({ children }) {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100 z-50">
-      <div className="text-center max-w-md px-6">
+      <div className="text-center max-w-lg px-6">
         {status === 'checking' && (
           <>
             <div className="text-6xl mb-4 animate-pulse">🔌</div>
@@ -309,6 +309,15 @@ function ServerReadyGate({ children }) {
             <div className="w-64 h-1.5 mx-auto bg-slate-700 rounded-full overflow-hidden">
               <div className="h-full bg-blue-500 animate-pulse rounded-full" style={{ width: '60%' }} />
             </div>
+            {diagnostic && (
+              <div className="mt-6 inline-block text-left text-xs font-mono bg-slate-800/60 rounded-lg p-3 space-y-1">
+                <div>{diagnostic.dns?.ok ? '✅' : diagnostic.dns === null ? '⏳' : '❌'} DNS resolve{diagnostic.dns?.addresses ? ` (${diagnostic.dns.addresses[0]})` : ''}</div>
+                <div>{diagnostic.tcp?.ok ? '✅' : diagnostic.tcp === null ? '⏳' : '❌'} TCP connect :443{diagnostic.tcp?.error ? ` — ${diagnostic.tcp.error}` : ''}</div>
+                <div>{diagnostic.tls?.ok ? '✅' : diagnostic.tls === null ? '⏳' : '❌'} TLS handshake</div>
+                <div>{diagnostic.http?.ok ? '✅' : diagnostic.http === null ? '⏳' : '❌'} HTTP POST{diagnostic.http?.status ? ` (${diagnostic.http.status})` : ''}</div>
+                {diagnostic.attempts > 1 && <div className="text-yellow-400">🔁 Përpjekja {diagnostic.attempts}/3</div>}
+              </div>
+            )}
             {elapsed > 5 && (
               <p className="text-xs text-slate-500 mt-4">
                 {elapsed}s · nëse zgjat shumë, kontrollo lidhjen e internetit
@@ -323,8 +332,18 @@ function ServerReadyGate({ children }) {
             <p className="text-sm text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-lg font-mono text-left break-all">
               {errorDetail || 'Nuk u lidh dot me Turso'}
             </p>
+            {diagnostic && (
+              <div className="mb-4 text-left text-xs font-mono bg-slate-800/60 rounded-lg p-3 space-y-1">
+                <div className="text-slate-400 mb-1">Diagnostikimi i shtresave:</div>
+                <div>{diagnostic.dns?.ok ? '✅' : '❌'} DNS{diagnostic.dns?.error ? ` — ${diagnostic.dns.error}` : diagnostic.dns?.addresses ? ` (${diagnostic.dns.addresses[0]})` : ''}</div>
+                <div>{diagnostic.tcp?.ok ? '✅' : diagnostic.tcp === null ? '⏭️' : '❌'} TCP :443{diagnostic.tcp?.error ? ` — ${diagnostic.tcp.error}` : ''}</div>
+                <div>{diagnostic.tls?.ok ? '✅' : diagnostic.tls === null ? '⏭️' : '❌'} TLS</div>
+                <div>{diagnostic.http?.ok ? '✅' : diagnostic.http === null ? '⏭️' : '❌'} HTTP POST{diagnostic.http?.status ? ` (${diagnostic.http.status})` : diagnostic.http?.error ? ` — ${diagnostic.http.error}` : ''}</div>
+                <div className="text-yellow-400 pt-1">🔁 Provuar {diagnostic.attempts || 1}/3 herë</div>
+              </div>
+            )}
             <p className="text-xs text-slate-400 mb-4">
-              Kontrollo internetin dhe provo përsëri. Nëse vazhdon, kontakto administratorin.
+              Kontrollo firewall, antivirus, VPN. Nëse DNS/TCP dështojnë → rrjeti/router e bllokon Turso.
             </p>
             <div className="flex gap-2 justify-center">
               <button
