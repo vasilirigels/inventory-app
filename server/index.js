@@ -142,14 +142,37 @@ app.use((req, res, next) => {
 // dialogun "Server-i nuk u nis" kur Turso është i ngadaltë (portable/USB).
 let dbReady = false;
 let dbError = null;
-const dbReadyPromise = initDB()
-  .then(() => { dbReady = true; })
-  .catch(err => { dbError = err; console.error('[db init failed]', err); });
+let dbReadyPromise = null;
+const DB_INIT_TIMEOUT_MS = 60_000;
+
+function kickoffDbInit() {
+  dbReady = false;
+  dbError = null;
+  const timeoutErr = new Error(
+    `Lidhja me Turso timeout pas ${DB_INIT_TIMEOUT_MS / 1000}s. Kontrollo internetin ose kredencialet TURSO_URL/TURSO_TOKEN.`
+  );
+  dbReadyPromise = Promise.race([
+    initDB(),
+    new Promise((_, rej) => setTimeout(() => rej(timeoutErr), DB_INIT_TIMEOUT_MS)),
+  ])
+    .then(() => { dbReady = true; dbError = null; })
+    .catch(err => { dbError = err; console.error('[db init failed]', err); });
+}
+kickoffDbInit();
 
 // Health check — hapet menjëherë, s'ka nevojë për DB. Electron e përdor
 // për të konfirmuar që porti është hapur.
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, dbReady, error: dbError ? String(dbError.message || dbError) : null });
+});
+
+// Riprovo init-in pa restart. E vendosim JASHTË /api/* middleware-it që të
+// mos bllokohet vetë kur dbError është aktive. Frontend-i e thërret nga
+// butoni "🔄 Provo Përsëri" te splash-i.
+app.post('/reinit', (req, res) => {
+  if (dbReady) return res.json({ ok: true, message: 'already_ready' });
+  kickoffDbInit();
+  res.json({ ok: true, message: 'reinit_triggered' });
 });
 
 // Bllokon çdo /api/* derisa initDB të mbarojë. Kur mbaron, kalon tutje.

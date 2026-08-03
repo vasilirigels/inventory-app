@@ -255,12 +255,22 @@ function ServerReadyGate({ children }) {
   const [status, setStatus] = useState('checking') // 'checking' | 'ready' | 'error'
   const [errorDetail, setErrorDetail] = useState('')
   const [elapsed, setElapsed] = useState(0)
+  const [retryToken, setRetryToken] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     const startedAt = Date.now()
+    const CLIENT_TIMEOUT_S = 90
     const tick = setInterval(() => {
-      if (!cancelled) setElapsed(Math.floor((Date.now() - startedAt) / 1000))
+      if (cancelled) return
+      const s = Math.floor((Date.now() - startedAt) / 1000)
+      setElapsed(s)
+      // Nëse server-i s'ka thënë as ready as error brenda 90s, force error —
+      // ka të ngjarë Turso i bllokuar nga firewall ose kredenciale të pavlefshme.
+      if (s >= CLIENT_TIMEOUT_S) {
+        setStatus(cur => cur === 'checking' ? 'error' : cur)
+        setErrorDetail(cur => cur || `Server-i s'u përgjigj brenda ${CLIENT_TIMEOUT_S}s. Kontrollo internetin ose kredencialet Turso.`)
+      }
     }, 1000)
     const poll = async () => {
       while (!cancelled) {
@@ -276,7 +286,15 @@ function ServerReadyGate({ children }) {
     }
     poll()
     return () => { cancelled = true; clearInterval(tick) }
-  }, [])
+  }, [retryToken])
+
+  const doRetry = async () => {
+    try { await fetch('/reinit', { method: 'POST' }) } catch (_) {}
+    setStatus('checking')
+    setErrorDetail('')
+    setElapsed(0)
+    setRetryToken(t => t + 1)
+  }
 
   if (status === 'ready') return children
 
@@ -308,12 +326,20 @@ function ServerReadyGate({ children }) {
             <p className="text-xs text-slate-400 mb-4">
               Kontrollo internetin dhe provo përsëri. Nëse vazhdon, kontakto administratorin.
             </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold"
-            >
-              🔄 Provo Përsëri
-            </button>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={doRetry}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold"
+              >
+                🔄 Provo Përsëri
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold"
+              >
+                Rifresko Faqen
+              </button>
+            </div>
           </>
         )}
       </div>
