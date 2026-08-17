@@ -21,6 +21,18 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      '/healthz': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/reinit': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
       // Realtime change broadcast — Vite has to be told it's a WebSocket
       // upgrade or the connection silently drops through.
       '/ws': {

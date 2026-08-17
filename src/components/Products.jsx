@@ -786,11 +786,6 @@ function ProductModal({ product, onClose, onSave }) {
                   className="input-field" placeholder="Barcode (opsional)" />
               </div>
               <div>
-                <label className="form-label">Nr Serie</label>
-                <input type="text" value={form.serial_no} onChange={e => set('serial_no', e.target.value)}
-                  className="input-field font-mono" placeholder="p.sh. PR0002955" />
-              </div>
-              <div>
                 <label className="form-label">Çmimi PA TVSH — Blerje (€)</label>
                 <MoneyInput value={form.purchase_price_no_vat}
                   onChange={v => set('purchase_price_no_vat', String(v))}
@@ -977,6 +972,7 @@ export default function Products() {
   const [fromDate, setFromDate]     = useState('')
   const [toDate, setToDate]         = useState('')
   const [bulkApplying, setBulkApplying] = useState(false)
+  const [bulkMultiplier, setBulkMultiplier] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -1272,29 +1268,35 @@ export default function Products() {
 
         <div>
           <label className="form-label">Apliko shumëzues për {filtered.length} produkte</label>
-          <select
-            value=""
-            disabled={bulkApplying || filtered.length === 0}
-            onChange={e => {
-              const m = parseFloat(e.target.value)
-              e.target.selectedIndex = 0
-              if (m) applyBulkMultiplier(m)
-            }}
-            title="Apliko Çm. Shitje = Kosto × shumëzues për të gjitha produktet e shfaqura"
-            className="input-field w-56 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-emerald-700 dark:text-emerald-300"
-          >
-            <option value="">⚡ {bulkApplying ? 'Duke aplikuar...' : 'Zgjidh shumëzuesin...'}</option>
-            <option value="0.5">×0.5 (kosto × 0.5)</option>
-            <option value="1">×1 (kosto × 1)</option>
-            <option value="1.5">×1.5 (kosto × 1.5)</option>
-            <option value="2">×2 (kosto × 2)</option>
-            <option value="2.5">×2.5 (kosto × 2.5)</option>
-            <option value="3">×3 (kosto × 3)</option>
-            <option value="3.5">×3.5 (kosto × 3.5)</option>
-            <option value="4">×4 (kosto × 4)</option>
-            <option value="4.5">×4.5 (kosto × 4.5)</option>
-            <option value="5">×5 (kosto × 5)</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={bulkMultiplier}
+              onChange={e => setBulkMultiplier(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const m = parseFloat(String(bulkMultiplier).replace(',', '.'))
+                  if (m > 0 && !bulkApplying && filtered.length) applyBulkMultiplier(m)
+                }
+              }}
+              disabled={bulkApplying || filtered.length === 0}
+              className="input-field w-28 text-center disabled:opacity-50 disabled:cursor-not-allowed font-bold text-lg text-emerald-700 dark:text-emerald-300"
+              placeholder="p.sh. 2.5"
+              title="Shkruaj vetë shumëzuesin (p.sh. 2.5 = kosto × 2.5)"
+            />
+            <button
+              onClick={() => {
+                const m = parseFloat(String(bulkMultiplier).replace(',', '.'))
+                if (!m || m <= 0) { alert('Vendos një shumëzues > 0.'); return }
+                applyBulkMultiplier(m)
+              }}
+              disabled={bulkApplying || filtered.length === 0}
+              className="btn-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Apliko Çm. Shitje = Kosto × shumëzues për të gjitha produktet e shfaqura"
+            >⚡ {bulkApplying ? 'Duke aplikuar...' : 'Apliko ×'}</button>
+          </div>
         </div>
       </div>
 
@@ -1406,10 +1408,8 @@ export default function Products() {
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr Serie</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pershkrimi</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Njesi</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
@@ -1427,7 +1427,6 @@ export default function Products() {
                 <tr key={p.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                   <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{productNo(p.id)}</td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{p.barcode || <span className="text-slate-300">—</span>}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{p.serial_no || <span className="text-slate-300">—</span>}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="text-lg">{CAT_ICONS[p.category] || '📦'}</span>
@@ -1440,7 +1439,6 @@ export default function Products() {
                   <td className="px-3 py-2">
                     <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>{p.category}</span>
                   </td>
-                  <td className="px-3 py-2 text-center text-xs text-slate-600 dark:text-slate-300">{p.unit || 'copë'}</td>
                   <td className="px-3 py-2 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
                     {p.gram > 0 ? `${Number(p.gram).toLocaleString('sq-AL', { maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
@@ -1462,29 +1460,26 @@ export default function Products() {
                       <span className="font-bold text-slate-900 dark:text-white tabular-nums">
                         {p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}
                       </span>
-                      <select
-                        value=""
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        defaultValue=""
                         disabled={!p.cost_price}
-                        onChange={e => {
-                          const m = parseFloat(e.target.value)
-                          e.target.selectedIndex = 0
-                          if (m) applyMultiplier(p, m)
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            const m = parseFloat(String(e.currentTarget.value).replace(',', '.'))
+                            if (m > 0) applyMultiplier(p, m)
+                          }
                         }}
-                        title={p.cost_price ? 'Vendos Çm. Shitje = Kosto × shumëzues' : 'Vendos fillimisht koston'}
-                        className="text-[10px] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-emerald-700 dark:text-emerald-300 font-bold cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <option value="">×</option>
-                        <option value="0.5">×0.5</option>
-                        <option value="1">×1</option>
-                        <option value="1.5">×1.5</option>
-                        <option value="2">×2</option>
-                        <option value="2.5">×2.5</option>
-                        <option value="3">×3</option>
-                        <option value="3.5">×3.5</option>
-                        <option value="4">×4</option>
-                        <option value="4.5">×4.5</option>
-                        <option value="5">×5</option>
-                      </select>
+                        onBlur={e => {
+                          const m = parseFloat(String(e.currentTarget.value).replace(',', '.'))
+                          if (m > 0) applyMultiplier(p, m)
+                        }}
+                        title={p.cost_price ? 'Shkruaj shumëzuesin (p.sh. 2.5) dhe shtyp Enter → Çm. Shitje = Kosto × shumëzues' : 'Vendos fillimisht koston'}
+                        placeholder="× p.sh. 2.5"
+                        className="w-24 text-xs text-center bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded px-2 py-1 text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-50 hover:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                      />
                     </div>
                   </td>
                   <td className="px-3 py-2">

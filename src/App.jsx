@@ -24,6 +24,8 @@ const BlerjeHas              = lazy(() => import('./components/BlerjeHas.jsx'))
 const SalesSection           = lazy(() => import('./components/SalesSection.jsx'))
 const FaturaShitje           = lazy(() => import('./components/FaturaShitje.jsx'))
 const FaturaBlerje           = lazy(() => import('./components/FaturaBlerje.jsx'))
+const BlerjeFlori            = lazy(() => import('./components/BlerjeFlori.jsx'))
+const BlerjeDiamant          = lazy(() => import('./components/BlerjeDiamant.jsx'))
 const Magazina               = lazy(() => import('./components/Magazina.jsx'))
 const Magazinat              = lazy(() => import('./components/Magazinat.jsx'))
 const InventarPermbledhese   = lazy(() => import('./components/InventarPermbledhese.jsx'))
@@ -187,7 +189,9 @@ function AppInner({ user }) {
 
       // Fatura Shitje — new invoice-based module
       case 'fatura-shitje': return <FaturaShitje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} openNew={openNewInvoice} onConsumeNew={() => setOpenNewInvoice(false)} />
-      case 'fatura-blerje': return <FaturaBlerje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+      case 'fatura-blerje':  return <FaturaBlerje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+      case 'blerje-flori':   return <BlerjeFlori date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+      case 'blerje-diamant': return <BlerjeDiamant date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
 
       // Magazina — fletë hyrje / dalje me kod magazine + monedhë (pa TVSH)
       case 'magazina-hyrje': return <Magazina date={currentDate} kind="hyrje" />

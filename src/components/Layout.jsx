@@ -75,6 +75,8 @@ const NAV_GROUPS = [
         id: 'blerje', label: 'Blerje', icon: '⬇️',
         children: [
           { id: 'fatura-blerje',         label: 'FATURA BLERJE' },
+          { id: 'blerje-flori',          label: '🟡 BLERJE FLORI' },
+          { id: 'blerje-diamant',        label: '💎 BLERJE DIAMANT' },
           { id: 'blerje-has',            label: 'BLERJE HAS' },
           { id: 'raport-blerje-artikuj', label: 'Raport Blerje Artikuj' },
         ],
@@ -171,7 +173,7 @@ export default function Layout({
   canGoBack, onGoBack,
 }) {
   const isSales = user?.role === 'sales'
-  const NAV = isSales
+  const rawNav = isSales
     ? NAV_GROUPS
         .map(g => ({
           ...g,
@@ -185,6 +187,11 @@ export default function Layout({
         }))
         .filter(g => g.items.length > 0)
     : NAV_GROUPS
+  // Për admin, riemërto "Shitjet" (dashboard) → "Historiku i Shitjeve".
+  const NAV = isSales ? rawNav : rawNav.map(g => ({
+    ...g,
+    items: g.items.map(it => it.id === 'dashboard' ? { ...it, label: 'Historiku i Shitjeve' } : it),
+  }))
   const now = new Date()
   const [y, m, d] = currentDate.split('-').map(Number)
   const dateLabel = `${d} ${ALBANIAN_MONTHS[m]} ${y}`
@@ -194,7 +201,9 @@ export default function Layout({
   const toggleMenu = id => setOpenMenus(m => ({ ...m, [id]: !m[id] }))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  const headerTitle = PAGE_TITLES[page] ?? getChildTitle(page) ?? 'Faqe'
+  const headerTitle = (page === 'dashboard' && !isSales)
+    ? 'Historiku i Shitjeve'
+    : (PAGE_TITLES[page] ?? getChildTitle(page) ?? 'Faqe')
   const unreadComments = useUnreadCommentsCount()
   const { theme, toggle: toggleTheme } = useTheme()
 

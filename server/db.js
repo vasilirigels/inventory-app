@@ -710,20 +710,23 @@ const MIGRATIONS = [
 async function initDB() {
   if (initialized) return client;
 
-  for (const sql of SCHEMA) {
-    await client.execute(sql);
-  }
-  for (const sql of MIGRATIONS) {
-    try { await client.execute(sql); } catch (_) { /* column already exists */ }
-  }
+  // Batch SCHEMA në 1 request Turso (mode 'write' e trajton si transaksion, por
+  // secili CREATE TABLE IF NOT EXISTS është idempotent). Kjo redukton ~50 HTTP
+  // calls në 1 → init nga 30-60s → 1-2s.
+  await client.batch(SCHEMA.map(sql => ({ sql })), 'write');
+
+  // MIGRATIONS janë ALTER TABLE që dështojnë me "column already exists" në
+  // çdo restart pas të parit. `batch` do të abort-onte të gjithë transaksionin
+  // te dështimi i parë, ndaj i ekzekutojmë veç, POR paralel me Promise.allSettled
+  // që të gjitha HTTP round-trips të bëhen njëkohësisht (~1 RTT në total, jo N).
+  await Promise.allSettled(MIGRATIONS.map(sql => client.execute(sql)));
 
   // One-shot data migration: normalize old credit notes and expense currency.
-  try {
-    await client.execute(`UPDATE invoices SET amount_paid = 0, amount_due = total_with_vat
-                          WHERE is_credit_note = 1 AND (amount_due IS NULL OR amount_due = 0)`);
-  } catch (_) {}
-  try {
-    await client.execute(`
+  // Këto janë të pavarura nga njëra-tjetra → paralelizohen.
+  await Promise.allSettled([
+    client.execute(`UPDATE invoices SET amount_paid = 0, amount_due = total_with_vat
+                    WHERE is_credit_note = 1 AND (amount_due IS NULL OR amount_due = 0)`),
+    client.execute(`
       UPDATE expense_entries
       SET currency = CASE
             WHEN amount_lek > 0 THEN 'LEK'
@@ -739,11 +742,8 @@ async function initDB() {
           END,
           exchange_rate = 1
       WHERE COALESCE(currency, '') = '' OR amount IS NULL OR amount = 0
-    `);
-  } catch (_) {}
-  // Migrimi i njëjtë për marketingun — legacy amount_lek/eur/usd → currency + amount.
-  try {
-    await client.execute(`
+    `),
+    client.execute(`
       UPDATE marketing_expenses
       SET currency = CASE
             WHEN amount_lek > 0 THEN 'LEK'
@@ -759,8 +759,8 @@ async function initDB() {
           END,
           exchange_rate = 1
       WHERE COALESCE(currency, '') = '' OR amount IS NULL OR amount = 0
-    `);
-  } catch (_) {}
+    `),
+  ]);
 
   initialized = true;
   return client;

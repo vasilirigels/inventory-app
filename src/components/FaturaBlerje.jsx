@@ -310,11 +310,13 @@ function SupplierPicker({ value, onChange }) {
 }
 
 // ── Product picker for purchase rows ────────────────────────────────────────
-function ProductPickerCell({ value, onPick }) {
+function ProductPickerCell({ value, onPick, onNameChange }) {
   // Pershkrimi është i pavarur nga kolona e barkodit — mos ridiktoj vlerën nga
   // barcode-i, sepse ndryshe kur user-i shkruan barkodin, ai duket edhe këtu.
   // Emri vjen nga produkti i importuar (pickProduct → setItem({ name })) ose
-  // shkruhet me dorë.
+  // shkruhet me dorë. Kur shkruhet me dorë, `onNameChange` sinkronizon vlerën
+  // te state-i i prindit — pa këtë, `it.name` mbetet bosh dhe backend-i s'e
+  // krijon produktin e ri.
   const [query, setQuery] = useState(value?.name || '')
   const [results, setResults] = useState([])
   const [open, setOpen]       = useState(false)
@@ -352,7 +354,13 @@ function ProductPickerCell({ value, onPick }) {
       <input
         type="text" value={query}
         placeholder="barkod ose emër..."
-        onChange={e => { setQuery(e.target.value); search(e.target.value); setOpen(true) }}
+        onChange={e => {
+          const v = e.target.value
+          setQuery(v)
+          onNameChange?.(v)
+          search(v)
+          setOpen(true)
+        }}
         onFocus={() => query && setOpen(true)}
         onKeyDown={e => {
           if (e.key === 'Enter' && results.length > 0) { e.preventDefault(); pick(results[0]) }
@@ -381,7 +389,7 @@ function ProductPickerCell({ value, onPick }) {
 }
 
 // ── List view: all purchase invoices for the day ────────────────────────────
-function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
+function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, materialFilter }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [fromDate, setFromDate] = useState(date)
@@ -393,14 +401,15 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
   useEffect(() => {
     if (!fromDate || !toDate) return
     setLoading(true)
+    const matQ = materialFilter ? `?material=${encodeURIComponent(materialFilter)}` : ''
     const url = fromDate === toDate
-      ? `/api/purchase-invoices/by-date/${fromDate}`
-      : `/api/purchase-invoices/by-range?from=${fromDate}&to=${toDate}`
+      ? `/api/purchase-invoices/by-date/${fromDate}${matQ}`
+      : `/api/purchase-invoices/by-range?from=${fromDate}&to=${toDate}${materialFilter ? `&material=${encodeURIComponent(materialFilter)}` : ''}`
     fetch(url)
       .then(r => r.json())
       .then(d => { setList(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => { setList([]); setLoading(false) })
-  }, [fromDate, toDate, refreshKey])
+  }, [fromDate, toDate, refreshKey, materialFilter])
 
   // Convert per-invoice LEK subtotals into EUR: need EUR rate for each invoice's date.
   useEffect(() => {
@@ -449,24 +458,28 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
     acc.totEur   += n(inv.total_with_vat) * toEur
     acc.paidEur  += initPaid * toEur
     acc.dueEur   += initDue * toEur
+    acc.gram     += n(inv.total_gram)
     return acc
   }, {
     count: 0, gross: 0, sub: 0, disc: 0, vat: 0, tot: 0, paid: 0, due: 0,
     grossEur: 0, discEur: 0, subEur: 0, vatEur: 0, totEur: 0, paidEur: 0, dueEur: 0,
+    gram: 0,
   })
+
+  const showGram = !!materialFilter
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Fatura Blerje</h2>
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">{title || 'Fatura Blerje'}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {fromDate === toDate
               ? 'Lista e faturave të blerjes për këtë datë'
               : `Lista e faturave të blerjes nga ${fromDate} në ${toDate}`}
           </p>
         </div>
-        <button onClick={onCreate} className="btn-primary">+ Faturë Blerje e Re</button>
+        <button onClick={onCreate} className="btn-primary">+ {title ? `${title} e Re` : 'Faturë Blerje e Re'}</button>
       </div>
 
       {/* Date range filter */}
@@ -523,6 +536,9 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
+                {showGram && (
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Gram</th>
+                )}
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa Zbritje</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritja</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH</th>
@@ -563,6 +579,11 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                   <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{inv.supplier_nipt || '—'}</td>
                   <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
                   <td className="px-4 py-3 text-center text-xs">{pmBadge}</td>
+                  {showGram && (
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200">
+                      {n(inv.total_gram) > 0 ? `${n(inv.total_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
                     {isForeign && (
@@ -633,6 +654,11 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                 <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                   💵 TOTAL CASH (EUR) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
                 </td>
+                {showGram && (
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 text-base">
+                    {totals.gram > 0.0005 ? `${totals.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
+                  </td>
+                )}
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossEur)}</td>
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
                   {totals.discEur > 0.005 ? `-${fmt(totals.discEur)}` : '—'}
@@ -860,7 +886,7 @@ function ImportExcelModal({ onClose, onImported }) {
 }
 
 // ── Editor ──────────────────────────────────────────────────────────────────
-function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
+function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCategory }) {
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
   const [invoiceDate, setInvoiceDate] = useState(date)
@@ -874,11 +900,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   // method (cash|bank), monedhë, shumë dhe kurs drejt LEK.
   const [paymentSplits, setPaymentSplits] = useState([])
   const [notes, setNotes]       = useState('')
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState(forcedCategory || '')
   const [items, setItems]       = useState([emptyItem()])
   const [allRates, setAllRates] = useState({ LEK: 1 })
   const [showImport, setShowImport] = useState(false)
   const [bulkPromoPct, setBulkPromoPct] = useState('20')
+  const [bulkMultiplier, setBulkMultiplier] = useState('')
   const [materialCategories, setMaterialCategories] = useState([])
   // Kursi aktual EUR / gram HAS (nga /api/gold-spot-price). Ruhet globalisht
   // për të gjithë rreshtat e faturës — çdo rresht mund ta shohë por kursi
@@ -924,6 +951,27 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRate, items.length])
 
+  // Blerje Flori: llogarit auto Çm. Kosto = (Blerje Ne Monedhe + Kursi) × Gram
+  // për çdo rresht sa herë njëri nga tre input-et ndryshon. Loop-i i useEffect
+  // ndalet sepse `changed=false` kthen referencën e vjetër → asnjë render tjetër.
+  useEffect(() => {
+    if (forcedCategory !== 'flori') return
+    setItems(prev => {
+      let changed = false
+      const next = prev.map(it => {
+        const g  = n(it.gram)
+        const hg = n(it.has_gram)
+        const hr = n(it.has_rate)
+        if (g <= 0 || (hg <= 0 && hr <= 0)) return it
+        const newCost = +((hg + hr) * g).toFixed(2)
+        if (Math.abs(newCost - n(it.cost_price)) < 0.005) return it
+        changed = true
+        return { ...it, cost_price: newCost }
+      })
+      return changed ? next : prev
+    })
+  }, [items, forcedCategory])
+
   useEffect(() => {
     let cancel = false
     async function init() {
@@ -966,7 +1014,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           setNotes(inv.notes || '')
           const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
           const mats = invItems.map(it => it.material).filter(Boolean)
-          setCategory(mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : '')
+          setCategory(forcedCategory || (mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : ''))
           setItems(invItems)
         } else {
           setInvoiceDate(date)
@@ -1303,7 +1351,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
           <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
           <div>
             <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-              {invoiceId ? 'Edito Faturën Blerje' : 'Faturë Blerje e Re'}
+              {invoiceId
+                ? (title ? `Edito ${title}` : 'Edito Faturën Blerje')
+                : (title ? `${title} e Re` : 'Faturë Blerje e Re')}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">Nr. {invoiceNo}</p>
           </div>
@@ -1351,12 +1401,22 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
         </div>
         <div>
           <label className="form-label">Kategoria</label>
-          <MaterialCategoryPicker
-            value={category}
-            onChange={setCategory}
-            categories={materialCategories}
-            onChanged={loadMaterialCategories}
-          />
+          {forcedCategory ? (() => {
+            const cat = materialCategories.find(c => c.slug === forcedCategory)
+            const label = cat ? (cat.icon ? `${cat.icon} ${cat.label}` : cat.label) : forcedCategory
+            return (
+              <div className="input-field bg-slate-50 dark:bg-slate-900 cursor-not-allowed font-semibold text-slate-700 dark:text-slate-200">
+                {label} <span className="text-[10px] text-slate-400 ml-1">(e kyçur)</span>
+              </div>
+            )
+          })() : (
+            <MaterialCategoryPicker
+              value={category}
+              onChange={setCategory}
+              categories={materialCategories}
+              onChanged={loadMaterialCategories}
+            />
+          )}
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Aplikohet për të gjithë artikujt e faturës</p>
         </div>
         <div className="col-span-2 md:col-span-4">
@@ -1440,11 +1500,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                     <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Borxh ndaj Furnitorit ({currency})</label>
                     {(() => {
                       // Kur totali është 0 por s'ka pagesa, ekrani është ende bosh — mesazh i thjeshtë.
-                      // Kur totali është 0 por ka pagesa, ka gjasa që user-i s'ka vënë "Cmimi PA".
+                      // Kur totali është 0 por ka pagesa, ka gjasa që user-i s'ka vënë "Cmim blerje".
                       const hasAnyItemContent = items.some(it => it.product_id || (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.purchase_price_no_vat) > 0)
                       if (tot <= 0.005) {
                         const msg = hasAnyItemContent
-                          ? '— vendos "Cmimi PA" tek artikujt'
+                          ? '— vendos "Cmim blerje" tek artikujt'
                           : '— shto artikuj së pari'
                         return (
                           <div className="input-field tabular-nums font-bold bg-slate-50 dark:bg-slate-900 text-slate-400 dark:text-slate-500 border-slate-200">{msg}</div>
@@ -1476,15 +1536,13 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">Nr.</th>
                 <th className="px-2 py-2 text-left font-semibold w-40">Barkodi</th>
-                <th className="px-2 py-2 text-left font-semibold w-28">Nr Serie</th>
                 <th className="px-2 py-2 text-left font-semibold w-56">Pershkrimi</th>
-                <th className="px-2 py-2 text-left font-semibold w-16">Njesi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
                 <th className="px-2 py-2 text-center font-semibold w-12 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">Mon</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="EUR / gram HAS — mbushet automatikisht nga çmimi aktual i florit">Kursi</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Cmimi PA</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Cmim blerje</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Kosto €</th>
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:text-emerald-200">Cmim Shitje €</th>
@@ -1521,17 +1579,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                       </div>
                     </td>
                     <td className="px-1 py-1">
-                      <input type="text" value={it.serial_no || ''}
-                        onChange={e => setItem(idx, { serial_no: e.target.value })}
-                        className="input-field-sm font-mono" placeholder="—" />
-                    </td>
-                    <td className="px-1 py-1">
-                      <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
-                    </td>
-                    <td className="px-1 py-1">
-                      <input type="text" value={it.unit || ''}
-                        onChange={e => setItem(idx, { unit: e.target.value })}
-                        className="input-field-sm" placeholder="copë" />
+                      <ProductPickerCell
+                        value={it}
+                        onPick={p => pickProduct(idx, p)}
+                        onNameChange={n => setItem(idx, { name: n })}
+                      />
                     </td>
                     <td className="px-1 py-1">
                       <input type="number" step="any" value={it.qty}
@@ -1571,7 +1623,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
                     <td className="px-1 py-1">
                       <MoneyInput value={it.cost_price}
                         onChange={v => setItem(idx, { cost_price: v })}
-                        className="input-field-sm text-right" />
+                        disabled={forcedCategory === 'flori'}
+                        className={`input-field-sm text-right ${forcedCategory === 'flori' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
+                        {...(forcedCategory === 'flori' ? { title: 'Auto: (Blerje Ne Monedhe + Kursi) × Gram' } : {})}
+                      />
                     </td>
                     <td className="px-1 py-1 bg-emerald-50 dark:bg-emerald-900/30">
                       <MoneyInput value={it.sell_price}
@@ -1613,7 +1668,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={13} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                <td colSpan={11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
@@ -1642,37 +1697,36 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
               className="text-xs bg-slate-900 dark:bg-slate-950 hover:bg-slate-800 text-white font-semibold px-2 py-1.5 rounded-lg"
               title="Printo etiketa (50×30mm) për të gjithë rreshtat me barkod"
             >🖨️ Printo Barkod</button>
-            <select
-              value=""
-              onChange={async e => {
-                const m = parseFloat(e.target.value)
-                e.target.selectedIndex = 0
-                if (!m) return
-                const eligible = items.filter(it => n(it.purchase_price_no_vat) > 0).length
-                if (eligible === 0) { alert('Asnjë rresht me Çm. Blerje > 0.'); return }
-                if (!(await showConfirm(`Vendos Çm. Shitje = Çm. Blerje × ${m} për ${eligible} rreshta?`, {
-                  title: 'Apliko shumëzuesin', confirmLabel: 'Apliko',
-                }))) return
-                setItems(prev => prev.map(it => ({
-                  ...it,
-                  sell_price: +(n(it.purchase_price_no_vat) * m).toFixed(2),
-                })))
-              }}
-              title="Vendos Çm. Shitje = Çm. Blerje × shumëzues për të gjithë rreshtat"
-              className="text-xs bg-white dark:bg-slate-800 border border-emerald-300 rounded-lg px-2 py-1.5 text-emerald-700 dark:text-emerald-300 font-semibold cursor-pointer hover:bg-emerald-50"
-            >
-              <option value="">⚡ Apliko × për të gjithë...</option>
-              <option value="0.5">×0.5 (blerje × 0.5)</option>
-              <option value="1">×1 (blerje × 1)</option>
-              <option value="1.5">×1.5 (blerje × 1.5)</option>
-              <option value="2">×2 (blerje × 2)</option>
-              <option value="2.5">×2.5 (blerje × 2.5)</option>
-              <option value="3">×3 (blerje × 3)</option>
-              <option value="3.5">×3.5 (blerje × 3.5)</option>
-              <option value="4">×4 (blerje × 4)</option>
-              <option value="4.5">×4.5 (blerje × 4.5)</option>
-              <option value="5">×5 (blerje × 5)</option>
-            </select>
+            <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-700">
+              <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold uppercase">Shumëzues:</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={bulkMultiplier}
+                onChange={e => setBulkMultiplier(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.nextElementSibling?.click() } }}
+                className="input-field-sm text-center w-24 font-bold text-emerald-700 dark:text-emerald-300"
+                placeholder="p.sh. 2.5"
+                title="Vendos vetë shumëzuesin (p.sh. 2.5 = blerje × 2.5)"
+              />
+              <button
+                onClick={async () => {
+                  const m = parseFloat(String(bulkMultiplier).replace(',', '.'))
+                  if (!m || m <= 0) { alert('Vendos një shumëzues > 0.'); return }
+                  const eligible = items.filter(it => n(it.purchase_price_no_vat) > 0).length
+                  if (eligible === 0) { alert('Asnjë rresht me Çm. Blerje > 0.'); return }
+                  if (!(await showConfirm(`Vendos Çm. Shitje = Çm. Blerje × ${m} për ${eligible} rreshta?`, {
+                    title: 'Apliko shumëzuesin', confirmLabel: 'Apliko',
+                  }))) return
+                  setItems(prev => prev.map(it => ({
+                    ...it,
+                    sell_price: +(n(it.purchase_price_no_vat) * m).toFixed(2),
+                  })))
+                }}
+                className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-2 py-1.5 rounded-lg"
+                title="Vendos Çm. Shitje = Çm. Blerje × shumëzues për të gjithë rreshtat"
+              >⚡ Apliko ×</button>
+            </div>
             <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-700">
               <span className="text-[10px] text-rose-700 font-semibold uppercase">Promo Bulk:</span>
               <input
@@ -1731,7 +1785,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved }) {
   )
 }
 
-export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen }) {
+export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title, forcedCategory }) {
   const [mode, setMode] = useState('list')
   const [editingId, setEditingId] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -1759,7 +1813,7 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen }) {
   }
 
   if (mode === 'edit') {
-    return <PurchaseEditor date={date} invoiceId={editingId} onClose={backToList} onSaved={onSaved} />
+    return <PurchaseEditor date={date} invoiceId={editingId} onClose={backToList} onSaved={onSaved} title={title} forcedCategory={forcedCategory} />
   }
   return (
     <PurchaseList
@@ -1768,6 +1822,8 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen }) {
       onCreate={createNew}
       onDelete={deleteInvoice}
       refreshKey={refreshKey}
+      title={title}
+      materialFilter={forcedCategory}
     />
   )
 }

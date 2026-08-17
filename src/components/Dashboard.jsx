@@ -10,7 +10,7 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 const CAT_ICONS = {
   'Unazë': '💍', 'Vathë': '✨', 'Byzylyk': '📿',
   'Gjerdan / Varëse': '🏅', 'Komplet': '🎁',
-  'Ora': '⌚', 'Diamant': '💎', 'Tjeter': '📦',
+  'Ora': '⌚', 'Diamant': '💎', 'Flori': '🟡', 'Tjeter': '📦',
 }
 
 function n(v) { return parseFloat(v) || 0 }
@@ -485,6 +485,36 @@ export default function Dashboard({ date, onNavigate }) {
             onClick={() => onNavigate('products')} />
         </div>
       )}
+
+      {/* Gjendja e Inventarit (vetëm për Shitës) — tre grupe të thjeshta:
+          Flori, Diamant, Tjeter (çdo gjë tjetër përfshihet te Tjeter). */}
+      {isSales && (() => {
+        const buckets = { 'Flori': 0, 'Diamant': 0, 'Tjeter': 0 }
+        for (const p of products) {
+          const mat = String(p.material || '').toLowerCase().trim()
+          const cat = String(p.category || '').toLowerCase().trim()
+          const key = (mat === 'flori' || cat === 'flori') ? 'Flori'
+                    : (mat === 'diamant' || cat === 'diamant') ? 'Diamant'
+                    : 'Tjeter'
+          buckets[key] += n(p.stock)
+        }
+        return (
+          <div className="card">
+            <h3 className="font-semibold text-slate-800 dark:text-slate-100 mb-3">📦 Gjendja e Inventarit</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {['Flori', 'Diamant', 'Tjeter'].map(cat => (
+                <div key={cat} className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3">
+                  <span className="text-2xl">{CAT_ICONS[cat] || '📦'}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{cat}</p>
+                    <p className="text-xl font-extrabold tabular-nums text-slate-800 dark:text-slate-100">{fmt(buckets[cat])}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Rreshti 3 — Fitim & Marzh për periudhën, sipas monedhës origjinale (vetëm admin) */}
       {!isSales && (

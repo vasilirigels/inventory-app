@@ -1760,20 +1760,37 @@ function buildOnlineFilter(online, status) {
   };
 }
 
+// Total gram (peshë) i artikujve për faturë shitje. invoice_items s'ka
+// kolonë gram, kështu që bashkohet me products për të marrë pesha aktuale.
+// Kur ka material filter, numërohen vetëm artikujt e produkteve me atë material.
+function salesGramSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND COALESCE(xp3.material,'') = ?`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xp3.gram, 0) * COALESCE(xii2.qty, 0)), 0)
+     FROM invoice_items xii2
+     LEFT JOIN products xp3 ON xp3.id = xii2.product_id
+     WHERE xii2.invoice_id = i.id ${matClause}) AS total_gram`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
 app.get('/api/invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
     const { material, category, online, status } = req.query;
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
+    const gram = salesGramSubquery(material);
     const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid,
          (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
          (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
-            FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary
+            FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary,
+         ${gram.sql}
        FROM invoices i WHERE i.date = ? ${filter.sql} ${onl.sql} ORDER BY i.id ASC`,
-      [date, ...filter.params, ...onl.params]
+      [...gram.params, date, ...filter.params, ...onl.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1785,14 +1802,16 @@ app.get('/api/invoices/by-range', async (req, res) => {
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
+    const gram = salesGramSubquery(material);
     const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid,
          (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
          (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
-            FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary
+            FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary,
+         ${gram.sql}
        FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ${onl.sql} ORDER BY i.date ASC, i.id ASC`,
-      [from, to, ...filter.params, ...onl.params]
+      [...gram.params, from, to, ...filter.params, ...onl.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2842,14 +2861,45 @@ app.get('/api/purchase-invoices/next-no', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Filtër opsional për faqet Blerje Flori / Blerje Diamant — kthen vetëm faturat
+// që kanë të paktën një artikull të lidhur me një produkt të asaj materialiteti.
+function buildPurchaseMaterialFilter(material) {
+  if (!material || !String(material).trim()) return { sql: '', params: [] };
+  return {
+    sql: `AND EXISTS (
+      SELECT 1 FROM purchase_items xpit
+      LEFT JOIN products xp ON xp.id = xpit.product_id
+      WHERE xpit.purchase_id = pi.id AND COALESCE(xp.material, '') = ?
+    )`,
+    params: [String(material).trim()],
+  };
+}
+
+// Total gram (peshë) i artikujve për faturë — kur ka materialFilter, numërohen
+// vetëm artikujt e produkteve me atë material (p.sh. Blerje Flori s'duhet të
+// përfshijë grama e diamanteve nëse fatura ka të dyja).
+function purchaseGramSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND EXISTS (SELECT 1 FROM products xp2 WHERE xp2.id = xpit2.product_id AND COALESCE(xp2.material,'') = ?)`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xpit2.gram,0) * COALESCE(xpit2.qty,0)), 0)
+     FROM purchase_items xpit2
+     WHERE xpit2.purchase_id = pi.id ${matClause}) AS total_gram`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
 app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
+    const mat = buildPurchaseMaterialFilter(req.query.material);
+    const gram = purchaseGramSubquery(req.query.material);
     res.json(await queryAll(
       `SELECT pi.*,
-         (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid
-       FROM purchase_invoices pi WHERE pi.date = ? ORDER BY pi.id ASC`,
-      [date]
+         (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
+         ${gram.sql}
+       FROM purchase_invoices pi WHERE pi.date = ? ${mat.sql} ORDER BY pi.id ASC`,
+      [...gram.params, date, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2858,11 +2908,14 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    const mat = buildPurchaseMaterialFilter(req.query.material);
+    const gram = purchaseGramSubquery(req.query.material);
     res.json(await queryAll(
       `SELECT pi.*,
-         (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid
-       FROM purchase_invoices pi WHERE pi.date BETWEEN ? AND ? ORDER BY pi.date ASC, pi.id ASC`,
-      [from, to]
+         (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
+         ${gram.sql}
+       FROM purchase_invoices pi WHERE pi.date BETWEEN ? AND ? ${mat.sql} ORDER BY pi.date ASC, pi.id ASC`,
+      [...gram.params, from, to, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
