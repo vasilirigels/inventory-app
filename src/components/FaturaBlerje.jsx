@@ -142,11 +142,14 @@ function emptyItem() {
     product_id: null, serial_no: '', barcode: '', name: '',
     category: '', unit: 'copë', gram: 0,
     qty: 1, purchase_price_no_vat: 0, cost_price: 0, discount_percent: 0,
-    vat_rate: 20, sell_price: 0, material: '',
+    vat_rate: 0, sell_price: 0, material: '',
     is_promotion: false, promo_discount_pct: 0,
     // Blerje në gram HAS (peshë floriri të pastër) + kursi EUR/gram HAS që
     // mbushet automatikisht nga /api/gold-spot-price kur hapet editori.
     has_gram: 0, has_currency: 'HAS', has_rate: 0,
+    // Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulën:
+    // has_gram = (kodi/1000 + kursi/1000) × gram. Shumëzuesi për çmim shitjeje.
+    kodi: 0, multiplier: 0,
   }
 }
 
@@ -194,8 +197,9 @@ function detectMapping(headers) {
   const category   = findFirst(['kategori', 'category', 'tip', 'lloj'])
   const brand      = findFirst(['brendi', 'brand', 'prodhu'])
   const name       = findFirst(['pershkrim', 'emri', 'name', 'produkt', 'article', 'description', 'artikull'])
+  const gram       = findFirst(['gram', 'peshe', 'weight', 'pesha'])
 
-  return { name, category, brand, sku, barcode, cost_price, sell_price, stock, min_stock }
+  return { name, category, brand, sku, barcode, cost_price, sell_price, stock, min_stock, gram }
 }
 
 function rowToProduct(row, m) {
@@ -210,6 +214,7 @@ function rowToProduct(row, m) {
     sell_price: parseFloat(get(m.sell_price, 0)) || 0,
     stock:      parseInt(get(m.stock, 0)) || 0,
     min_stock:  parseInt(get(m.min_stock, 5)) || 5,
+    gram:       parseFloat(String(get(m.gram, 0)).replace(',', '.')) || 0,
   }
 }
 
@@ -764,6 +769,7 @@ function ImportExcelModal({ onClose, onImported }) {
     { key: 'cost_price', label: 'Çm. Blerje (€)' },
     { key: 'sell_price', label: 'Çm. Shitje (€)' },
     { key: 'stock',      label: 'Sasia' },
+    { key: 'gram',       label: 'Gram' },
     { key: 'min_stock',  label: 'Stok Minimal' },
   ]
 
@@ -912,6 +918,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // vjen njësoj se blerja bëhet në të njëjtën ditë.
   const [hasRate, setHasRate]           = useState(0)
   const [hasRateLoading, setHasRateLoading] = useState(false)
+  const [defaultMultiplier, setDefaultMultiplier] = useState('')
 
   const loadMaterialCategories = async () => {
     try {
@@ -951,22 +958,31 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRate, items.length])
 
-  // Blerje Flori: llogarit auto Çm. Kosto = (Blerje Ne Monedhe + Kursi) × Gram
-  // për çdo rresht sa herë njëri nga tre input-et ndryshon. Loop-i i useEffect
-  // ndalet sepse `changed=false` kthen referencën e vjetër → asnjë render tjetër.
+  // Blerje Flori: formula e re — nëse kodi > 0, llogarit auto:
+  //   has_gram    = (kodi/1000 + kursi/1000) × gram
+  //   cost_price  = has_gram × kursi           (kursi si vlerë e plotë, p.sh. 120)
+  //   sell_price  = has_gram × multiplier × kursi
+  // Nëse kodi = 0 (fatura të vjetra) nuk mbishkruajmë asgjë — të dhënat mbeten.
   useEffect(() => {
     if (forcedCategory !== 'flori') return
     setItems(prev => {
       let changed = false
       const next = prev.map(it => {
-        const g  = n(it.gram)
-        const hg = n(it.has_gram)
-        const hr = n(it.has_rate)
-        if (g <= 0 || (hg <= 0 && hr <= 0)) return it
-        const newCost = +((hg + hr) * g).toFixed(2)
-        if (Math.abs(newCost - n(it.cost_price)) < 0.005) return it
+        const g   = n(it.gram)
+        const k   = n(it.kodi)
+        const hr  = n(it.has_rate)
+        const mul = n(it.multiplier)
+        if (k <= 0 || g <= 0 || hr <= 0) return it
+        const newHas   = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
+        const newCost  = +(newHas * hr).toFixed(2)
+        const newSell  = mul > 0 ? +(newHas * mul * hr).toFixed(2) : n(it.sell_price)
+        if (
+          Math.abs(newHas  - n(it.has_gram))   < 0.00005 &&
+          Math.abs(newCost - n(it.cost_price)) < 0.005 &&
+          Math.abs(newSell - n(it.sell_price)) < 0.005
+        ) return it
         changed = true
-        return { ...it, cost_price: newCost }
+        return { ...it, has_gram: newHas, cost_price: newCost, sell_price: newSell }
       })
       return changed ? next : prev
     })
@@ -1057,7 +1073,24 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const setItem = (idx, patch) =>
     setItems(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it))
 
-  const addItem = () => setItems(prev => [...prev, { ...emptyItem(), has_rate: hasRate || 0 }])
+  const addItem = () => setItems(prev => [...prev, {
+    ...emptyItem(),
+    has_rate: hasRate || 0,
+    multiplier: parseFloat(String(defaultMultiplier).replace(',', '.')) || 0,
+  }])
+
+  // Kur ndryshon shumëzuesi default (input global), mbush të njëjtën vlerë te
+  // çdo rresht. User-i mund të bëjë override për një rresht të caktuar pastaj.
+  useEffect(() => {
+    if (forcedCategory !== 'flori') return
+    const m = parseFloat(String(defaultMultiplier).replace(',', '.')) || 0
+    if (m <= 0) return
+    setItems(prev => {
+      if (prev.every(it => Math.abs(n(it.multiplier) - m) < 0.0001)) return prev
+      return prev.map(it => ({ ...it, multiplier: m }))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultMultiplier, forcedCategory])
   const removeItem = (idx) =>
     setItems(prev => prev.length === 1 ? [emptyItem()] : prev.filter((_, i) => i !== idx))
 
@@ -1256,9 +1289,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       barcode:               p.barcode || '',
       name:                  p.name,
       qty:                   p.stock > 0 ? p.stock : 1,
+      gram:                  p.gram || 0,
       purchase_price_no_vat: eurToInvoiceCurrency(p.cost_price || 0),
       discount_percent:      0,
-      vat_rate:              20,
+      vat_rate:              0,
       sell_price:            eurToInvoiceCurrency(p.sell_price || 0),
     }))
     setItems(prev => {
@@ -1279,7 +1313,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       purchase_price_no_vat: eurToInvoiceCurrency(p.purchase_price_no_vat || 0),
       cost_price:            eurToInvoiceCurrency(p.cost_price || 0),
       sell_price:            eurToInvoiceCurrency(p.sell_price || 0),
-      vat_rate: p.vat_rate != null ? p.vat_rate : 20,
+      vat_rate: 0,
       material: p.material || '',
       is_promotion: !!p.is_promotion,
       promo_discount_pct: p.is_promotion ? (parseFloat(p.promo_discount_pct) || 0) : 0,
@@ -1399,6 +1433,22 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             disabled={currency === 'LEK'} className="input-field disabled:bg-slate-50" />
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
         </div>
+        {forcedCategory === 'flori' && (
+          <div>
+            <label className="form-label">
+              Shumëzues Shitjeje
+              <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">(p.sh. 1.8)</span>
+            </label>
+            <input
+              type="text" inputMode="decimal"
+              value={defaultMultiplier}
+              onChange={e => setDefaultMultiplier(e.target.value)}
+              className="input-field font-bold text-emerald-700 dark:text-emerald-300"
+              placeholder="p.sh. 1.8"
+            />
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Aplikohet për të gjitha rreshtat</p>
+          </div>
+        )}
         <div>
           <label className="form-label">Kategoria</label>
           {forcedCategory ? (() => {
@@ -1539,13 +1589,17 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 <th className="px-2 py-2 text-left font-semibold w-56">Pershkrimi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
-                <th className="px-2 py-2 text-center font-semibold w-12 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">Mon</th>
+                {forcedCategory === 'flori' && (
+                  <th className="px-2 py-2 text-right font-semibold w-16 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulë">Kodi</th>
+                )}
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="EUR / gram HAS — mbushet automatikisht nga çmimi aktual i florit">Kursi</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Cmim blerje</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Cmim Kosto €</th>
-                <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:text-emerald-200">Cmim Shitje €</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
+                {forcedCategory === 'flori' && (
+                  <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
+                )}
+                <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">Cmim Shitje €</th>
                 <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-50 text-rose-700" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
@@ -1595,25 +1649,27 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         onChange={e => setItem(idx, { gram: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
+                    {forcedCategory === 'flori' && (
+                      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+                        <input type="number" step="1" min="0" value={it.kodi || ''}
+                          onChange={e => setItem(idx, { kodi: e.target.value })}
+                          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                          placeholder="585" />
+                      </td>
+                    )}
                     <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
                       <input type="number" step="0.001" min="0" value={it.has_gram || ''}
                         onChange={e => setItem(idx, { has_gram: e.target.value })}
-                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
-                        placeholder="0.00" />
-                    </td>
-                    <td className="px-1 py-1 text-center bg-amber-50/40 dark:bg-amber-900/10 text-[10px] font-mono font-semibold text-amber-700 dark:text-amber-300">
-                      {it.has_currency || 'HAS'}
+                        disabled={forcedCategory === 'flori' && n(it.kodi) > 0}
+                        className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+                        placeholder="0.00"
+                        title={forcedCategory === 'flori' && n(it.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
                     </td>
                     <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
                       <MoneyInput value={it.has_rate}
                         onChange={v => setItem(idx, { has_rate: v })}
                         className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
                         placeholder={hasRateLoading ? '…' : '0.00'} />
-                    </td>
-                    <td className="px-1 py-1">
-                      <MoneyInput value={it.purchase_price_no_vat}
-                        onChange={v => setItem(idx, { purchase_price_no_vat: v })}
-                        className="input-field-sm text-right" />
                     </td>
                     <td className="px-1 py-1">
                       <input type="number" step="0.01" min="0" max="100" value={it.vat_rate}
@@ -1625,13 +1681,24 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         onChange={v => setItem(idx, { cost_price: v })}
                         disabled={forcedCategory === 'flori'}
                         className={`input-field-sm text-right ${forcedCategory === 'flori' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
-                        {...(forcedCategory === 'flori' ? { title: 'Auto: (Blerje Ne Monedhe + Kursi) × Gram' } : {})}
+                        {...(forcedCategory === 'flori' ? { title: 'Auto: has_gram × Kursi' } : {})}
                       />
                     </td>
+                    {forcedCategory === 'flori' && (
+                      <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+                        <input type="number" step="0.01" min="0" value={it.multiplier || ''}
+                          onChange={e => setItem(idx, { multiplier: e.target.value })}
+                          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                          placeholder="1.8"
+                          title="Shumëzues per rresht — override i vlerës globale" />
+                      </td>
+                    )}
                     <td className="px-1 py-1 bg-emerald-50 dark:bg-emerald-900/30">
                       <MoneyInput value={it.sell_price}
                         onChange={v => setItem(idx, { sell_price: v })}
-                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200" />
+                        disabled={forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0}
+                        className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+                        {...(forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0 ? { title: 'Auto: has_gram × Shumëzues × Kursi' } : {})} />
                     </td>
                     <td className="px-1 py-1 text-center bg-rose-50/40">
                       <div className="flex items-center justify-center gap-1">
@@ -1668,7 +1735,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                <td colSpan={forcedCategory === 'flori' ? 13 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>

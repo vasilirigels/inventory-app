@@ -648,7 +648,7 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                         <td className="px-4 py-2 text-slate-700 dark:text-slate-200">{inv.date}</td>
                         <td className="px-4 py-2 font-mono text-xs">
                           <button
-                            onClick={() => onNavigate?.('fatura-blerje', { date: inv.date, invoiceId: inv.id })}
+                            onClick={() => onNavigate?.('artikuj-te-tjere', { date: inv.date, invoiceId: inv.id })}
                             className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
                             title="Hap këtë faturë"
                           >{inv.invoice_no}</button>

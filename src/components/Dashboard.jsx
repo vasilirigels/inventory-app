@@ -781,7 +781,7 @@ const QUICK_ACTIONS = [
 
   // Vetëm admin — nuk shfaqen për shitësin
   { icon: '🧾', label: 'Fatura Shitje',          page: 'fatura-shitje',           salesOk: false },
-  { icon: '🛒', label: 'Fatura Blerje',          page: 'fatura-blerje',           salesOk: false },
+  { icon: '🛒', label: 'Artikuj Të Tjerë',       page: 'artikuj-te-tjere',        salesOk: false },
   { icon: '💠', label: 'Blerje HAS',             page: 'blerje-has',              salesOk: false },
   { icon: '📦', label: 'Produktet',              page: 'products',                salesOk: false },
   { icon: '👤', label: 'Klienti',                page: 'klienti',                 salesOk: false },

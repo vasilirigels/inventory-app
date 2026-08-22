@@ -74,7 +74,7 @@ const NAV_GROUPS = [
       {
         id: 'blerje', label: 'Blerje', icon: '⬇️',
         children: [
-          { id: 'fatura-blerje',         label: 'FATURA BLERJE' },
+          { id: 'artikuj-te-tjere',      label: 'ARTIKUJ TË TJERË' },
           { id: 'blerje-flori',          label: '🟡 BLERJE FLORI' },
           { id: 'blerje-diamant',        label: '💎 BLERJE DIAMANT' },
           { id: 'blerje-has',            label: 'BLERJE HAS' },

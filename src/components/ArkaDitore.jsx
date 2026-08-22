@@ -438,7 +438,7 @@ export default function ArkaDitore({ date, onNavigate }) {
       <div className="flex flex-wrap gap-2">
         <button onClick={() => onNavigate?.('arka-kasaforta')} className="btn-secondary text-xs">→ Kasaforta</button>
         <button onClick={() => onNavigate?.('fatura-shitje')}  className="btn-secondary text-xs">→ Fatura Shitje</button>
-        <button onClick={() => onNavigate?.('fatura-blerje')}  className="btn-secondary text-xs">→ Fatura Blerje</button>
+        <button onClick={() => onNavigate?.('artikuj-te-tjere')}  className="btn-secondary text-xs">→ Artikuj Të Tjerë</button>
         <button onClick={() => onNavigate?.('arka-shpenzime')} className="btn-secondary text-xs">→ Shpenzime</button>
       </div>
     </div>

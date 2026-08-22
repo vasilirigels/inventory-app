@@ -109,7 +109,7 @@ function DocsModal({ row, from, to, onClose, onNavigate }) {
 
   const openDoc = (d) => {
     if (d.source === 'purchase') {
-      onNavigate?.('fatura-blerje', { date: d.date, invoiceId: d.doc_id })
+      onNavigate?.('artikuj-te-tjere', { date: d.date, invoiceId: d.doc_id })
     } else {
       onNavigate?.('magazina-hyrje', { date: d.date })
     }

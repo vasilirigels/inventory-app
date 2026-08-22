@@ -388,7 +388,7 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                     </td>
                     <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">
                       <button
-                        onClick={() => onNavigate?.('fatura-blerje', { date: inv.date, invoiceId: inv.id })}
+                        onClick={() => onNavigate?.('artikuj-te-tjere', { date: inv.date, invoiceId: inv.id })}
                         className="font-mono font-semibold text-blue-600 hover:text-blue-800 hover:underline"
                         title="Hap këtë faturë"
                       >{inv.invoice_no}</button>
@@ -437,7 +437,7 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                     <div className="text-slate-700 dark:text-slate-200">
                       për fat.{' '}
                       <button
-                        onClick={() => onNavigate?.('fatura-blerje', { date: p.invoice_date, invoiceId: p.purchase_id })}
+                        onClick={() => onNavigate?.('artikuj-te-tjere', { date: p.invoice_date, invoiceId: p.purchase_id })}
                         className="font-mono font-semibold text-blue-600 hover:text-blue-800 hover:underline"
                         title="Hap këtë faturë"
                       >{p.invoice_no}</button>

@@ -189,7 +189,7 @@ function AppInner({ user }) {
 
       // Fatura Shitje — new invoice-based module
       case 'fatura-shitje': return <FaturaShitje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} openNew={openNewInvoice} onConsumeNew={() => setOpenNewInvoice(false)} />
-      case 'fatura-blerje':  return <FaturaBlerje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+      case 'artikuj-te-tjere':  return <FaturaBlerje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
       case 'blerje-flori':   return <BlerjeFlori date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
       case 'blerje-diamant': return <BlerjeDiamant date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
 
