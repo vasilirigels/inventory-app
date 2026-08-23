@@ -700,6 +700,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
     const cur = inv.currency || 'LEK'
     if (!acc[cur]) acc[cur] = {
       count: 0, gross: 0, disc: 0, sub: 0, vat: 0, tot: 0, paid: 0, due: 0,
+      cost: 0, profit: 0,
     }
     const t = acc[cur]
     const initPaid = truePaidCashPos(inv)
@@ -714,6 +715,13 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
     t.paid  += initPaid
     t.due   += initDue
     t.gram  = (t.gram || 0) + n(inv.total_gram)
+    // Kosto & Fitim përjashtojnë faturat e anuluara; kthimet (credit notes)
+    // futen me shenjë negative dhe balancohen natyrshëm.
+    if (!inv.cancelled) {
+      const c = n(inv.total_cost)
+      t.cost   += c
+      t.profit += n(inv.subtotal_no_vat) - c
+    }
     return acc
   }, {})
   const currenciesInList = Object.keys(totalsByCur).sort()
@@ -926,6 +934,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
                 <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
@@ -936,6 +945,13 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TOTALI</th>
+                {isAdmin && (
+                  <>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Fitim</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Fitim %</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Marzh %</th>
+                  </>
+                )}
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shuma e Paguar</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shuma Pa Paguar</th>
                 {online && <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statusi</th>}
@@ -973,6 +989,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                     {isCancelled && <span className="ml-1.5 badge bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px]">ANULUAR</span>}
                     {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 dark:text-red-300 text-[9px]">KREDITORE</span>}
                   </td>
+                  <td className="px-2 py-2 text-xs text-slate-600 dark:text-slate-300 tabular-nums whitespace-nowrap">{inv.date || '—'}</td>
                   <td className="px-2 py-2 text-slate-800 dark:text-slate-100">{inv.customer_name || <span className="text-slate-400 dark:text-slate-500 italic">— pa klient —</span>}</td>
                   <td className="px-2 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{inv.customer_nipt || '—'}</td>
                   <td className="px-2 py-2 text-center text-xs">
@@ -1022,6 +1039,36 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                       </div>
                     )}
                   </td>
+                  {isAdmin && (() => {
+                    const cost   = n(inv.total_cost)
+                    const sales  = n(inv.subtotal_no_vat)
+                    const profit = sales - cost
+                    const marginPct = sales !== 0 ? (profit / sales) * 100 : 0
+                    const profitPct = cost  !== 0 ? (profit / cost)  * 100 : 0
+                    const cancelled = !!inv.cancelled
+                    const hasCost   = cost > 0.005
+                    const clsProfit = cancelled ? 'text-slate-400 dark:text-slate-500' : profit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'
+                    const clsPct    = cancelled ? 'text-slate-400 dark:text-slate-500' : profitPct < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'
+                    const clsMar    = cancelled ? 'text-slate-400 dark:text-slate-500' : marginPct < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'
+                    return (
+                      <>
+                        <td className={`px-2 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 ${clsProfit}`}>
+                          {hasCost ? fmt(profit) : <span className="text-slate-300">—</span>}
+                          {hasCost && (
+                            <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
+                              kosto: {fmt(cost)}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`px-2 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 ${clsPct}`}>
+                          {hasCost ? `${profitPct.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className={`px-2 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 ${clsMar}`}>
+                          {sales > 0.005 && hasCost ? `${marginPct.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : <span className="text-slate-300">—</span>}
+                        </td>
+                      </>
+                    )
+                  })()}
                   <td className="px-2 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(initPaid)}
                     {isForeign && initPaid > 0.005 && (
@@ -1140,6 +1187,32 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.sub)}</td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.vat)}</td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(t.tot)}</td>
+                    {isAdmin && (() => {
+                      const tProfitPct = t.cost !== 0 ? (t.profit / t.cost) * 100 : 0
+                      const tMarginPct = t.sub  !== 0 ? (t.profit / t.sub)  * 100 : 0
+                      const hasCost    = t.cost > 0.005
+                      const clsProfit  = t.profit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'
+                      const clsPct     = tProfitPct < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'
+                      const clsMar     = tMarginPct < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'
+                      return (
+                        <>
+                          <td className={`px-2 py-2 text-right tabular-nums font-extrabold bg-emerald-100/70 dark:bg-emerald-900/40 text-base ${clsProfit}`}>
+                            {hasCost ? fmt(t.profit) : '—'}
+                            {hasCost && (
+                              <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
+                                kosto: {fmt(t.cost)}
+                              </div>
+                            )}
+                          </td>
+                          <td className={`px-2 py-2 text-right tabular-nums font-extrabold bg-emerald-100/70 dark:bg-emerald-900/40 text-base ${clsPct}`}>
+                            {hasCost ? `${tProfitPct.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : '—'}
+                          </td>
+                          <td className={`px-2 py-2 text-right tabular-nums font-extrabold bg-emerald-100/70 dark:bg-emerald-900/40 text-base ${clsMar}`}>
+                            {t.sub > 0.005 && hasCost ? `${tMarginPct.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : '—'}
+                          </td>
+                        </>
+                      )
+                    })()}
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(t.paid)}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-extrabold text-base ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                       {t.due > 0.005 ? fmt(t.due) : '✓'}

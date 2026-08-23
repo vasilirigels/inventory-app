@@ -4,6 +4,7 @@ import { setSession } from '../lib/auth.js'
 export default function AuthLogin({ onLoggedIn }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
@@ -45,8 +46,17 @@ export default function AuthLogin({ onLoggedIn }) {
           </div>
           <div>
             <label className="form-label">Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-              className="input-field" required />
+            <div className="relative">
+              <input type={showPassword ? 'text' : 'password'} value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="input-field pr-10" required />
+              <button type="button" onClick={() => setShowPassword(s => !s)}
+                aria-label={showPassword ? 'Fshih password' : 'Shfaq password'}
+                title={showPassword ? 'Fshih password' : 'Shfaq password'}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">
+                {showPassword ? '🙈' : '👁'}
+              </button>
+            </div>
           </div>
           {err && <p className="text-sm text-rose-600">⚠ {err}</p>}
           <button type="submit" disabled={saving} className="btn-primary w-full justify-center">

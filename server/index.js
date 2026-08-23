@@ -1775,6 +1775,16 @@ function salesGramSubquery(material) {
   return { sql, params };
 }
 
+// Kosto totale e faturës (në monedhën e faturës) = SUM(qty * products.cost_price).
+// Përdoret për të llogaritur Fitim & Marzh në listën e faturave. Përputhet me
+// konvencionin e /api/inventory-summary → profitByCurrency (pa konvertim LEK).
+function salesCostSubquery() {
+  return `(SELECT COALESCE(SUM(COALESCE(xii3.qty,0) * COALESCE(xp4.cost_price,0)), 0)
+     FROM invoice_items xii3
+     LEFT JOIN products xp4 ON xp4.id = xii3.product_id
+     WHERE xii3.invoice_id = i.id AND xii3.product_id IS NOT NULL) AS total_cost`;
+}
+
 app.get('/api/invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
@@ -1788,7 +1798,8 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
          (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
          (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
             FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary,
-         ${gram.sql}
+         ${gram.sql},
+         ${salesCostSubquery()}
        FROM invoices i WHERE i.date = ? ${filter.sql} ${onl.sql} ORDER BY i.id ASC`,
       [...gram.params, date, ...filter.params, ...onl.params]
     );
@@ -1809,7 +1820,8 @@ app.get('/api/invoices/by-range', async (req, res) => {
          (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
          (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
             FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary,
-         ${gram.sql}
+         ${gram.sql},
+         ${salesCostSubquery()}
        FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ${onl.sql} ORDER BY i.date ASC, i.id ASC`,
       [...gram.params, from, to, ...filter.params, ...onl.params]
     );

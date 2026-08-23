@@ -537,6 +537,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitori</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">NIPT</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
@@ -580,6 +581,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
                   <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">
                     <button onClick={() => onOpen(inv.id)} className="text-blue-600 hover:underline">{inv.invoice_no}</button>
                   </td>
+                  <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300 tabular-nums whitespace-nowrap">{inv.date || '—'}</td>
                   <td className="px-4 py-3 text-slate-800 dark:text-slate-100">{inv.supplier_name || <span className="text-slate-400 dark:text-slate-500 italic">— pa furnitor —</span>}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{inv.supplier_nipt || '—'}</td>
                   <td className="px-4 py-3 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
@@ -1600,7 +1602,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">Cmim Shitje €</th>
-                <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-50 text-rose-700" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
+                <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-600 text-white" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
             </thead>

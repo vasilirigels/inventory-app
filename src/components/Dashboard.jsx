@@ -226,6 +226,10 @@ export default function Dashboard({ date, onNavigate }) {
   const profitMarginPct = salesRangeLek > 0
     ? +((profitRangeLek / salesRangeLek) * 100).toFixed(2)
     : 0
+  // Fitim % = fitim mbi koston (markup); ndryshe nga Marzh % që është fitim mbi shitjen.
+  const profitPctLek = cogsRangeLek > 0
+    ? +((profitRangeLek / cogsRangeLek) * 100).toFixed(2)
+    : 0
 
   // ── Fitim i ndarë sipas monedhës origjinale (pa konvertim në LEK)
   const profitByCur = invSummaryRange?.profitByCurrency || {}
@@ -536,19 +540,25 @@ export default function Dashboard({ date, onNavigate }) {
           <div className="space-y-3">
             {profitCurrencies.map(cur => {
               const t = profitByCur[cur]
+              const profitPct = t.cogs > 0 ? +((t.profit / t.cogs) * 100).toFixed(2) : 0
               return (
                 <div key={cur}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="badge bg-blue-200 text-blue-800 dark:text-blue-200 font-bold">{cur}</span>
                     <span className="text-[10px] text-slate-500 dark:text-slate-400">Sasi e shitur: {fmt(t.qty, 0)}</span>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-3">
                     <MiniStat label={`Shitje pa TVSH (${cur})`}  value={fmt(t.sales_no_vat)} color="blue" />
                     <MiniStat label={`Kosto e Shitur (${cur})`}  value={fmt(t.cogs)}         color="slate" />
                     <MiniStat
                       label={`Fitim (${cur})`}
                       value={fmt(t.profit)}
                       color={t.profit < 0 ? 'rose' : 'emerald'}
+                    />
+                    <MiniStat
+                      label="Fitim %"
+                      value={t.cogs > 0 ? `${fmt(profitPct, 2)}%` : '—'}
+                      color={profitPct < 0 ? 'rose' : 'emerald'}
                     />
                     <MiniStat
                       label="Marzh %"
@@ -565,13 +575,18 @@ export default function Dashboard({ date, onNavigate }) {
                 <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">
                   Ekuivalent i kombinuar në LEK (të konvertuar me kursin e secilës faturë)
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-3">
                   <MiniStat label="Shitje (LEK)"      value={fmt(salesRangeLek)}  color="blue" />
                   <MiniStat label="Kosto (LEK)"       value={fmt(cogsRangeLek)}   color="slate" />
                   <MiniStat
                     label="Fitim (LEK)"
                     value={fmt(profitRangeLek)}
                     color={profitRangeLek < 0 ? 'rose' : 'emerald'}
+                  />
+                  <MiniStat
+                    label="Fitim % (LEK)"
+                    value={cogsRangeLek > 0 ? `${fmt(profitPctLek, 2)}%` : '—'}
+                    color={profitPctLek < 0 ? 'rose' : 'emerald'}
                   />
                   <MiniStat
                     label="Marzh % (LEK)"
