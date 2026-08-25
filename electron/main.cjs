@@ -449,6 +449,137 @@ async function checkForUpdateMac(manual = false) {
   }
 }
 
+// ─── Custom Portable (Windows) updater ─────────────────────────────────────
+// Portable .exe s'mund të mbivendoset ndërsa është duke ekzekutuar. Për të
+// mbështetur auto-update:
+//   1. Fetch nga GitHub API → gjej ChamShop-Portable-{version}.exe të fundit
+//   2. Shkarko .exe-në e re në të njëjtën direktori ku ndodhet aktualja
+//   3. Shkruaj një .bat script në temp që:
+//      - pret 3s që procesi aktual të mbyllet plotësisht (unlock file)
+//      - fshin .exe-në e vjetër
+//      - nis .exe-në e re
+//      - fshin veten
+//   4. Spawn .bat detached + quit
+let portableUpdateInProgress = false;
+async function checkForUpdatePortable(manual = false) {
+  if (process.platform !== 'win32') return;
+  if (portableUpdateInProgress) { updaterLog('Portable updater: already in progress'); return; }
+  portableUpdateInProgress = true;
+  try {
+    updaterLog('Portable updater: checking GitHub...');
+    const apiUrl = 'https://api.github.com/repos/vasilirigels/inventory-app-releases/releases/latest';
+    const res = await fetch(apiUrl, { headers: { 'User-Agent': 'ChamShopUpdater/1.0' } });
+    if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}`);
+    const data = await res.json();
+    const latestVersion = String(data.tag_name || '').replace(/^v/, '');
+    const currentVersion = app.getVersion();
+    updaterLog(`Portable updater: current=v${currentVersion}, latest=v${latestVersion}`);
+
+    if (compareVersions(latestVersion, currentVersion) <= 0) {
+      if (manual) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info', title: 'Nuk ka update',
+          message: `Je te versioni më i fundit (v${currentVersion}).`,
+        });
+      }
+      return;
+    }
+
+    const exeName = `ChamShop-Portable-${latestVersion}.exe`;
+    const exeAsset = (data.assets || []).find(a => a.name === exeName);
+    if (!exeAsset) {
+      updaterLog(`Portable updater: asset not found (${exeName})`);
+      if (manual) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'warning', title: 'Update jo i disponueshëm',
+          message: `Nuk u gjet ChamShop-Portable-${latestVersion}.exe`,
+          detail: `Asete: ${(data.assets || []).map(a => a.name).join(', ')}`,
+        });
+      }
+      return;
+    }
+
+    const sizeMB = Math.round(exeAsset.size / 1024 / 1024);
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Version i ri i disponueshëm',
+      message: `Version i ri: v${latestVersion}`,
+      detail: `Version-i aktual: v${currentVersion}\n\nDo të shkarkohet ~${sizeMB} MB dhe do të zëvendësohet automatikisht .exe-në e vjetër. Aplikacioni do të mbyllet dhe të rihapet me versionin e ri.`,
+      buttons: ['Shkarko dhe instalo', 'Më vonë'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) { updaterLog('Portable updater: user cancelled'); return; }
+
+    // Shkarko në të njëjtën direktori ku ndodhet .exe-ja aktuale (te USB-ja).
+    const currentExePath = process.execPath;
+    const currentExeDir = path.dirname(currentExePath);
+    const newExePath = path.join(currentExeDir, exeName);
+    updaterLog(`Portable updater: downloading to ${newExePath}`);
+    let lastLogged = 0;
+    await downloadFile(exeAsset.browser_download_url, newExePath, (done, total) => {
+      const pct = total ? Math.round(done / total * 100) : 0;
+      if (pct >= lastLogged + 10) { updaterLog(`Portable updater: download ${pct}%`); lastLogged = pct; }
+    });
+    updaterLog('Portable updater: download complete');
+
+    const { response: r2 } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Shkarkimi u plotësua',
+      message: `Version v${latestVersion} u shkarkua.`,
+      detail: `Aplikacioni do të mbyllet, .exe-ja e vjetër do të fshihet, dhe versioni i ri do të hapet automatikisht.\n\nVendndodhja: ${currentExeDir}`,
+      buttons: ['Rinis dhe instalo', 'Më vonë'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (r2 !== 0) { updaterLog('Portable updater: user postponed install'); return; }
+
+    // Shkruaj batch script-in që do të bëjë replace + relaunch pas mbylljes.
+    const batchPath = path.join(app.getPath('temp'), `chamshop-update-${Date.now()}.bat`);
+    // Nëse emri i ri është i njëjtë me atë të vjetër (rast i pamundur meqë kemi
+    // version në emër, por për siguri), mos e fshi.
+    const shouldDeleteOld = path.resolve(currentExePath).toLowerCase() !== path.resolve(newExePath).toLowerCase();
+    const delLine = shouldDeleteOld ? `del /f /q "${currentExePath}"` : 'rem old = new, no delete';
+    const batchContent = [
+      '@echo off',
+      'timeout /t 3 /nobreak >nul',
+      delLine,
+      `start "" "${newExePath}"`,
+      'del "%~f0"',
+      '',
+    ].join('\r\n');
+    fs.writeFileSync(batchPath, batchContent);
+    updaterLog(`Portable updater: wrote batch ${batchPath}`);
+
+    // Spawn detached — batch vazhdon të ekzekutohet edhe pasi Electron të mbyllet.
+    const child = spawn('cmd.exe', ['/c', batchPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+
+    // Vrit server-in që porti 3001 të lirohet para se .exe-ja e re të fillojë.
+    if (serverProcess) {
+      try { serverProcess.kill('SIGKILL'); } catch (_) {}
+      serverProcess = null;
+    }
+    updaterLog('Portable updater: quitting for installer to take over');
+    app.exit(0);
+  } catch (err) {
+    updaterLog(`Portable updater ERROR: ${err?.message || err}`);
+    if (manual) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'error', title: 'Gabim update',
+        message: 'Nuk u kontrollua dot për update.',
+        detail: String(err?.message || err),
+      });
+    }
+  } finally {
+    portableUpdateInProgress = false;
+  }
+}
+
 let manualUpdateCheck = false;
 function setupAutoUpdate() {
   // Mac s'mbështetet nga electron-updater pa Developer ID signing. Përdorim
@@ -460,33 +591,23 @@ function setupAutoUpdate() {
     setInterval(() => checkForUpdateMac(false), 60 * 60 * 1000);
     return;
   }
-  // Portable s'mund të mbivendosë vetveten ndërsa është duke ekzekutuar (s'ka
-  // NSIS uninstaller/installer për të thirrur). Fikim autoDownload që të mos
-  // shkarkojë kot dhe në update-available shfaqim dialog me linkun për download.
+  // Portable — përdor custom flow (checkForUpdatePortable) që shkarkon .exe-në
+  // e re, e zëvendëson me batch script-in, dhe rihap versionin e ri.
+  // electron-updater nuk mbështet natyrisht portable, ndaj për këtë rast e
+  // dezaktivizojmë tërësisht dhe përdorim vetëm updater-in tonë (si te macOS).
   const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR;
-  autoUpdater.autoDownload = !isPortable;
+  if (isPortable) {
+    updaterLog(`Portable mode — përdor custom updater; aktuali: v${app.getVersion()}`);
+    checkForUpdatePortable(false);
+    setInterval(() => checkForUpdatePortable(false), 60 * 60 * 1000);
+    return;
+  }
   autoUpdater.logger = { info: updaterLog, warn: updaterLog, error: updaterLog, debug: () => {} };
-  updaterLog(`mode: ${isPortable ? 'portable (notify-only)' : 'installer (auto-download)'}`);
+  updaterLog('mode: installer (auto-download)');
 
   autoUpdater.on('checking-for-update', () => updaterLog('checking-for-update'));
   autoUpdater.on('update-available', async (info) => {
     updaterLog(`update-available: v${info?.version}`);
-    if (isPortable) {
-      // Portable — s'mund të instalojmë vetvetiu; hap browser-in te faqja e
-      // release-it që user-i të shkarkojë manualisht dhe të zëvendësojë .exe-në.
-      const releaseUrl = `https://github.com/vasilirigels/inventory-app-releases/releases/tag/v${info?.version}`;
-      const { response } = await dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Version i ri i disponueshëm',
-        message: `Version i ri: v${info?.version}`,
-        detail: `Version-i aktual: v${app.getVersion()}\n\nMeqë je te versioni portable (USB), nuk mund të instalohet vetvetiu. Kliko "Shkarko" për të hapur faqen e release-it në browser dhe zëvendëso .exe-në në USB.`,
-        buttons: ['Shkarko', 'Më vonë'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (response === 0) shell.openExternal(releaseUrl);
-      return;
-    }
     // NSIS installed — dialog informues; shkarkimi vazhdon në sfond automatikisht.
     dialog.showMessageBox(mainWindow, {
       type: 'info',
@@ -570,6 +691,8 @@ function buildAppMenu() {
           updaterLog('manual check triggered from menu');
           if (isMac) {
             checkForUpdateMac(true);
+          } else if (process.env.PORTABLE_EXECUTABLE_DIR) {
+            checkForUpdatePortable(true);
           } else {
             manualUpdateCheck = true;
             autoUpdater.checkForUpdates().catch(err => {
