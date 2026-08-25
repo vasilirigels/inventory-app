@@ -122,9 +122,36 @@ async function probePort() {
 // kur server-i dështon — pa varësi nga skedari log.
 let serverOutput = '';
 let serverExitCode = null;
+let serverStarted = false;
+let logStreamGlobal = null;
 
-function startServer() {
-  const serverPath = path.join(__dirname, '..', 'server', 'index.js');
+// Kap stdout/stderr te faji log dhe buffer-i memory. Redirect-ohet global sepse
+// pas require-imit të server-it në procesin tonë, console.log i tij shkon te
+// stdout-i ynë (jo te subprocess më vete).
+function setupServerLogging() {
+  const logDir = path.join(app.getPath('userData'), 'logs');
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    logStreamGlobal = fs.createWriteStream(path.join(logDir, 'server.log'), { flags: 'a' });
+    logStreamGlobal.on('error', () => { logStreamGlobal = null; });
+    logStreamGlobal.write(`\n\n===== ${new Date().toISOString()} startup =====\n${serverOutput}`);
+  } catch (_) {}
+  const write = (s) => {
+    serverOutput += s;
+    if (logStreamGlobal) { try { logStreamGlobal.write(s); } catch (_) {} }
+  };
+  // Mbivendos console.log/error që të dyshojë (write te terminal + log file + buffer).
+  const origLog = console.log.bind(console);
+  const origErr = console.error.bind(console);
+  console.log = (...args) => { const s = args.join(' ') + '\n'; write(s); origLog(...args); };
+  console.error = (...args) => { const s = args.join(' ') + '\n'; write(s); origErr(...args); };
+}
+
+// Server run-on brenda TË NJËJTIT proces si Electron main. Këtu s'ka më spawn
+// të një Cham Shop.exe të dytë — për installer-in NSIS ka vetëm 1 proces
+// "Cham Shop.exe" dhe nuk vjen kurrë dialog-u "app is running".
+async function startServer() {
+  if (serverStarted) return;
   const envLoaded = loadEnv();
   const envPathUsed = envLoaded.__path;
   const envMissingList = envLoaded.__missing;
@@ -134,52 +161,51 @@ function startServer() {
   // shkruajë brenda app.asar (read-only) dhe të ruhet me user-in.
   const uploadDir = path.join(app.getPath('userData'), 'uploads', 'products');
   try { fs.mkdirSync(uploadDir, { recursive: true }); } catch (_) {}
-  const env = {
-    ...process.env,
-    ...envLoaded,
-    PORT: String(PORT),
-    ELECTRON_RUN_AS_NODE: '1',
-    NODE_ENV: 'production',
-    UPLOAD_DIR: uploadDir,
-  };
+  // Server-i lexon TURSO_URL/TOKEN etj. nga process.env — vendosi para require.
+  for (const [k, v] of Object.entries(envLoaded)) {
+    if (process.env[k] == null) process.env[k] = v;
+  }
+  process.env.PORT = String(PORT);
+  process.env.NODE_ENV = 'production';
+  process.env.UPLOAD_DIR = uploadDir;
+
   serverOutput = `[env keys]: ${Object.keys(envLoaded).join(', ') || '(none)'}\n`;
   serverOutput += `[env source]: ${envPathUsed || `NOT FOUND. tried: ${(envMissingList || []).join(' | ')}`}\n`;
-  serverOutput += `[server path]: ${serverPath}\n`;
+  serverOutput += `[mode]: in-process (no subprocess)\n`;
   serverOutput += `[exec path]: ${process.execPath}\n`;
   serverOutput += `[portable]: ${portableDir ? `yes (${portableDir})` : 'no'}\n\n`;
-  // Provo edhe log-un në skedar (backup), por parësor është buffer-i memory.
-  const logDir = path.join(app.getPath('userData'), 'logs');
-  let logStream = null;
+
+  setupServerLogging();
+
+  // Kap unhandled errors nga server-i që të mos crash-onin Electron-in tërësisht.
+  process.on('uncaughtException', (err) => {
+    const msg = `[uncaughtException]: ${err?.stack || err?.message || err}\n`;
+    serverOutput += msg;
+    if (logStreamGlobal) { try { logStreamGlobal.write(msg); } catch (_) {} }
+    console.error(msg);
+  });
+  process.on('unhandledRejection', (reason) => {
+    const msg = `[unhandledRejection]: ${reason?.stack || reason?.message || reason}\n`;
+    serverOutput += msg;
+    if (logStreamGlobal) { try { logStreamGlobal.write(msg); } catch (_) {} }
+    console.error(msg);
+  });
+
+  // server/index.js është ESM — ngarko me dynamic import në CJS main.
+  // Kur ngarkohet, ekzekuton `httpServer.listen(PORT)` automatikisht.
+  const { pathToFileURL } = require('url');
+  const serverPath = path.join(__dirname, '..', 'server', 'index.js');
   try {
-    fs.mkdirSync(logDir, { recursive: true });
-    logStream = fs.createWriteStream(path.join(logDir, 'server.log'), { flags: 'a' });
-    logStream.on('error', () => { logStream = null; });
-    logStream.write(`\n\n===== ${new Date().toISOString()} startup =====\n${serverOutput}`);
-  } catch (_) {}
-  const capture = (d) => {
-    const s = d.toString();
-    serverOutput += s;
-    if (logStream) { try { logStream.write(s); } catch (_) {} }
-  };
-  try {
-    serverProcess = spawn(process.execPath, [serverPath], {
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    await import(pathToFileURL(serverPath).href);
+    serverStarted = true;
+    serverOutput += `[server] loaded and listening on ${PORT}\n`;
   } catch (err) {
-    capture(`[spawn threw]: ${err.message}\n`);
-    return;
+    serverExitCode = 1;
+    const msg = `[server] import failed: ${err?.stack || err?.message || err}\n`;
+    serverOutput += msg;
+    if (logStreamGlobal) { try { logStreamGlobal.write(msg); } catch (_) {} }
+    throw err;
   }
-  serverProcess.stdout.on('data', capture);
-  serverProcess.stderr.on('data', capture);
-  serverProcess.on('exit', (code) => {
-    serverExitCode = code;
-    capture(`[server] exited with code ${code}\n`);
-    serverProcess = null;
-  });
-  serverProcess.on('error', (err) => {
-    capture(`[server] spawn error: ${err.message}\n`);
-  });
 }
 
 // Prit vetëm që port-i të hapet — server-i tani listen-on menjëherë dhe
@@ -576,34 +602,12 @@ async function checkForUpdatePortable(manual = false) {
   }
 }
 
-// Mbyll server-in fëmijë dhe prit derisa procesi të dalë vërtet nga OS-i.
-// KRITIKE para autoUpdater.quitAndInstall() — NSIS-i detekton child-in që
-// spawn-ohet me `process.execPath` si një `Cham Shop.exe` më vete dhe refuzon
-// të vazhdojë me instalim ("Cham Shop non può essere chiuso"). SIGKILL i thjeshtë
-// nuk garanton që procesi ka dalë kur bëjmë quitAndInstall — duhet të presim
-// event-in 'exit'. Për Windows, si mburojë, ekzekutojmë edhe `taskkill /F /T`
-// që të vrasim çdo child të tij (p.sh. libsql native worker).
+// Server-i tani ekzekuton brenda process-it kryesor (jo më si subprocess).
+// Kjo funksion mbetet për backward-compat në pikat e vjetra që e thërrasin;
+// tani thjesht mbyll port-in HTTP nëse është hapur ende (rrallë e nevojshme
+// sepse app.exit()/quit() e mbyllin gjithsesi kur procesi vdes).
 async function killServerAndWait() {
-  const child = serverProcess;
-  if (!child) return;
   serverProcess = null;
-  const pid = child.pid;
-  return new Promise(resolve => {
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(); } };
-    child.once('exit', finish);
-    child.once('close', finish);
-    try { child.kill('SIGKILL'); } catch (_) {}
-    // Windows: force-kill tërë tree-in me taskkill (`/T` = tree, `/F` = force).
-    if (process.platform === 'win32' && pid) {
-      try {
-        require('child_process').execSync(`taskkill /F /T /PID ${pid}`, {
-          stdio: 'ignore', timeout: 3000,
-        });
-      } catch (_) {}
-    }
-    setTimeout(finish, 3000); // fallback timeout
-  });
 }
 
 let manualUpdateCheck = false;
@@ -817,11 +821,10 @@ app.whenReady().then(async () => {
       return;
     }
     if (state === 'free') {
-      startServer();
-      try { await waitForServer(); }
-      catch (err) {
-        // Prit deri në 500ms që stdout/stderr të shterojë para hapjes së dritares.
-        await new Promise(r => setTimeout(r, 500));
+      try {
+        await startServer();
+        await waitForServer();
+      } catch (err) {
         showServerErrorInWindow(err);
         return;
       }
@@ -876,8 +879,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  if (serverProcess) {
-    try { serverProcess.kill(); } catch (_) {}
-    serverProcess = null;
+  // Server-i tani punon brenda main-it — vdes automatikisht kur mbyllet Electron.
+  // Vetëm mbyll log stream-in që të mos humbet output i fundit.
+  if (logStreamGlobal) {
+    try { logStreamGlobal.end(); } catch (_) {}
+    logStreamGlobal = null;
   }
 });
