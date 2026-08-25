@@ -418,11 +418,8 @@ async function checkForUpdateMac(manual = false) {
       // KRITIKE: app.exit(0) nuk fajron before-quit → server subprocess mbetet
       // gjallë, mban portin 3001, dhe pas relaunch-it Electron-i i ri
       // hyn te SERVERI I VJETËR që serve-on JS bundle-in e vjetër. Vrisim
-      // server-in explicitisht që porti të lirohet.
-      if (serverProcess) {
-        try { serverProcess.kill('SIGKILL'); } catch (_) {}
-        serverProcess = null;
-      }
+      // server-in dhe presim që të dalë vërtet.
+      await killServerAndWait();
       app.relaunch();
       app.exit(0);
     } catch (installErr) {
@@ -559,12 +556,11 @@ async function checkForUpdatePortable(manual = false) {
     });
     child.unref();
 
-    // Vrit server-in që porti 3001 të lirohet para se .exe-ja e re të fillojë.
-    if (serverProcess) {
-      try { serverProcess.kill('SIGKILL'); } catch (_) {}
-      serverProcess = null;
-    }
-    updaterLog('Portable updater: quitting for installer to take over');
+    // Vrit server-in dhe prit që të dalë vërtet — nëse mbetet gjallë, batch-i
+    // do të dështojë të fshijë .exe-në e vjetër (Windows locking).
+    updaterLog('Portable updater: killing server subprocess before quit');
+    await killServerAndWait();
+    updaterLog('Portable updater: server dead, exiting');
     app.exit(0);
   } catch (err) {
     updaterLog(`Portable updater ERROR: ${err?.message || err}`);
@@ -578,6 +574,36 @@ async function checkForUpdatePortable(manual = false) {
   } finally {
     portableUpdateInProgress = false;
   }
+}
+
+// Mbyll server-in fëmijë dhe prit derisa procesi të dalë vërtet nga OS-i.
+// KRITIKE para autoUpdater.quitAndInstall() — NSIS-i detekton child-in që
+// spawn-ohet me `process.execPath` si një `Cham Shop.exe` më vete dhe refuzon
+// të vazhdojë me instalim ("Cham Shop non può essere chiuso"). SIGKILL i thjeshtë
+// nuk garanton që procesi ka dalë kur bëjmë quitAndInstall — duhet të presim
+// event-in 'exit'. Për Windows, si mburojë, ekzekutojmë edhe `taskkill /F /T`
+// që të vrasim çdo child të tij (p.sh. libsql native worker).
+async function killServerAndWait() {
+  const child = serverProcess;
+  if (!child) return;
+  serverProcess = null;
+  const pid = child.pid;
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    child.once('exit', finish);
+    child.once('close', finish);
+    try { child.kill('SIGKILL'); } catch (_) {}
+    // Windows: force-kill tërë tree-in me taskkill (`/T` = tree, `/F` = force).
+    if (process.platform === 'win32' && pid) {
+      try {
+        require('child_process').execSync(`taskkill /F /T /PID ${pid}`, {
+          stdio: 'ignore', timeout: 3000,
+        });
+      } catch (_) {}
+    }
+    setTimeout(finish, 3000); // fallback timeout
+  });
 }
 
 let manualUpdateCheck = false;
@@ -642,13 +668,12 @@ function setupAutoUpdate() {
       cancelId: 1,
     });
     if (response === 0) {
-      // Vrit serverin eksplicitisht para quitAndInstall — before-quit
-      // duhet ta bënte, por për të qenë 100% i sigurt që porti 3001 lirohet
-      // para se NSIS installer-i të nisë procesin e ri.
-      if (serverProcess) {
-        try { serverProcess.kill('SIGKILL'); } catch (_) {}
-        serverProcess = null;
-      }
+      // Vrit serverin dhe prit që të dalë vërtet nga OS-i para quitAndInstall.
+      // NSIS-i detekton child-in `Cham Shop.exe` (server) si proces më vete dhe
+      // refuzon të vazhdojë me instalim nëse gjen ndonjë të tillë.
+      updaterLog('installer: killing server subprocess before quitAndInstall');
+      await killServerAndWait();
+      updaterLog('installer: server dead, calling quitAndInstall');
       autoUpdater.quitAndInstall();
     }
   });
