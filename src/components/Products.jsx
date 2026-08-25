@@ -97,6 +97,10 @@ const EMPTY = {
   serial_no: '', purchase_price_no_vat: '',
   // Blerje në gram HAS (peshë floriri të pastër) + kursi EUR/gram HAS te blerja
   has_gram: '', has_currency: 'HAS', has_rate: '',
+  // Fusha flori: kodi (585/750...), shumëzuesi për çmim shitjeje, dhe kursi
+  // i shitjes. Kur mbushen (bashkë me gram), has_gram, cost_price, sell_price
+  // llogariten auto sipas formulës flori te Fatura Blerje.
+  kodi: '', multiplier: '', sell_rate: '',
 }
 
 const VAT_OPTIONS = [0, 6, 10, 20]
@@ -679,6 +683,361 @@ function ImportModal({ onClose, onDone }) {
   )
 }
 
+// ── Inline "new product" row ──────────────────────────────────────────────
+// Shfaqet në krye të tabelës kur user-i shtyp "+ Shto Produkt". Formula flori
+// aplikohet auto; user-i ruan me butonin ✓ ose anulon me ✕.
+function NewProductRow({ rowData, onChange, onSave, onCancel }) {
+  const set = (k, v) => onChange({ [k]: v })
+
+  // Formula flori
+  useEffect(() => {
+    const g   = parseFloat(rowData.gram) || 0
+    const k   = parseFloat(rowData.kodi) || 0
+    const hr  = parseFloat(rowData.has_rate) || 0
+    const mul = parseFloat(rowData.multiplier) || 0
+    const sr  = parseFloat(rowData.sell_rate) || 0
+    if (k <= 0 || g <= 0 || hr <= 0) return
+    const effSell = sr > 0 ? sr : hr
+    const newHas  = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
+    const newCost = +(newHas * hr).toFixed(2)
+    const newSell = mul > 0 ? +(newHas * mul * effSell).toFixed(2) : null
+    const patch = {}
+    if (String(newHas)  !== String(parseFloat(rowData.has_gram)   || 0)) patch.has_gram   = String(newHas)
+    if (String(newCost) !== String(parseFloat(rowData.cost_price) || 0)) patch.cost_price = String(newCost)
+    if (newSell != null && String(newSell) !== String(parseFloat(rowData.sell_price) || 0)) patch.sell_price = String(newSell)
+    if (Object.keys(patch).length) onChange(patch)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowData.gram, rowData.kodi, rowData.has_rate, rowData.multiplier, rowData.sell_rate])
+
+  return (
+    <tr className="border-b border-slate-200 dark:border-slate-700 bg-blue-50/40 dark:bg-blue-900/10">
+      <td className="px-2 py-1 font-mono text-xs text-blue-600 dark:text-blue-300 whitespace-nowrap font-bold">
+        i ri
+      </td>
+      <td className="px-1 py-1">
+        <input type="text" value={rowData.barcode}
+          onChange={e => set('barcode', e.target.value)}
+          className="input-field-sm font-mono text-xs" placeholder="—" />
+      </td>
+      <td className="px-1 py-1">
+        <div className="flex items-center gap-1">
+          <span className="text-base">{CAT_ICONS[rowData.category] || '📦'}</span>
+          <input type="text" value={rowData.name} autoFocus
+            onChange={e => set('name', e.target.value)}
+            className="input-field-sm flex-1" placeholder="Emri i produktit *" />
+        </div>
+      </td>
+      <td className="px-1 py-1">
+        <select value={rowData.category}
+          onChange={e => set('category', e.target.value)}
+          className="input-field-sm text-xs">
+          {CATEGORIES.map(c => <option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}
+        </select>
+      </td>
+      <td className="px-1 py-1">
+        <input type="number" min="0" value={rowData.stock}
+          onChange={e => set('stock', e.target.value)}
+          className="input-field-sm text-center" placeholder="0" />
+      </td>
+      <td className="px-1 py-1">
+        <input type="number" step="0.001" min="0" value={rowData.gram}
+          onChange={e => set('gram', e.target.value)}
+          className="input-field-sm text-right" placeholder="0.000" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <input type="number" step="1" min="0" value={rowData.kodi}
+          onChange={e => set('kodi', e.target.value)}
+          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+          placeholder="585" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <input type="number" step="0.001" min="0" value={rowData.has_gram}
+          onChange={e => set('has_gram', e.target.value)}
+          disabled={parseFloat(rowData.kodi) > 0}
+          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${parseFloat(rowData.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          placeholder="0.000" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <input type="text" value={rowData.has_currency}
+          onChange={e => set('has_currency', e.target.value)}
+          className="input-field-sm text-center text-xs font-mono font-semibold text-amber-700 dark:text-amber-300"
+          placeholder="HAS" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <MoneyInput value={rowData.has_rate}
+          onChange={v => set('has_rate', String(v))}
+          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+          placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+        <input type="number" step="0.01" min="0" value={rowData.multiplier}
+          onChange={e => set('multiplier', e.target.value)}
+          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+          placeholder="1.8" />
+      </td>
+      <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+        <MoneyInput value={rowData.sell_rate}
+          onChange={v => set('sell_rate', String(v))}
+          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+          placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={rowData.purchase_price_no_vat}
+          onChange={v => set('purchase_price_no_vat', String(v))}
+          className="input-field-sm text-right" placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1">
+        <input type="number" step="0.01" min="0" max="100" value={rowData.vat_rate}
+          onChange={e => set('vat_rate', e.target.value)}
+          className="input-field-sm text-center" />
+      </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={rowData.cost_price}
+          onChange={v => set('cost_price', String(v))}
+          disabled={parseFloat(rowData.kodi) > 0}
+          className={`input-field-sm text-right font-semibold ${parseFloat(rowData.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={rowData.sell_price}
+          onChange={v => set('sell_price', String(v))}
+          disabled={parseFloat(rowData.kodi) > 0 && parseFloat(rowData.multiplier) > 0}
+          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(rowData.kodi) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          placeholder="0.00" />
+      </td>
+      <td className="px-2 py-1">
+        <div className="flex items-center justify-center gap-1">
+          <button onClick={onSave} title="Ruaj"
+            className="px-2 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs font-bold">✓</button>
+          <button onClick={onCancel} title="Anulo"
+            className="px-2 py-0.5 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold">✕</button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+// ── Inline-editable list row ──────────────────────────────────────────────
+// Çdo qelizë e rreshtit të produktit është input i editueshëm — si te
+// Fatura Blerje. Ndryshimet ruhen me debounce (500ms) me PUT /api/products/:id.
+// Formula flori aplikohet auto kur ndryshojnë kodi/gram/has_rate/multiplier/sell_rate.
+function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultiplierApply }) {
+  const initForm = () => ({
+    barcode:               p.barcode || '',
+    name:                  p.name || '',
+    brand:                 p.brand || '',
+    category:              p.category || 'Tjeter',
+    stock:                 p.stock != null ? String(p.stock) : '',
+    gram:                  p.gram != null ? String(p.gram) : '',
+    kodi:                  p.kodi != null && parseFloat(p.kodi) > 0 ? String(p.kodi) : '',
+    has_gram:              p.has_gram != null ? String(p.has_gram) : '',
+    has_currency:          p.has_currency || 'HAS',
+    has_rate:              p.has_rate != null && parseFloat(p.has_rate) > 0 ? String(p.has_rate) : '',
+    multiplier:            p.multiplier != null && parseFloat(p.multiplier) > 0 ? String(p.multiplier) : '',
+    sell_rate:             p.sell_rate != null && parseFloat(p.sell_rate) > 0 ? String(p.sell_rate) : '',
+    purchase_price_no_vat: p.purchase_price_no_vat != null ? String(p.purchase_price_no_vat) : '',
+    vat_rate:              p.vat_rate != null ? String(p.vat_rate) : '0',
+    cost_price:            p.cost_price != null ? String(p.cost_price) : '',
+    sell_price:            p.sell_price != null ? String(p.sell_price) : '',
+  })
+  const [form, setForm] = useState(initForm)
+  const [saving, setSaving] = useState(false)
+  const initialMount = useRef(true)
+  const savedSnapshot = useRef(JSON.stringify(initForm()))
+
+  // Rifresko formin kur produkti ndryshon nga jashtë (reload, realtime sync),
+  // vetëm nëse s'kemi ndryshime lokale të pa-ruajtura.
+  useEffect(() => {
+    const fresh = initForm()
+    const freshStr = JSON.stringify(fresh)
+    if (freshStr !== savedSnapshot.current) {
+      setForm(fresh)
+      savedSnapshot.current = freshStr
+      initialMount.current = true // ndalo save-in e ardhshëm auto
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.id, p.updated_at, p.barcode, p.name, p.stock, p.cost_price, p.sell_price,
+      p.gram, p.has_gram, p.has_rate, p.kodi, p.multiplier, p.sell_rate])
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  // Formula flori — llogarit auto has_gram, cost_price, sell_price
+  useEffect(() => {
+    const g   = parseFloat(form.gram) || 0
+    const k   = parseFloat(form.kodi) || 0
+    const hr  = parseFloat(form.has_rate) || 0
+    const mul = parseFloat(form.multiplier) || 0
+    const sr  = parseFloat(form.sell_rate) || 0
+    if (k <= 0 || g <= 0 || hr <= 0) return
+    const effSell = sr > 0 ? sr : hr
+    const newHas  = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
+    const newCost = +(newHas * hr).toFixed(2)
+    const newSell = mul > 0 ? +(newHas * mul * effSell).toFixed(2) : null
+    setForm(prev => {
+      const patch = {}
+      if (String(newHas)  !== String(parseFloat(prev.has_gram)   || 0)) patch.has_gram   = String(newHas)
+      if (String(newCost) !== String(parseFloat(prev.cost_price) || 0)) patch.cost_price = String(newCost)
+      if (newSell != null && String(newSell) !== String(parseFloat(prev.sell_price) || 0)) patch.sell_price = String(newSell)
+      return Object.keys(patch).length ? { ...prev, ...patch } : prev
+    })
+  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate])
+
+  // Debounced auto-save — 600ms pas ndalimit të shkrimit.
+  useEffect(() => {
+    if (initialMount.current) { initialMount.current = false; return }
+    const t = setTimeout(async () => {
+      if (saving) return
+      const payload = {
+        ...p,
+        barcode:               form.barcode,
+        name:                  form.name,
+        brand:                 form.brand,
+        category:              form.category,
+        stock:                 parseInt(form.stock) || 0,
+        gram:                  parseFloat(form.gram) || 0,
+        kodi:                  parseFloat(form.kodi) || 0,
+        has_gram:              parseFloat(form.has_gram) || 0,
+        has_currency:          form.has_currency || 'HAS',
+        has_rate:              parseFloat(form.has_rate) || 0,
+        multiplier:            parseFloat(form.multiplier) || 0,
+        sell_rate:             parseFloat(form.sell_rate) || 0,
+        purchase_price_no_vat: parseFloat(form.purchase_price_no_vat) || 0,
+        vat_rate:              parseFloat(form.vat_rate) || 0,
+        cost_price:            parseFloat(form.cost_price) || 0,
+        sell_price:            parseFloat(form.sell_price) || 0,
+      }
+      setSaving(true)
+      try {
+        const res = await fetch(`/api/products/${p.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (res.ok) {
+          savedSnapshot.current = JSON.stringify(form)
+          onSaved?.()
+        }
+      } catch (e) { console.error(e) }
+      finally { setSaving(false) }
+    }, 600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form])
+
+  return (
+    <tr className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+      <td className="px-2 py-1 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+        {productNo(p.id)}
+        {saving && <span className="ml-1 text-[10px] text-blue-500" title="Duke ruajtur...">⏳</span>}
+      </td>
+      <td className="px-1 py-1">
+        <input type="text" value={form.barcode}
+          onChange={e => set('barcode', e.target.value)}
+          className="input-field-sm font-mono text-xs" placeholder="—" />
+      </td>
+      <td className="px-1 py-1">
+        <div className="flex items-center gap-1">
+          <span className="text-base">{CAT_ICONS[form.category] || '📦'}</span>
+          <input type="text" value={form.name}
+            onChange={e => set('name', e.target.value)}
+            className="input-field-sm flex-1" placeholder="Emri i produktit" />
+        </div>
+      </td>
+      <td className="px-1 py-1">
+        <select value={form.category}
+          onChange={e => set('category', e.target.value)}
+          className="input-field-sm text-xs">
+          {CATEGORIES.map(c => <option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}
+        </select>
+      </td>
+      <td className="px-1 py-1">
+        <input type="number" min="0" value={form.stock}
+          onChange={e => set('stock', e.target.value)}
+          className="input-field-sm text-center" />
+      </td>
+      <td className="px-1 py-1">
+        <input type="number" step="0.001" min="0" value={form.gram}
+          onChange={e => set('gram', e.target.value)}
+          className="input-field-sm text-right" placeholder="0.000" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <input type="number" step="1" min="0" value={form.kodi}
+          onChange={e => set('kodi', e.target.value)}
+          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+          placeholder="585" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <input type="number" step="0.001" min="0" value={form.has_gram}
+          onChange={e => set('has_gram', e.target.value)}
+          disabled={parseFloat(form.kodi) > 0}
+          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${parseFloat(form.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          title={parseFloat(form.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined}
+          placeholder="0.000" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <input type="text" value={form.has_currency}
+          onChange={e => set('has_currency', e.target.value)}
+          className="input-field-sm text-center text-xs font-mono font-semibold text-amber-700 dark:text-amber-300"
+          placeholder="HAS" />
+      </td>
+      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+        <MoneyInput value={form.has_rate}
+          onChange={v => set('has_rate', String(v))}
+          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+          placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+        <input type="number" step="0.01" min="0" value={form.multiplier}
+          onChange={e => set('multiplier', e.target.value)}
+          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+          placeholder="1.8" />
+      </td>
+      <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+        <MoneyInput value={form.sell_rate}
+          onChange={v => set('sell_rate', String(v))}
+          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+          placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={form.purchase_price_no_vat}
+          onChange={v => set('purchase_price_no_vat', String(v))}
+          className="input-field-sm text-right" placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1">
+        <input type="number" step="0.01" min="0" max="100" value={form.vat_rate}
+          onChange={e => set('vat_rate', e.target.value)}
+          className="input-field-sm text-center" />
+      </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={form.cost_price}
+          onChange={v => set('cost_price', String(v))}
+          disabled={parseFloat(form.kodi) > 0}
+          className={`input-field-sm text-right font-semibold ${parseFloat(form.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          title={parseFloat(form.kodi) > 0 ? 'Auto: has_gram × Kursi Blerje' : undefined}
+          placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={form.sell_price}
+          onChange={v => set('sell_price', String(v))}
+          disabled={parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0}
+          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          title={parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: has_gram × Shumëzues × Kursi Shitje' : undefined}
+          placeholder="0.00" />
+      </td>
+      <td className="px-2 py-1">
+        <div className="flex items-center justify-center gap-1">
+          <button onClick={() => onBarcode(p)} title="Gjenero & Printo Barkod"
+            className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs">🏷️</button>
+          <button onClick={() => onEdit(p)} title="Hap modal-in e plotë"
+            className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs">✎</button>
+          <button onClick={() => onDelete(p)} title="Fshi"
+            className="px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs">✕</button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 // ── Add / Edit Modal ───────────────────────────────────────────────────────────
 function ProductModal({ product, onClose, onSave }) {
   const [form, setForm] = useState(() =>
@@ -701,6 +1060,9 @@ function ProductModal({ product, onClose, onSave }) {
           has_gram:     product.has_gram != null ? String(product.has_gram) : '',
           has_currency: product.has_currency || 'HAS',
           has_rate:     product.has_rate != null ? String(product.has_rate) : '',
+          kodi:         product.kodi != null && parseFloat(product.kodi) > 0 ? String(product.kodi) : '',
+          multiplier:   product.multiplier != null && parseFloat(product.multiplier) > 0 ? String(product.multiplier) : '',
+          sell_rate:    product.sell_rate != null && parseFloat(product.sell_rate) > 0 ? String(product.sell_rate) : '',
           is_promotion: !!product.is_promotion,
           promo_discount_pct: product.promo_discount_pct != null
             ? String(product.promo_discount_pct)
@@ -709,6 +1071,30 @@ function ProductModal({ product, onClose, onSave }) {
       : { ...EMPTY, is_promotion: false, promo_discount_pct: '' }
   )
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  // Formula flori — kur kodi, gram dhe has_rate janë > 0, llogarit auto:
+  //   has_gram   = (kodi/1000 + has_rate/1000) × gram
+  //   cost_price = has_gram × has_rate
+  //   sell_price = has_gram × multiplier × sell_rate    (sell_rate ose has_rate si fallback)
+  useEffect(() => {
+    const g   = parseFloat(form.gram) || 0
+    const k   = parseFloat(form.kodi) || 0
+    const hr  = parseFloat(form.has_rate) || 0
+    const mul = parseFloat(form.multiplier) || 0
+    const sr  = parseFloat(form.sell_rate) || 0
+    if (k <= 0 || g <= 0 || hr <= 0) return
+    const effSell = sr > 0 ? sr : hr
+    const newHas  = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
+    const newCost = +(newHas * hr).toFixed(2)
+    const newSell = mul > 0 ? +(newHas * mul * effSell).toFixed(2) : null
+    setForm(prev => {
+      const patch = {}
+      if (String(newHas)  !== String(parseFloat(prev.has_gram)   || 0)) patch.has_gram   = String(newHas)
+      if (String(newCost) !== String(parseFloat(prev.cost_price) || 0)) patch.cost_price = String(newCost)
+      if (newSell != null && String(newSell) !== String(parseFloat(prev.sell_price) || 0)) patch.sell_price = String(newSell)
+      return Object.keys(patch).length ? { ...prev, ...patch } : prev
+    })
+  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate])
 
   const margin =
     parseFloat(form.cost_price) > 0 && parseFloat(form.sell_price) > 0
@@ -732,6 +1118,9 @@ function ProductModal({ product, onClose, onSave }) {
       has_gram:     parseFloat(form.has_gram) || 0,
       has_currency: form.has_currency || 'HAS',
       has_rate:     parseFloat(form.has_rate) || 0,
+      kodi:         parseFloat(form.kodi) || 0,
+      multiplier:   parseFloat(form.multiplier) || 0,
+      sell_rate:    parseFloat(form.sell_rate) || 0,
       is_promotion: form.is_promotion ? 1 : 0,
       promo_discount_pct: form.is_promotion
         ? Math.max(0, Math.min(100, parseFloat(form.promo_discount_pct) || 0))
@@ -843,10 +1232,20 @@ function ProductModal({ product, onClose, onSave }) {
                   🟡 Blerje në gram HAS
                 </div>
                 <div>
+                  <label className="form-label">Kodi (585/750...)</label>
+                  <input type="number" step="1" min="0" value={form.kodi}
+                    onChange={e => set('kodi', e.target.value)}
+                    className="input-field font-semibold text-amber-800 dark:text-amber-200"
+                    placeholder="585" />
+                </div>
+                <div>
                   <label className="form-label">Blerje Ne Monedhe</label>
                   <input type="number" step="0.001" min="0" value={form.has_gram}
+                    disabled={parseFloat(form.kodi) > 0}
                     onChange={e => set('has_gram', e.target.value)}
-                    className="input-field" placeholder="0.000" />
+                    className={`input-field ${parseFloat(form.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
+                    placeholder="0.000"
+                    title={parseFloat(form.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
                 </div>
                 <div>
                   <label className="form-label">Monedha</label>
@@ -855,13 +1254,28 @@ function ProductModal({ product, onClose, onSave }) {
                     className="input-field font-mono" placeholder="HAS" />
                 </div>
                 <div>
-                  <label className="form-label">Kursi (EUR/g)</label>
+                  <label className="form-label">Kursi Blerje (EUR/g)</label>
                   <MoneyInput value={form.has_rate}
                     onChange={v => set('has_rate', String(v))}
-                    className="input-field tabular-nums" placeholder="0.00" />
+                    className="input-field tabular-nums font-semibold text-amber-800 dark:text-amber-200"
+                    placeholder="0.00" />
+                </div>
+                <div>
+                  <label className="form-label">Shumëzues Shitjeje</label>
+                  <input type="number" step="0.01" min="0" value={form.multiplier}
+                    onChange={e => set('multiplier', e.target.value)}
+                    className="input-field font-semibold text-emerald-800 dark:text-emerald-200"
+                    placeholder="1.8" />
+                </div>
+                <div>
+                  <label className="form-label">Kursi Shitje (EUR/g)</label>
+                  <MoneyInput value={form.sell_rate}
+                    onChange={v => set('sell_rate', String(v))}
+                    className="input-field tabular-nums font-semibold text-emerald-800 dark:text-emerald-200"
+                    placeholder="0.00" />
                 </div>
                 <p className="col-span-3 text-[10px] text-amber-700 dark:text-amber-300">
-                  Mbushet automatikisht nga fatura e blerjes; këtu mund ta korrigjosh manualisht.
+                  Kur mbushet Kodi + Gram + Kursi Blerje, llogariten auto: <strong>Cmim Kosto</strong> = has_gram × Kursi Blerje. Kur mbushet edhe Shumëzuesi + Kursi Shitje: <strong>Cmim Shitje</strong> = has_gram × Shumëzues × Kursi Shitje.
                 </p>
               </div>
               <div className="col-span-2">
@@ -973,6 +1387,51 @@ export default function Products() {
   const [toDate, setToDate]         = useState('')
   const [bulkApplying, setBulkApplying] = useState(false)
   const [bulkMultiplier, setBulkMultiplier] = useState('')
+  // Rreshtat e rinj për shtim inline — si te Fatura Blerje "+ Shto Artikull"
+  const [newRows, setNewRows] = useState([])
+  const newRowKey = useRef(0)
+
+  const addNewRow = () => {
+    newRowKey.current += 1
+    setNewRows(prev => [{ __key: newRowKey.current, ...EMPTY, is_promotion: false, promo_discount_pct: '' }, ...prev])
+  }
+  const updateNewRow = (idx, patch) => {
+    setNewRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
+  }
+  const removeNewRow = (idx) => {
+    setNewRows(prev => prev.filter((_, i) => i !== idx))
+  }
+  const saveNewRow = async (idx) => {
+    const r = newRows[idx]
+    if (!r || !r.name?.trim()) { alert('Vendos emrin e produktit.'); return }
+    try {
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...r,
+          cost_price: parseFloat(r.cost_price) || 0,
+          sell_price: parseFloat(r.sell_price) || 0,
+          stock:      parseInt(r.stock)         || 0,
+          min_stock:  parseInt(r.min_stock)     || 5,
+          vat_rate:   r.vat_rate === '' || r.vat_rate == null ? 0 : parseFloat(r.vat_rate),
+          gram:       parseFloat(r.gram) || 0,
+          purchase_price_no_vat: parseFloat(r.purchase_price_no_vat) || 0,
+          has_gram:     parseFloat(r.has_gram) || 0,
+          has_currency: r.has_currency || 'HAS',
+          has_rate:     parseFloat(r.has_rate) || 0,
+          kodi:         parseFloat(r.kodi) || 0,
+          multiplier:   parseFloat(r.multiplier) || 0,
+          sell_rate:    parseFloat(r.sell_rate) || 0,
+          is_promotion: 0,
+          promo_discount_pct: 0,
+        }),
+      })
+      if (!res.ok) throw new Error('Gabim në ruajtje')
+      removeNewRow(idx)
+      await load()
+    } catch (e) { alert(e.message || 'Gabim') }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -1223,7 +1682,7 @@ export default function Products() {
         <button onClick={() => setShowImport(true)} className="btn-secondary flex-shrink-0">
           📂 Import
         </button>
-        <button onClick={() => setModal('add')} className="btn-primary flex-shrink-0">
+        <button onClick={addNewRow} className="btn-primary flex-shrink-0">
           + Shto Produkt
         </button>
       </div>
@@ -1312,7 +1771,7 @@ export default function Products() {
       )}
 
       {/* ── Empty states ── */}
-      {filtered.length === 0 && (
+      {filtered.length === 0 && newRows.length === 0 && (
         <div className="card text-center py-16">
           {products.length === 0 ? (
             <>
@@ -1321,7 +1780,7 @@ export default function Products() {
               <p className="text-slate-400 dark:text-slate-500 mb-6 text-sm">Shtoni artikuj manualisht ose importoni nga Excel</p>
               <div className="flex gap-3 justify-center">
                 <button onClick={() => setShowImport(true)} className="btn-secondary">📂 Import Excel</button>
-                <button onClick={() => setModal('add')} className="btn-primary">+ Shto Manualisht</button>
+                <button onClick={() => { setView('list'); addNewRow() }} className="btn-primary">+ Shto Manualisht</button>
               </div>
             </>
           ) : (
@@ -1400,7 +1859,7 @@ export default function Products() {
       )}
 
       {/* ── LIST view ── */}
-      {filtered.length > 0 && view === 'list' && (
+      {(filtered.length > 0 || newRows.length > 0) && view === 'list' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1500px]">
@@ -1412,9 +1871,12 @@ export default function Products() {
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Kodi i floririt (585, 750, ...)">Kodi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Mon</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="EUR / gram HAS në kohën e blerjes">Kursi</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="EUR / gram HAS në kohën e blerjes">Kursi Blerje</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Shumëzuesi për çmim shitjeje">Shumëzues</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="EUR / gram HAS për çmim shitjeje">Kursi Shitje</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmimi PA</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
@@ -1423,77 +1885,27 @@ export default function Products() {
               </tr>
             </thead>
             <tbody>
+              {/* Rreshtat e rinj për shtim inline — si te Fatura Blerje */}
+              {newRows.map((nr, idx) => (
+                <NewProductRow key={`new-${nr.__key}`} rowData={nr}
+                  onChange={patch => updateNewRow(idx, patch)}
+                  onSave={() => saveNewRow(idx)}
+                  onCancel={() => removeNewRow(idx)}
+                />
+              ))}
               {filtered.map(p => (
-                <tr key={p.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{productNo(p.id)}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{p.barcode || <span className="text-slate-300">—</span>}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{CAT_ICONS[p.category] || '📦'}</span>
-                      <div>
-                        <p className="font-medium text-slate-800 dark:text-slate-100">{p.name}</p>
-                        {p.brand && <p className="text-[11px] text-slate-500 dark:text-slate-400">{p.brand}</p>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`badge text-xs ${CAT_COLORS[p.category] || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>{p.category}</span>
-                  </td>
-                  <td className="px-3 py-2 text-center"><StockBadge stock={p.stock} minStock={p.min_stock} /></td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
-                    {p.gram > 0 ? `${Number(p.gram).toLocaleString('sq-AL', { maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-700 dark:text-amber-300 bg-amber-50/40 dark:bg-amber-900/10">
-                    {p.has_gram > 0 ? Number(p.has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2 text-center text-[11px] font-mono font-semibold text-amber-700 dark:text-amber-300 bg-amber-50/40 dark:bg-amber-900/10">
-                    {p.has_gram > 0 ? (p.has_currency || 'HAS') : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-amber-800 dark:text-amber-200 bg-amber-50/40 dark:bg-amber-900/10">
-                    {p.has_rate > 0 ? Number(p.has_rate).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{p.purchase_price_no_vat ? `€${Number(p.purchase_price_no_vat).toLocaleString()}` : '—'}</td>
-                  <td className="px-3 py-2 text-center text-xs text-slate-600 dark:text-slate-300">{p.vat_rate != null ? `${p.vat_rate}%` : '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{p.cost_price ? `€${Number(p.cost_price).toLocaleString()}` : '—'}</td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <span className="font-bold text-slate-900 dark:text-white tabular-nums">
-                        {p.sell_price ? `€${Number(p.sell_price).toLocaleString()}` : '—'}
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        defaultValue=""
-                        disabled={!p.cost_price}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
-                            const m = parseFloat(String(e.currentTarget.value).replace(',', '.'))
-                            if (m > 0) applyMultiplier(p, m)
-                          }
-                        }}
-                        onBlur={e => {
-                          const m = parseFloat(String(e.currentTarget.value).replace(',', '.'))
-                          if (m > 0) applyMultiplier(p, m)
-                        }}
-                        title={p.cost_price ? 'Shkruaj shumëzuesin (p.sh. 2.5) dhe shtyp Enter → Çm. Shitje = Kosto × shumëzues' : 'Vendos fillimisht koston'}
-                        placeholder="× p.sh. 2.5"
-                        className="w-24 text-xs text-center bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded px-2 py-1 text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-50 hover:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed"
-                      />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => setBarcodeFor(p)} title="Gjenero & Printo Barkod"
-                        className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium">🏷️</button>
-                      <button onClick={() => setModal(p)} className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Ndrysho</button>
-                      <button onClick={() => setConfirmDel(p)} className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
-                    </div>
-                  </td>
-                </tr>
+                <EditableProductRow key={p.id} p={p}
+                  onSaved={load}
+                  onEdit={() => setModal(p)}
+                  onDelete={() => setConfirmDel(p)}
+                  onBarcode={() => setBarcodeFor(p)}
+                />
               ))}
             </tbody>
           </table>
+          </div>
+          <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+            <button onClick={addNewRow} className="btn-secondary text-xs">+ Shto Produkt</button>
           </div>
         </div>
       )}

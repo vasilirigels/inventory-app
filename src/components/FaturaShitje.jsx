@@ -45,6 +45,9 @@ function emptyItem() {
     qty: 1, gram: 0, unit_price_no_vat: 0, discount_percent: 0,
     vat_rate: 0,
     on_promotion: 0, promo_discount_pct: 0,
+    // Kursi i Shitjes per rresht — kur ndryshohet, `unit_price_no_vat` rillogaritet
+    // proporcionalisht (unit_price × new/old). Default = 0 (pa efekt).
+    sell_rate: 0,
   }
 }
 
@@ -1481,6 +1484,10 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
       vat_rate: p.vat_rate != null ? p.vat_rate : 0,
       on_promotion: onPromo ? 1 : 0,
       promo_discount_pct: onPromo ? n(p.promo_discount_pct) : 0,
+      // Kursi i Shitjes fillestar — merret nga produkti (ruhet me blerjen e
+      // fundit). User-i mund ta ndryshojë manualisht dhe unit_price rillogaritet
+      // proporcionalisht (changeItemSellRate).
+      sell_rate: n(p.sell_rate) > 0 ? n(p.sell_rate) : (n(p.has_rate) > 0 ? n(p.has_rate) : 0),
     })
   }
 
@@ -1535,6 +1542,27 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
     setExchangeRate(newRate)
     const r = String(newRate)
     setPaymentSplits(prev => prev.map(s => s.currency === currency ? { ...s, exchange_rate: r } : s))
+  }
+
+  // Kursi i Shitjes per rresht — kur ndryshohet, rillogarit `unit_price_no_vat`
+  // proporcionalisht (i ri / i vjetër). Nëse kursi i vjetër është 0 (rreshti
+  // sapo krijuar), thjesht ruaj vlerën pa prekur çmimin — user-i do të vendosë
+  // çmimin bazë manualisht ose duke zgjedhur produktin.
+  const changeItemSellRate = (idx, newRate) => {
+    setItems(prev => prev.map((it, i) => {
+      if (i !== idx) return it
+      const oldR = n(it.sell_rate)
+      const newR = parseFloat(newRate) || 0
+      if (oldR > 0 && newR > 0 && Math.abs(newR - oldR) > 1e-9) {
+        const factor = newR / oldR
+        return {
+          ...it,
+          sell_rate: newRate,
+          unit_price_no_vat: +(n(it.unit_price_no_vat) * factor).toFixed(2),
+        }
+      }
+      return { ...it, sell_rate: newRate }
+    }))
   }
 
   // Deduho metodën e pagesës nga splits për ruajtjen dhe për badge-t në listë:
@@ -1860,6 +1888,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Sasia</th>
                 <th className="px-2 py-2 text-right font-semibold w-20">Gramatura</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes për këtë rresht — kur ndryshohet, çmimi rillogaritet proporcionalisht (unit_price × i ri / i vjetër)">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Zbritje €</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Zbritje %</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
@@ -1877,7 +1906,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
-                      {it.on_promotion && (
+                      {!!it.on_promotion && (
                         <div className="mt-0.5">
                           <span className="badge bg-rose-100 text-rose-700 text-[9px] font-bold">
                             🏷️ PROMO {n(it.promo_discount_pct) > 0 ? `-${n(it.promo_discount_pct)}%` : ''}
@@ -1904,6 +1933,14 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         type="number" step="0.001" min="0" value={it.gram}
                         onChange={e => setItem(idx, { gram: e.target.value })}
                         className="input-field-sm text-right"
+                      />
+                    </td>
+                    <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+                      <MoneyInput
+                        value={it.sell_rate}
+                        onChange={v => changeItemSellRate(idx, v)}
+                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                        placeholder="0.00"
                       />
                     </td>
                     <td className="px-1 py-1">
@@ -1942,7 +1979,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={8} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
+                <td colSpan={9} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
               </tr>

@@ -705,6 +705,21 @@ const MIGRATIONS = [
   "ALTER TABLE products ADD COLUMN has_gram REAL DEFAULT 0",
   "ALTER TABLE products ADD COLUMN has_currency TEXT DEFAULT 'HAS'",
   "ALTER TABLE products ADD COLUMN has_rate REAL DEFAULT 0",
+
+  // Kursi i Shitjes për rresht — përdoret në formulën flori për të llogaritur
+  // `sell_price` të pavarur nga `has_rate` (kursi i blerjes). Default = has_rate
+  // kur rreshti krijohet; user-i mund ta ndryshojë manualisht. Ndodhet edhe te
+  // invoice_items — kur user-i ndryshon `sell_rate` në Fatura Shitje, çmimi
+  // rillogaritet proporcionalisht (unit_price × new/old).
+  "ALTER TABLE purchase_items ADD COLUMN sell_rate REAL DEFAULT 0",
+  "ALTER TABLE invoice_items ADD COLUMN sell_rate REAL DEFAULT 0",
+
+  // Fusha flori te produkti: kodi (585/750...), shumëzuesi (p.sh. 1.8), dhe
+  // kursi i shitjes (EUR/gram) — që Products modal të llogarisë auto has_gram,
+  // cost_price, sell_price. Kopjohen edhe nga Fatura Blerje kur ruhen artikujt.
+  "ALTER TABLE products ADD COLUMN kodi REAL DEFAULT 0",
+  "ALTER TABLE products ADD COLUMN multiplier REAL DEFAULT 0",
+  "ALTER TABLE products ADD COLUMN sell_rate REAL DEFAULT 0",
 ];
 
 async function initDB() {

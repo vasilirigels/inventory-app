@@ -313,20 +313,6 @@ export default function Dashboard({ date, onNavigate }) {
     </div>
   )
 
-  if (total === 0 && invoicesRange.length === 0) return (
-    <div className="flex items-center justify-center h-[70vh]">
-      <div className="card text-center py-16 px-10 max-w-md">
-        <div className="text-6xl mb-4">💍</div>
-        <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">Mirë se vini në Cham Shop!</h3>
-        <p className="text-slate-500 dark:text-slate-400 mb-8 text-sm">Fillo me shtimin e produkteve ose regjistrimin e faturës së parë.</p>
-        <div className="flex flex-col gap-2 max-w-xs mx-auto">
-          <button onClick={() => onNavigate('products')} className="btn-primary">+ Shto Produktin e Parë</button>
-          <button onClick={() => onNavigate('fatura-shitje')} className="btn-secondary">🧾 Fatura Shitje</button>
-        </div>
-      </div>
-    </div>
-  )
-
   return (
     <div className="space-y-4 md:space-y-5">
 

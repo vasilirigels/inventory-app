@@ -1391,8 +1391,8 @@ app.post('/api/products', async (req, res) => {
       ? Math.max(0, Math.min(100, parseFloat(d.promo_discount_pct) || 0))
       : 0;
     await run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, is_promotion, promo_discount_pct, gram, serial_no, purchase_price_no_vat, has_gram, has_currency, has_rate, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
+      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, is_promotion, promo_discount_pct, gram, serial_no, purchase_price_no_vat, has_gram, has_currency, has_rate, kodi, multiplier, sell_rate, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
@@ -1408,6 +1408,9 @@ app.post('/api/products', async (req, res) => {
         parseFloat(d.has_gram) || 0,
         d.has_currency || 'HAS',
         parseFloat(d.has_rate) || 0,
+        parseFloat(d.kodi) || 0,
+        parseFloat(d.multiplier) || 0,
+        parseFloat(d.sell_rate) || 0,
       ]
     );
     res.json({ success: true });
@@ -1443,6 +1446,7 @@ app.put('/api/products/:id', async (req, res) => {
            is_promotion=?, promo_discount_pct=?, gram=?,
            serial_no=?, purchase_price_no_vat=?,
            has_gram=?, has_currency=?, has_rate=?,
+           kodi=?, multiplier=?, sell_rate=?,
            updated_at=${NOW_TS_SQL}
        WHERE id=?`,
       [
@@ -1460,6 +1464,9 @@ app.put('/api/products/:id', async (req, res) => {
         parseFloat(d.has_gram) || 0,
         d.has_currency || 'HAS',
         parseFloat(d.has_rate) || 0,
+        parseFloat(d.kodi) || 0,
+        parseFloat(d.multiplier) || 0,
+        parseFloat(d.sell_rate) || 0,
         id,
       ]
     );
@@ -2014,13 +2021,14 @@ app.post('/api/invoices', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invoiceId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
+          parseFloat(it.sell_rate) || 0,
         ]
       );
     }
@@ -2132,13 +2140,14 @@ app.put('/api/invoices/:id', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
+          parseFloat(it.sell_rate) || 0,
         ]
       );
     }
@@ -2356,14 +2365,15 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           -(it.qty || 0), -(parseFloat(it.gram) || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
           -(it.subtotal_no_vat || 0), it.vat_rate || 0,
           -(it.vat_amount || 0), -(it.total_with_vat || 0),
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
+          parseFloat(it.sell_rate) || 0,
         ]
       );
     }
@@ -2860,6 +2870,20 @@ async function applyProductPrices(items) {
       updates.push('has_rate = ?');
       params.push(parseFloat(it.has_rate));
     }
+    // Fusha flori: kodi (585, 750...), shumëzuesi, dhe kursi i shitjes —
+    // përditësohen te produkti nga blerja e fundit që përmban vlera > 0.
+    if (it.kodi != null && it.kodi !== '' && parseFloat(it.kodi) > 0) {
+      updates.push('kodi = ?');
+      params.push(parseFloat(it.kodi));
+    }
+    if (it.multiplier != null && it.multiplier !== '' && parseFloat(it.multiplier) > 0) {
+      updates.push('multiplier = ?');
+      params.push(parseFloat(it.multiplier));
+    }
+    if (it.sell_rate != null && it.sell_rate !== '' && parseFloat(it.sell_rate) > 0) {
+      updates.push('sell_rate = ?');
+      params.push(parseFloat(it.sell_rate));
+    }
     if (updates.length === 0) continue;
     params.push(it.product_id);
     await run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -3025,8 +3049,8 @@ app.post('/api/purchase-invoices', async (req, res) => {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
           purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-          has_gram, has_currency, has_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          has_gram, has_currency, has_rate, sell_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
@@ -3034,6 +3058,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           parseFloat(it.sell_price) || 0,
           parseFloat(it.has_gram) || 0, it.has_currency || 'HAS', parseFloat(it.has_rate) || 0,
+          parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
         ]
       );
     }
@@ -3121,8 +3146,8 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
           purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-          has_gram, has_currency, has_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          has_gram, has_currency, has_rate, sell_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
@@ -3130,6 +3155,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           parseFloat(it.sell_price) || 0,
           parseFloat(it.has_gram) || 0, it.has_currency || 'HAS', parseFloat(it.has_rate) || 0,
+          parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
         ]
       );
     }

@@ -150,6 +150,10 @@ function emptyItem() {
     // Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulën:
     // has_gram = (kodi/1000 + kursi/1000) × gram. Shumëzuesi për çmim shitjeje.
     kodi: 0, multiplier: 0,
+    // Kursi i shitjes për këtë rresht — përdoret në formulën flori për të
+    // llogaritur `sell_price` të pavarur nga kursi i blerjes (`has_rate`).
+    // Default = has_rate kur rreshti krijohet; user-i mund ta ndryshojë manualisht.
+    sell_rate: 0,
   }
 }
 
@@ -948,22 +952,28 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   }
   useEffect(() => { fetchHasRate() }, [])
 
-  // Auto-mbush has_rate te çdo rresht që ende s'ka kurs të vetin, kur hasRate
-  // vjen nga API-ja. Nuk mbishkruajmë kursin që erdhi tashmë me faturën ekzistuese.
-  // Fire edhe kur items ndryshojnë (p.sh. fatura ekzistuese ngarkohet pas hasRate).
+  // Auto-mbush has_rate + sell_rate te çdo rresht që ende s'ka kurs të vetin,
+  // kur hasRate vjen nga API-ja. Nuk mbishkruajmë kursin që erdhi tashmë me
+  // faturën ekzistuese. Fire edhe kur items ndryshojnë (p.sh. fatura ekzistuese
+  // ngarkohet pas hasRate).
   useEffect(() => {
     if (!hasRate) return
     setItems(prev => {
-      if (!prev.some(it => !(n(it.has_rate) > 0))) return prev
-      return prev.map(it => n(it.has_rate) > 0 ? it : { ...it, has_rate: hasRate })
+      if (!prev.some(it => !(n(it.has_rate) > 0) || !(n(it.sell_rate) > 0))) return prev
+      return prev.map(it => {
+        const patch = {}
+        if (!(n(it.has_rate) > 0))  patch.has_rate  = hasRate
+        if (!(n(it.sell_rate) > 0)) patch.sell_rate = hasRate
+        return Object.keys(patch).length ? { ...it, ...patch } : it
+      })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRate, items.length])
 
-  // Blerje Flori: formula e re — nëse kodi > 0, llogarit auto:
-  //   has_gram    = (kodi/1000 + kursi/1000) × gram
-  //   cost_price  = has_gram × kursi           (kursi si vlerë e plotë, p.sh. 120)
-  //   sell_price  = has_gram × multiplier × kursi
+  // Blerje Flori: formula — nëse kodi > 0, llogarit auto:
+  //   has_gram    = (kodi/1000 + kursi_blerje/1000) × gram
+  //   cost_price  = has_gram × kursi_blerje              (has_rate — per rresht)
+  //   sell_price  = has_gram × multiplier × kursi_shitje (sell_rate — per rresht; fallback te has_rate)
   // Nëse kodi = 0 (fatura të vjetra) nuk mbishkruajmë asgjë — të dhënat mbeten.
   useEffect(() => {
     if (forcedCategory !== 'flori') return
@@ -975,9 +985,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         const hr  = n(it.has_rate)
         const mul = n(it.multiplier)
         if (k <= 0 || g <= 0 || hr <= 0) return it
+        const sellR    = n(it.sell_rate) > 0 ? n(it.sell_rate) : hr
         const newHas   = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
         const newCost  = +(newHas * hr).toFixed(2)
-        const newSell  = mul > 0 ? +(newHas * mul * hr).toFixed(2) : n(it.sell_price)
+        const newSell  = mul > 0 ? +(newHas * mul * sellR).toFixed(2) : n(it.sell_price)
         if (
           Math.abs(newHas  - n(it.has_gram))   < 0.00005 &&
           Math.abs(newCost - n(it.cost_price)) < 0.005 &&
@@ -1078,6 +1089,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const addItem = () => setItems(prev => [...prev, {
     ...emptyItem(),
     has_rate: hasRate || 0,
+    sell_rate: hasRate || 0,
     multiplier: parseFloat(String(defaultMultiplier).replace(',', '.')) || 0,
   }])
 
@@ -1595,7 +1607,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulë">Kodi</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="EUR / gram HAS — mbushet automatikisht nga çmimi aktual i florit">Kursi</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
                 {forcedCategory === 'flori' && (
@@ -1671,6 +1684,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       <MoneyInput value={it.has_rate}
                         onChange={v => setItem(idx, { has_rate: v })}
                         className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                        placeholder={hasRateLoading ? '…' : '0.00'} />
+                    </td>
+                    <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+                      <MoneyInput value={it.sell_rate}
+                        onChange={v => setItem(idx, { sell_rate: v })}
+                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
                         placeholder={hasRateLoading ? '…' : '0.00'} />
                     </td>
                     <td className="px-1 py-1">
