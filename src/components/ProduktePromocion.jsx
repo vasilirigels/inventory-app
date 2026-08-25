@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import { getUser } from '../lib/auth.js'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
@@ -27,7 +28,7 @@ export default function ProduktePromocion({ onNavigate }) {
   const [flash, setFlash] = useState({})
   const isAdmin = getUser()?.role === 'admin'
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const all = await fetch('/api/products').then(r => r.json())
@@ -36,9 +37,11 @@ export default function ProduktePromocion({ onNavigate }) {
       setEdits({})
     } catch (e) { console.error(e) }
     setLoading(false)
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
+  // Rifresko kur produktet ndryshojnë (edit inline nga Produkte Inventar, etj.)
+  useRealtimeSync('products', load)
 
   const remove = async (id) => {
     if (!(await showConfirm('Hiqe produktin nga promocioni?', {

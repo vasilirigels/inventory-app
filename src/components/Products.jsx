@@ -805,6 +805,24 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(rowData.kodi) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
           placeholder="0.00" />
       </td>
+      <td className="px-1 py-1 bg-rose-50/40 dark:bg-rose-900/10">
+        <div className="flex items-center justify-center gap-1">
+          <input type="checkbox" checked={!!rowData.is_promotion}
+            onChange={e => onChange({
+              is_promotion: e.target.checked,
+              promo_discount_pct: e.target.checked ? (rowData.promo_discount_pct || '') : '',
+            })}
+            className="w-4 h-4 accent-rose-600"
+            title="Shënoje si produkt në promocion" />
+          <input type="number" step="0.01" min="0" max="100"
+            value={rowData.is_promotion ? rowData.promo_discount_pct : ''}
+            disabled={!rowData.is_promotion}
+            onChange={e => set('promo_discount_pct', e.target.value)}
+            className="input-field-sm text-right w-14 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-300"
+            placeholder="%"
+            title="Zbritja % për këtë produkt gjatë promocionit" />
+        </div>
+      </td>
       <td className="px-2 py-1">
         <div className="flex items-center justify-center gap-1">
           <button onClick={onSave} title="Ruaj"
@@ -839,6 +857,8 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
     vat_rate:              p.vat_rate != null ? String(p.vat_rate) : '0',
     cost_price:            p.cost_price != null ? String(p.cost_price) : '',
     sell_price:            p.sell_price != null ? String(p.sell_price) : '',
+    is_promotion:          !!p.is_promotion,
+    promo_discount_pct:    p.promo_discount_pct != null && parseFloat(p.promo_discount_pct) > 0 ? String(p.promo_discount_pct) : '',
   })
   const [form, setForm] = useState(initForm)
   const [saving, setSaving] = useState(false)
@@ -857,7 +877,8 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.id, p.updated_at, p.barcode, p.name, p.stock, p.cost_price, p.sell_price,
-      p.gram, p.has_gram, p.has_rate, p.kodi, p.multiplier, p.sell_rate])
+      p.gram, p.has_gram, p.has_rate, p.kodi, p.multiplier, p.sell_rate,
+      p.is_promotion, p.promo_discount_pct])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -905,6 +926,8 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
         vat_rate:              parseFloat(form.vat_rate) || 0,
         cost_price:            parseFloat(form.cost_price) || 0,
         sell_price:            parseFloat(form.sell_price) || 0,
+        is_promotion:          form.is_promotion ? 1 : 0,
+        promo_discount_pct:    form.is_promotion ? Math.max(0, Math.min(100, parseFloat(form.promo_discount_pct) || 0)) : 0,
       }
       setSaving(true)
       try {
@@ -1023,6 +1046,25 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
           title={parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: has_gram × Shumëzues × Kursi Shitje' : undefined}
           placeholder="0.00" />
+      </td>
+      <td className="px-1 py-1 bg-rose-50/40 dark:bg-rose-900/10">
+        <div className="flex items-center justify-center gap-1">
+          <input type="checkbox" checked={!!form.is_promotion}
+            onChange={e => setForm(f => ({
+              ...f,
+              is_promotion: e.target.checked,
+              promo_discount_pct: e.target.checked ? (f.promo_discount_pct || '') : '',
+            }))}
+            className="w-4 h-4 accent-rose-600"
+            title="Shënoje si produkt në promocion" />
+          <input type="number" step="0.01" min="0" max="100"
+            value={form.is_promotion ? form.promo_discount_pct : ''}
+            disabled={!form.is_promotion}
+            onChange={e => set('promo_discount_pct', e.target.value)}
+            className="input-field-sm text-right w-14 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-300"
+            placeholder="%"
+            title="Zbritja % për këtë produkt gjatë promocionit" />
+        </div>
       </td>
       <td className="px-2 py-1">
         <div className="flex items-center justify-center gap-1">
@@ -1423,8 +1465,8 @@ export default function Products() {
           kodi:         parseFloat(r.kodi) || 0,
           multiplier:   parseFloat(r.multiplier) || 0,
           sell_rate:    parseFloat(r.sell_rate) || 0,
-          is_promotion: 0,
-          promo_discount_pct: 0,
+          is_promotion: r.is_promotion ? 1 : 0,
+          promo_discount_pct: r.is_promotion ? Math.max(0, Math.min(100, parseFloat(r.promo_discount_pct) || 0)) : 0,
         }),
       })
       if (!res.ok) throw new Error('Gabim në ruajtje')
@@ -1881,6 +1923,7 @@ export default function Products() {
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Shitje €</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-rose-600 text-white w-24" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
             </thead>
