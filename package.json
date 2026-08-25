@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Cham Shop",
-  "version": "1.0.55",
+  "version": "1.0.56",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",
@@ -104,7 +104,8 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Cham Shop"
+      "shortcutName": "Cham Shop",
+      "include": "electron/installer.nsh"
     },
     "portable": {
       "artifactName": "ChamShop-Portable-${version}.${ext}",
