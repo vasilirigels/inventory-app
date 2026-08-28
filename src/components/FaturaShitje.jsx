@@ -45,9 +45,11 @@ function emptyItem() {
     qty: 1, gram: 0, unit_price_no_vat: 0, discount_percent: 0,
     vat_rate: 0,
     on_promotion: 0, promo_discount_pct: 0,
-    // Kursi i Shitjes per rresht — kur ndryshohet, `unit_price_no_vat` rillogaritet
-    // proporcionalisht (unit_price × new/old). Default = 0 (pa efekt).
-    sell_rate: 0,
+    // Fusha flori per rresht — kur has_gram + multiplier + sell_rate > 0,
+    // unit_price_no_vat llogaritet auto = has_gram × multiplier × sell_rate.
+    // Përndryshe (produkte jo-flori) mbeten 0 dhe unit_price ndryshohet vetëm
+    // proporcionalisht kur ndryshohet sell_rate.
+    sell_rate: 0, has_gram: 0, multiplier: 0,
   }
 }
 
@@ -1486,8 +1488,10 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
       promo_discount_pct: onPromo ? n(p.promo_discount_pct) : 0,
       // Kursi i Shitjes fillestar — merret nga produkti (ruhet me blerjen e
       // fundit). User-i mund ta ndryshojë manualisht dhe unit_price rillogaritet
-      // proporcionalisht (changeItemSellRate).
+      // (proporcionalisht ose me formulë flori nëse has_gram+multiplier janë>0).
       sell_rate: n(p.sell_rate) > 0 ? n(p.sell_rate) : (n(p.has_rate) > 0 ? n(p.has_rate) : 0),
+      has_gram: n(p.has_gram) > 0 ? n(p.has_gram) : 0,
+      multiplier: n(p.multiplier) > 0 ? n(p.multiplier) : 0,
     })
   }
 
@@ -1544,24 +1548,41 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
     setPaymentSplits(prev => prev.map(s => s.currency === currency ? { ...s, exchange_rate: r } : s))
   }
 
-  // Kursi i Shitjes per rresht — kur ndryshohet, rillogarit `unit_price_no_vat`
-  // proporcionalisht (i ri / i vjetër). Nëse kursi i vjetër është 0 (rreshti
-  // sapo krijuar), thjesht ruaj vlerën pa prekur çmimin — user-i do të vendosë
-  // çmimin bazë manualisht ose duke zgjedhur produktin.
+  // Kursi i Shitjes per rresht — kur ndryshohet, rillogarit `unit_price_no_vat`:
+  //   • FLORI (has_gram + multiplier > 0): formula direkte
+  //       unit_price = has_gram × multiplier × sell_rate
+  //   • PA FORMULE: shkallëzim proporcional (unit_price × new/old)
   const changeItemSellRate = (idx, newRate) => {
     setItems(prev => prev.map((it, i) => {
       if (i !== idx) return it
-      const oldR = n(it.sell_rate)
       const newR = parseFloat(newRate) || 0
+      const hg = n(it.has_gram)
+      const mul = n(it.multiplier)
+      if (hg > 0 && mul > 0 && newR > 0) {
+        return { ...it, sell_rate: newRate, unit_price_no_vat: +(hg * mul * newR).toFixed(2) }
+      }
+      const oldR = n(it.sell_rate)
       if (oldR > 0 && newR > 0 && Math.abs(newR - oldR) > 1e-9) {
         const factor = newR / oldR
-        return {
-          ...it,
-          sell_rate: newRate,
-          unit_price_no_vat: +(n(it.unit_price_no_vat) * factor).toFixed(2),
-        }
+        return { ...it, sell_rate: newRate, unit_price_no_vat: +(n(it.unit_price_no_vat) * factor).toFixed(2) }
       }
       return { ...it, sell_rate: newRate }
+    }))
+  }
+
+  // Kur user-i ndryshon has_gram ose multiplier për një rresht, rillogarit
+  // unit_price_no_vat me formulën flori (nëse të gjitha 3 fushat > 0).
+  const changeItemFloriField = (idx, field, value) => {
+    setItems(prev => prev.map((it, i) => {
+      if (i !== idx) return it
+      const next = { ...it, [field]: value }
+      const hg = n(next.has_gram)
+      const mul = n(next.multiplier)
+      const sr = n(next.sell_rate)
+      if (hg > 0 && mul > 0 && sr > 0) {
+        next.unit_price_no_vat = +(hg * mul * sr).toFixed(2)
+      }
+      return next
     }))
   }
 
@@ -1888,7 +1909,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Sasia</th>
                 <th className="px-2 py-2 text-right font-semibold w-20">Gramatura</th>
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes për këtë rresht — kur ndryshohet, çmimi rillogaritet proporcionalisht (unit_price × i ri / i vjetër)">Kursi Shitje</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS) — mbushet auto nga produkti">Has ne shitje</th>
+                <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzuesi për çmim shitjeje — mbushet auto nga produkti">Shumëzues</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes për këtë rresht — kur ndryshohet, çmimi rillogaritet (formula flori nëse Has+Shumëzues>0, ndryshe proporcionalisht)">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Zbritje €</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Zbritje %</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
@@ -1935,6 +1958,23 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         className="input-field-sm text-right"
                       />
                     </td>
+                    <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+                      <MoneyInput
+                        value={it.has_gram}
+                        onChange={v => changeItemFloriField(idx, 'has_gram', v)}
+                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                        placeholder="0.000"
+                      />
+                    </td>
+                    <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={it.multiplier || ''}
+                        onChange={e => changeItemFloriField(idx, 'multiplier', e.target.value)}
+                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                        placeholder="1.8"
+                      />
+                    </td>
                     <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
                       <MoneyInput
                         value={it.sell_rate}
@@ -1979,7 +2019,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={9} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
+                <td colSpan={11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
               </tr>

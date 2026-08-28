@@ -1608,9 +1608,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
+                <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
-                <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
                 {forcedCategory === 'flori' && (
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
                 )}
@@ -1686,6 +1686,14 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
                         placeholder={hasRateLoading ? '…' : '0.00'} />
                     </td>
+                    <td className="px-1 py-1">
+                      <MoneyInput value={it.cost_price}
+                        onChange={v => setItem(idx, { cost_price: v })}
+                        disabled={forcedCategory === 'flori'}
+                        className={`input-field-sm text-right ${forcedCategory === 'flori' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
+                        {...(forcedCategory === 'flori' ? { title: 'Auto: has_gram × Kursi' } : {})}
+                      />
+                    </td>
                     <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
                       <MoneyInput value={it.sell_rate}
                         onChange={v => setItem(idx, { sell_rate: v })}
@@ -1696,14 +1704,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       <input type="number" step="0.01" min="0" max="100" value={it.vat_rate}
                         onChange={e => setItem(idx, { vat_rate: e.target.value })}
                         className="input-field-sm text-right" />
-                    </td>
-                    <td className="px-1 py-1">
-                      <MoneyInput value={it.cost_price}
-                        onChange={v => setItem(idx, { cost_price: v })}
-                        disabled={forcedCategory === 'flori'}
-                        className={`input-field-sm text-right ${forcedCategory === 'flori' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
-                        {...(forcedCategory === 'flori' ? { title: 'Auto: has_gram × Kursi' } : {})}
-                      />
                     </td>
                     {forcedCategory === 'flori' && (
                       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">

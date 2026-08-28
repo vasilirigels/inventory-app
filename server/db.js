@@ -720,6 +720,12 @@ const MIGRATIONS = [
   "ALTER TABLE products ADD COLUMN kodi REAL DEFAULT 0",
   "ALTER TABLE products ADD COLUMN multiplier REAL DEFAULT 0",
   "ALTER TABLE products ADD COLUMN sell_rate REAL DEFAULT 0",
+
+  // Fatura Shitje flori: has_gram + multiplier per rresht — që formula
+  // unit_price = has_gram × multiplier × sell_rate të aplikohet auto (si
+  // te Fatura Blerje). Kopjohen nga produkti kur zgjidhet.
+  "ALTER TABLE invoice_items ADD COLUMN has_gram REAL DEFAULT 0",
+  "ALTER TABLE invoice_items ADD COLUMN multiplier REAL DEFAULT 0",
 ];
 
 async function initDB() {

@@ -1306,7 +1306,8 @@ app.get('/api/products/search', async (req, res) => {
     const rows = await queryAll(
       `SELECT id, name, sku, barcode, category, sell_price, cost_price, vat_rate, stock, image_path, gram,
               is_promotion, promo_discount_pct, serial_no, purchase_price_no_vat,
-              has_gram, has_currency, has_rate
+              has_gram, has_currency, has_rate,
+              kodi, multiplier, sell_rate
          FROM products
         WHERE active = 1
           AND (barcode LIKE ? OR sku LIKE ? OR name LIKE ? OR serial_no LIKE ?)
@@ -2021,14 +2022,15 @@ app.post('/api/invoices', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct, sell_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invoiceId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
           parseFloat(it.sell_rate) || 0,
+          parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
         ]
       );
     }
@@ -2140,14 +2142,15 @@ app.put('/api/invoices/:id', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct, sell_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
           parseFloat(it.sell_rate) || 0,
+          parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
         ]
       );
     }
@@ -2365,8 +2368,8 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct, sell_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           -(it.qty || 0), -(parseFloat(it.gram) || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
@@ -2374,6 +2377,7 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
           -(it.vat_amount || 0), -(it.total_with_vat || 0),
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
           parseFloat(it.sell_rate) || 0,
+          parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
         ]
       );
     }
