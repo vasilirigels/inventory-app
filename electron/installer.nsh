@@ -1,60 +1,129 @@
 ; Custom NSIS macros për ChamShop installer.
 ;
-; SHKAKU: NSIS-i i electron-builder-it bën taskkill + sleep ~2s → nëse procesi
-; ende gjallë ose file handles jo të liruara, shfaq dialog-un
-; "Cham Shop non può essere chiuso".
+; DIAGNOSTIKË: dialog-u "Cham Shop non può essere chiuso" mund të vijë nga:
+;   1. _CHECK_APP_RUNNING (bllokuar nga customCheckAppRunning — kalojmë)
+;   2. installUtil.nsh — kur uninstalluesi i vjetër dështon (skedar në përdorim)
+;   3. extractAppPackage.nsh — kur ekstraktimi dështon (skedar në përdorim)
 ;
-; Dialog-u mund të dalë nga 3 vende:
-;   1. _CHECK_APP_RUNNING loop → bllokuar nga customCheckAppRunning (këtu)
-;   2. extractAppPackage.nsh (file copy fail 5 herë) → nevojitet wait më i gjatë
-;   3. installUtil.nsh (old uninstaller fail 5 herë) → njësoj
-;
-; Server-i ynë spawn-ohet me process.execPath = "Cham Shop.exe" (v1.0.57 e më
-; poshtë) ose brenda main-it (v1.0.58+). Plus libsql native workers. Këta
-; mbajnë file handles deri disa sekonda pas kill-it. Antivirus ndoshta i mban
-; edhe më gjatë. Ndaj bëjmë 5 raunde kill me sleep 1s + final wait 5s =
-; ~10s total para se extract-i të nisë.
+; Ky installer shkruan log te %TEMP%\chamshop-installer.log në çdo hap kritik.
+; Pas një dështimi, hapni atë skedar dhe dërgojeni për diagnozë.
+
+!include "FileFunc.nsh"
+
+; Hap një dritare PowerShell që tail-on log-un në real-time (si `tail -f`).
+; Thirret NJËHERË në krye të preInit. `Exec` kthehet menjëherë (fire-and-forget)
+; që installer-i të vazhdojë. Dritarja mbetet e hapur derisa user-i ta mbyllë.
+!macro StartLogViewer
+  Push $0
+  ; Fillo një session të ri log-u (truncate — përndryshe log-ëve të vjetër u
+  ; ngjiten të rinjtë dhe s'kuptohet se cili install përket cilit).
+  FileOpen $0 "$TEMP\chamshop-installer.log" w
+  FileWrite $0 "===== INSTALLER SESSION START =====$\r$\n"
+  FileClose $0
+  ; Hap dritare PowerShell që bën tail -f mbi file-in. `cmd /C start` nis
+  ; procesin në një dritare të re dhe kthehet menjëherë.
+  Exec `cmd /C start "Cham Shop Installer LIVE Log" powershell -NoExit -Command "Get-Content -Wait -Path '$TEMP\chamshop-installer.log'"`
+  Pop $0
+!macroend
+
+!macro LogWrite _MSG
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  ${GetTime} "" "L" $1 $2 $3 $4 $5 $6 $0
+  ; $1=day $2=month $3=year $4=dayOfWeek $5=hour $6=minute $0=second
+  FileOpen $0 "$TEMP\chamshop-installer.log" a
+  FileSeek $0 0 END
+  FileWrite $0 "[$3-$2-$1 $5:$6] ${_MSG}$\r$\n"
+  FileClose $0
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+!macro LogProcessList _TAG
+  Push $R8
+  Push $R9
+  nsExec::ExecToStack 'cmd /C tasklist /FI "IMAGENAME eq Cham Shop.exe" /FO CSV /NH'
+  Pop $R8
+  Pop $R9
+  !insertmacro LogWrite "[${_TAG}] tasklist exit=$R8 out=$R9"
+  Pop $R9
+  Pop $R8
+!macroend
+
+!macro LogTaskkill _TAG
+  Push $R8
+  Push $R9
+  nsExec::ExecToStack 'cmd /C taskkill /F /T /IM "Cham Shop.exe" 2>&1'
+  Pop $R8
+  Pop $R9
+  !insertmacro LogWrite "[${_TAG}] taskkill exit=$R8 out=$R9"
+  Pop $R9
+  Pop $R8
+!macroend
 
 !macro customCheckAppRunning
-  ; Round 1-5: taskkill /F /T (force + tree) — kill main + tërë children.
-  ; Nëse procesi s'ekziston, taskkill kthen 128 dhe vazhdon (ignorohet).
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogWrite "===== customCheckAppRunning START ====="
+  !insertmacro LogProcessList "customCheckAppRunning:before-kill"
+
+  !insertmacro LogTaskkill "customCheckAppRunning:kill-1"
   Sleep 1000
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogTaskkill "customCheckAppRunning:kill-2"
   Sleep 1000
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogTaskkill "customCheckAppRunning:kill-3"
   Sleep 1000
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogTaskkill "customCheckAppRunning:kill-4"
   Sleep 1000
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
-  ; Final wait — jep OS-it kohë të lirojë të gjitha file handles.
-  ; Pa këtë, extractAppPackage.nsh mund të fail-ojë me "file in use"
-  ; edhe pse procesi ka dalë me kohë.
+  !insertmacro LogTaskkill "customCheckAppRunning:kill-5"
+
+  ; Prit që OS-i të lirojë file handles.
   Sleep 5000
+
+  !insertmacro LogProcessList "customCheckAppRunning:after-wait"
+  !insertmacro LogWrite "===== customCheckAppRunning END ====="
 !macroend
 
-; preInit ekzekutohet në krye të .onInit — mburoja e parë (para
-; ALLOW_ONLY_ONE_INSTALLER_INSTANCE). Shpejt (500ms) sepse
-; customCheckAppRunning bën wait-in e gjatë vetë.
 !macro preInit
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  ; Hap live-log viewer që në rreshtin e parë të installer-it.
+  !insertmacro StartLogViewer
+  !insertmacro LogWrite "===== preInit START ====="
+  !insertmacro LogProcessList "preInit:before-kill"
+  !insertmacro LogTaskkill "preInit:kill"
   Sleep 500
+  !insertmacro LogProcessList "preInit:after-kill"
+  !insertmacro LogWrite "===== preInit END ====="
 !macroend
 
-; customInit ekzekutohet mes ALLOW_ONLY_ONE_INSTALLER_INSTANCE dhe Section
-; install — mburojë shtesë për procese që mund të kenë respawn-uar
-; (p.sh. auto-restart nga Windows, ose ndonjë instancë e re nga user-i).
 !macro customInit
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogWrite "===== customInit START ====="
+  !insertmacro LogProcessList "customInit:before-kill"
+  !insertmacro LogTaskkill "customInit:kill"
   Sleep 500
+  !insertmacro LogProcessList "customInit:after-kill"
+  !insertmacro LogWrite "===== customInit END ====="
 !macroend
 
-; customUnInit — njësoj për uninstall standalone (jo për upgrade flow-in).
+!macro customInstall
+  !insertmacro LogWrite "===== customInstall (Section install starting) ====="
+  !insertmacro LogProcessList "customInstall:snapshot"
+!macroend
+
 !macro customUnInit
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogWrite "===== customUnInit START ====="
+  !insertmacro LogTaskkill "customUnInit:kill-1"
   Sleep 2000
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogTaskkill "customUnInit:kill-2"
   Sleep 2000
-  nsExec::Exec 'taskkill /F /T /IM "Cham Shop.exe"'
+  !insertmacro LogTaskkill "customUnInit:kill-3"
   Sleep 2000
+  !insertmacro LogWrite "===== customUnInit END ====="
 !macroend

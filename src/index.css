@@ -15,6 +15,17 @@
   html.dark textarea {
     color-scheme: dark;
   }
+  /* Hiq shigjetat e spinner-it te <input type="number"> — user-i shkruan vlerën
+     me tastierë, shigjetat native shpesh e ndryshojnë padashur me scroll. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
 }
 
 @layer components {

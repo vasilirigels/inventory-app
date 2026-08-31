@@ -537,7 +537,8 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
             <button onClick={onCreate} className="btn-primary mx-auto">+ Krijo Faturën e Parë</button>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
@@ -685,6 +686,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
               </tr>
             </tfoot>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -696,7 +698,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
 // up in the Products page), then ➋ appends them as line items on the open
 // purchase invoice — linked by the freshly-minted product_id so saving the
 // invoice tracks stock correctly via adjustPurchaseStock.
-function ImportExcelModal({ onClose, onImported }) {
+function ImportExcelModal({ onClose, onImported, overrideCategoryLabel }) {
   const fileRef = useRef()
   const [step, setStep]               = useState('upload') // upload | preview
   const [fileName, setFileName]       = useState('')
@@ -743,7 +745,14 @@ function ImportExcelModal({ onClose, onImported }) {
     try {
       // Set stock=0 in the products payload; the purchase invoice's qty will
       // drive stock via adjustPurchaseStock, otherwise we'd double-count.
-      const payload = products.map(p => ({ ...p, stock: 0 }))
+      // Nëse fatura ka një kategori të fiksuar (p.sh. Blerje Flori) e vendosim
+      // te çdo produkt — kolona "Kategori" e Excel-it shpesh mbushet vetëm te
+      // rreshti i parë (merged cells), duke bërë që të tjerët të bien te 'Tjeter'.
+      const payload = products.map(p => ({
+        ...p,
+        stock: 0,
+        ...(overrideCategoryLabel ? { category: overrideCategoryLabel } : {}),
+      }))
       const res = await fetch('/api/products/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -884,15 +893,40 @@ function ImportExcelModal({ onClose, onImported }) {
                 <button
                   onClick={handleImport}
                   disabled={products.length === 0 || importing}
-                  className="btn-primary flex-1 justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-primary flex-1 justify-center disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {importing ? '⏳ Duke importuar...' : `⬆️ Importo ${products.length} Artikuj`}
+                  {importing ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                        <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                      </svg>
+                      Duke importuar {products.length} artikuj...
+                    </>
+                  ) : `⬆️ Importo ${products.length} Artikuj`}
                 </button>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {importing && (
+        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl px-8 py-6 flex items-center gap-4 max-w-sm">
+            <svg className="animate-spin h-8 w-8 text-blue-600 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+              <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            </svg>
+            <div>
+              <p className="font-semibold text-slate-800 dark:text-slate-100">Duke importuar artikujt...</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {products.length} {products.length === 1 ? 'artikull' : 'artikuj'} — mund të zgjasë disa sekonda
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1408,8 +1442,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         </div>
         <div className="flex gap-2">
           <button onClick={onClose} className="btn-secondary">Anulo</button>
-          <button onClick={save} disabled={saving} className="btn-primary disabled:opacity-50">
-            {saving ? '⏳ Duke ruajtur...' : '💾 Ruaj Faturën'}
+          <button onClick={save} disabled={saving} className="btn-primary disabled:opacity-50 flex items-center gap-2">
+            {saving ? (
+              <>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                </svg>
+                Duke ruajtur...
+              </>
+            ) : '💾 Ruaj Faturën'}
           </button>
         </div>
       </div>
@@ -1867,7 +1909,29 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         <ImportExcelModal
           onClose={() => setShowImport(false)}
           onImported={handleImported}
+          overrideCategoryLabel={
+            category
+              ? (materialCategories.find(c => c.slug === category)?.label || null)
+              : null
+          }
         />
+      )}
+
+      {saving && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl px-8 py-6 flex items-center gap-4 max-w-sm">
+            <svg className="animate-spin h-8 w-8 text-blue-600 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+              <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            </svg>
+            <div>
+              <p className="font-semibold text-slate-800 dark:text-slate-100">Duke ruajtur faturën...</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {items.length} {items.length === 1 ? 'artikull' : 'artikuj'} — mund të zgjasë disa sekonda
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

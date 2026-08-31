@@ -77,7 +77,6 @@ const NAV_GROUPS = [
           { id: 'artikuj-te-tjere',      label: 'ARTIKUJ TË TJERË' },
           { id: 'blerje-flori',          label: '🟡 BLERJE FLORI' },
           { id: 'blerje-diamant',        label: '💎 BLERJE DIAMANT' },
-          { id: 'blerje-has',            label: 'BLERJE HAS' },
           { id: 'raport-blerje-artikuj', label: 'Raport Blerje Artikuj' },
         ],
       },

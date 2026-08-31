@@ -1905,12 +1905,11 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">#</th>
-                <th className="px-2 py-2 text-left font-semibold w-64">Produkti (barkod ose emër)</th>
                 <th className="px-2 py-2 text-left font-semibold w-32">Barkodi</th>
+                <th className="px-2 py-2 text-left font-semibold w-64">Përshkrimi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Sasia</th>
                 <th className="px-2 py-2 text-right font-semibold w-20">Gramatura</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS) — mbushet auto nga produkti">Has ne shitje</th>
-                <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzuesi për çmim shitjeje — mbushet auto nga produkti">Shumëzues</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes për këtë rresht — kur ndryshohet, çmimi rillogaritet (formula flori nëse Has+Shumëzues>0, ndryshe proporcionalisht)">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Zbritje €</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Zbritje %</th>
@@ -1928,6 +1927,13 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                   <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
+                      <input
+                        type="text" value={it.barcode} readOnly
+                        className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
+                        placeholder="—"
+                      />
+                    </td>
+                    <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
                       {!!it.on_promotion && (
                         <div className="mt-0.5">
@@ -1936,13 +1942,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                           </span>
                         </div>
                       )}
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        type="text" value={it.barcode} readOnly
-                        className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
-                        placeholder="—"
-                      />
                     </td>
                     <td className="px-1 py-1">
                       <input
@@ -1964,15 +1963,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         onChange={v => changeItemFloriField(idx, 'has_gram', v)}
                         className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
                         placeholder="0.000"
-                      />
-                    </td>
-                    <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={it.multiplier || ''}
-                        onChange={e => changeItemFloriField(idx, 'multiplier', e.target.value)}
-                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
-                        placeholder="1.8"
                       />
                     </td>
                     <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
@@ -2019,7 +2009,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
+                <td colSpan={10} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">TOTALI ({currency}):</td>
                 <td className="px-2 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</td>
                 <td></td>
               </tr>
