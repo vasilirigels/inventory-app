@@ -1657,6 +1657,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">Cmim Shitje €</th>
+                {forcedCategory === 'flori' && (
+                  <>
+                    <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Fitim % = (Cmim Shitje − Cmim Blerje) / Cmim Blerje × 100">Fitim %</th>
+                    <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Marzh % = (Cmim Shitje − Cmim Blerje) / Cmim Shitje × 100">Marzh %</th>
+                  </>
+                )}
                 <th className="px-2 py-2 text-center font-semibold w-24 bg-rose-600 text-white" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
@@ -1756,13 +1762,31 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                           title="Shumëzues per rresht — override i vlerës globale" />
                       </td>
                     )}
-                    <td className="px-1 py-1 bg-emerald-50 dark:bg-emerald-900/30">
+<td className="px-1 py-1 bg-emerald-50 dark:bg-emerald-900/30">
                       <MoneyInput value={it.sell_price}
                         onChange={v => setItem(idx, { sell_price: v })}
                         disabled={forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0}
                         className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
                         {...(forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0 ? { title: 'Auto: has_gram × Shumëzues × Kursi' } : {})} />
                     </td>
+                    {forcedCategory === 'flori' && (() => {
+                      const cp = n(it.cost_price), sp = n(it.sell_price)
+                      const fit = cp > 0 ? ((sp - cp) / cp) * 100 : 0
+                      const mar = sp > 0 ? ((sp - cp) / sp) * 100 : 0
+                      const cls = (v) => v > 0
+                        ? 'text-emerald-700 dark:text-emerald-300'
+                        : v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'
+                      return (
+                        <>
+                          <td className={`px-1 py-1 text-right tabular-nums font-semibold ${cls(fit)}`}>
+                            {cp > 0 ? fit.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td className={`px-1 py-1 text-right tabular-nums font-semibold ${cls(mar)}`}>
+                            {sp > 0 ? mar.toFixed(1) + '%' : '—'}
+                          </td>
+                        </>
+                      )
+                    })()}
                     <td className="px-1 py-1 text-center bg-rose-50/40">
                       <div className="flex items-center justify-center gap-1">
                         <input
@@ -1798,7 +1822,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={forcedCategory === 'flori' ? 13 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                <td colSpan={forcedCategory === 'flori' ? 15 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
