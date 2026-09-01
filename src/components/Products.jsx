@@ -805,6 +805,25 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(rowData.kodi) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
           placeholder="0.00" />
       </td>
+      {(() => {
+        const cp = parseFloat(rowData.cost_price) || 0
+        const sp = parseFloat(rowData.sell_price) || 0
+        const fit = cp > 0 ? ((sp - cp) / cp) * 100 : 0
+        const mar = sp > 0 ? ((sp - cp) / sp) * 100 : 0
+        const cls = v => v > 0
+          ? 'text-emerald-700 dark:text-emerald-300'
+          : v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'
+        return (
+          <>
+            <td className={`px-2 py-1 text-right tabular-nums font-semibold ${cls(fit)}`}>
+              {cp > 0 ? fit.toFixed(1) + '%' : '—'}
+            </td>
+            <td className={`px-2 py-1 text-right tabular-nums font-semibold ${cls(mar)}`}>
+              {sp > 0 ? mar.toFixed(1) + '%' : '—'}
+            </td>
+          </>
+        )
+      })()}
       <td className="px-1 py-1 bg-rose-50/40 dark:bg-rose-900/10">
         <div className="flex items-center justify-center gap-1">
           <input type="checkbox" checked={!!rowData.is_promotion}
@@ -1060,6 +1079,25 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           title={parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: has_gram × Shumëzues × Kursi Shitje' : undefined}
           placeholder="0.00" />
       </td>
+      {(() => {
+        const cp = parseFloat(form.cost_price) || 0
+        const sp = parseFloat(form.sell_price) || 0
+        const fit = cp > 0 ? ((sp - cp) / cp) * 100 : 0
+        const mar = sp > 0 ? ((sp - cp) / sp) * 100 : 0
+        const cls = v => v > 0
+          ? 'text-emerald-700 dark:text-emerald-300'
+          : v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'
+        return (
+          <>
+            <td className={`px-2 py-1 text-right tabular-nums font-semibold ${cls(fit)}`}>
+              {cp > 0 ? fit.toFixed(1) + '%' : '—'}
+            </td>
+            <td className={`px-2 py-1 text-right tabular-nums font-semibold ${cls(mar)}`}>
+              {sp > 0 ? mar.toFixed(1) + '%' : '—'}
+            </td>
+          </>
+        )
+      })()}
       <td className="px-1 py-1 bg-rose-50/40 dark:bg-rose-900/10">
         <div className="flex items-center justify-center gap-1">
           <input type="checkbox" checked={!!form.is_promotion}
@@ -1936,6 +1974,8 @@ export default function Products() {
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Shitje €</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" title="Fitim % = (Cmim Shitje − Cmim Kosto) / Cmim Kosto × 100">Fitim %</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" title="Marzh % = (Cmim Shitje − Cmim Kosto) / Cmim Shitje × 100">Marzh %</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-rose-600 text-white w-24" title="Shënoje si produkt në promocion; jep % ulje">Promo · %</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
               </tr>
