@@ -948,7 +948,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   }, [form])
 
   return (
-    <tr className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+    <tr className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
       <td className="px-2 py-1 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
         {productNo(p.id)}
         {saving && <span className="ml-1 text-[10px] text-blue-500" title="Duke ruajtur...">⏳</span>}
