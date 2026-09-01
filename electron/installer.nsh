@@ -1,28 +1,18 @@
 ; Custom NSIS macros për ChamShop installer.
 ;
-; DIAGNOSTIKË: dialog-u "Cham Shop non può essere chiuso" mund të vijë nga:
-;   1. _CHECK_APP_RUNNING (bllokuar nga customCheckAppRunning — kalojmë)
-;   2. installUtil.nsh — kur uninstalluesi i vjetër dështon (skedar në përdorim)
-;   3. extractAppPackage.nsh — kur ekstraktimi dështon (skedar në përdorim)
-;
-; Ky installer shkruan log te %TEMP%\chamshop-installer.log në çdo hap kritik.
-; Pas një dështimi, hapni atë skedar dhe dërgojeni për diagnozë.
+; Log-u shkruhet te %TEMP%\chamshop-installer.log në çdo hap kritik për
+; diagnozë (hape manualisht me Notepad nëse ka problem). Nuk hapet asnjë
+; dritare user-facing — instalimi mbetet silent siç e pret user-i.
 
 !include "FileFunc.nsh"
 
-; Hap një dritare PowerShell që tail-on log-un në real-time (si `tail -f`).
-; Thirret NJËHERË në krye të preInit. `Exec` kthehet menjëherë (fire-and-forget)
-; që installer-i të vazhdojë. Dritarja mbetet e hapur derisa user-i ta mbyllë.
-!macro StartLogViewer
+; Fillo një session të ri log-u (truncate — përndryshe log-ëve të vjetër u
+; ngjiten të rinjtë dhe s'kuptohet se cili install përket cilit).
+!macro StartLogSession
   Push $0
-  ; Fillo një session të ri log-u (truncate — përndryshe log-ëve të vjetër u
-  ; ngjiten të rinjtë dhe s'kuptohet se cili install përket cilit).
   FileOpen $0 "$TEMP\chamshop-installer.log" w
   FileWrite $0 "===== INSTALLER SESSION START =====$\r$\n"
   FileClose $0
-  ; Hap dritare PowerShell që bën tail -f mbi file-in. `cmd /C start` nis
-  ; procesin në një dritare të re dhe kthehet menjëherë.
-  Exec `cmd /C start "Cham Shop Installer LIVE Log" powershell -NoExit -Command "Get-Content -Wait -Path '$TEMP\chamshop-installer.log'"`
   Pop $0
 !macroend
 
@@ -93,8 +83,8 @@
 !macroend
 
 !macro preInit
-  ; Hap live-log viewer që në rreshtin e parë të installer-it.
-  !insertmacro StartLogViewer
+  ; Fillo një session të ri të log-ut (fshin log-un e vjetër).
+  !insertmacro StartLogSession
   !insertmacro LogWrite "===== preInit START ====="
   !insertmacro LogProcessList "preInit:before-kill"
   !insertmacro LogTaskkill "preInit:kill"
