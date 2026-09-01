@@ -886,18 +886,21 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   const savedSnapshot = useRef(JSON.stringify(initForm()))
   const savingRef = useRef(false)
   const formRef = useRef(form)
+  const lastSaveAt = useRef(0)
   useEffect(() => { formRef.current = form }, [form])
 
   // Rifresko formin kur produkti ndryshon nga jashtë (reload, realtime sync),
-  // vetëm nëse s'kemi ndryshime lokale të pa-ruajtura. Krahasojmë form aktual
-  // (formRef) me savedSnapshot — nëse ndryshojnë, user-i po edit-on dhe s'guxojmë
-  // t'ia mbishkruajmë punën me të dhëna të vjetra nga një load() pas save-i.
+  // vetëm nëse s'kemi ndryshime lokale të pa-ruajtura DHE nuk kemi bërë save
+  // rishtazi (nën 3s). Turso ndonjëherë kthen të dhëna të vjetra pas një PUT
+  // të suksesshëm (replica lag) → pa këtë guard, form-i i mbishkruar do ta
+  // rikthente ndryshimin që sapo user-i bëri.
   useEffect(() => {
     const fresh = initForm()
     const freshStr = JSON.stringify(fresh)
     if (freshStr === savedSnapshot.current) return
     const currentFormStr = JSON.stringify(formRef.current)
     if (currentFormStr !== savedSnapshot.current) return // dirty — mos e prek
+    if (Date.now() - lastSaveAt.current < 3000) return // just saved — prit propagimin
     setForm(fresh)
     savedSnapshot.current = freshStr
     initialMount.current = true
@@ -940,8 +943,12 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
     setSaving(true)
     setSaveError(null)
     const currentForm = formRef.current
+    // Hiq updated_at nga payload — server-i bën optimistic lock nese e gjen,
+    // dhe replica lag mund te shkaktoje 409 false-positive. Per inline edit,
+    // last-write-wins eshte i deshirueshem (user's own change should not fail).
+    const { updated_at: _skipTs, ...pRest } = p
     const payload = {
-      ...p,
+      ...pRest,
       barcode:               currentForm.barcode,
       name:                  currentForm.name,
       brand:                 currentForm.brand,
@@ -972,6 +979,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
         throw new Error(`HTTP ${res.status}${errBody ? ': ' + errBody.slice(0, 100) : ''}`)
       }
       savedSnapshot.current = JSON.stringify(currentForm)
+      lastSaveAt.current = Date.now()
       onSaved?.()
     } catch (e) {
       console.error('Product save failed:', e)
