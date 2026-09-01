@@ -2,7 +2,7 @@
 // server subprocess. In dev we assume `npm run dev` is already running Vite
 // (5173) + the Express server (3001) — Electron just points at Vite.
 const { app, BrowserWindow, shell, dialog, Menu, session } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -662,7 +662,7 @@ function setupAutoUpdate() {
     updaterLog(`download-progress: ${Math.round(p.percent || 0)}% (${p.transferred}/${p.total})`);
   });
   autoUpdater.on('update-downloaded', async (info) => {
-    updaterLog(`update-downloaded: v${info?.version}`);
+    updaterLog(`update-downloaded: v${info?.version} at ${info?.downloadedFile || '(no path)'}`);
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Përditësim i ri',
@@ -672,9 +672,22 @@ function setupAutoUpdate() {
       cancelId: 1,
     });
     if (response === 0) {
-      // Vrit serverin dhe prit që të dalë vërtet nga OS-i para quitAndInstall.
-      // NSIS-i detekton child-in `Cham Shop.exe` (server) si proces më vete dhe
-      // refuzon të vazhdojë me instalim nëse gjen ndonjë të tillë.
+      // Hiq Mark-of-the-Web (Zone.Identifier ADS) nga installer-i i shkarkuar.
+      // Pa këtë, kur autoUpdater e nis .exe-në programatikisht, SmartScreen e
+      // vret në heshtje ("Windows protected your PC" nuk shfaqet fare sepse
+      // procesi s'u nis nga user-i drejtpërdrejt) → install-i s'ndodh dhe
+      // user-i s'e kupton pse. Unblock-File e bën "trusted" këtë file specifik.
+      if (process.platform === 'win32' && info?.downloadedFile) {
+        try {
+          execFileSync('powershell.exe', [
+            '-NoProfile', '-NonInteractive', '-Command',
+            `Unblock-File -Path "${info.downloadedFile}"`,
+          ], { timeout: 10000 });
+          updaterLog(`installer: Unblock-File OK on ${info.downloadedFile}`);
+        } catch (e) {
+          updaterLog(`installer: Unblock-File failed: ${e?.message || e}`);
+        }
+      }
       updaterLog('installer: killing server subprocess before quitAndInstall');
       await killServerAndWait();
       updaterLog('installer: server dead, calling quitAndInstall');
