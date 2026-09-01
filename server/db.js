@@ -726,6 +726,17 @@ const MIGRATIONS = [
   // te Fatura Blerje). Kopjohen nga produkti kur zgjidhet.
   "ALTER TABLE invoice_items ADD COLUMN has_gram REAL DEFAULT 0",
   "ALTER TABLE invoice_items ADD COLUMN multiplier REAL DEFAULT 0",
+
+  // Etiketa valute për kursin e blerjes/shitjes te rreshti i Fatura Blerje —
+  // thjesht një marker (EUR/USD) që user-i të dijë në ç'valutë ka futur numrin.
+  // Formulat nuk konvertojnë; përdorin vlerën numerike si-është.
+  "ALTER TABLE purchase_items ADD COLUMN has_rate_currency TEXT DEFAULT 'EUR'",
+  "ALTER TABLE purchase_items ADD COLUMN sell_rate_currency TEXT DEFAULT 'EUR'",
+
+  // Të njëjtat etiketa valute propagohen te produkti pas blerjes së fundit —
+  // rreshti i produktit te Inventar shfaq valutën me të cilën u ble/shitur.
+  "ALTER TABLE products ADD COLUMN has_rate_currency TEXT DEFAULT 'EUR'",
+  "ALTER TABLE products ADD COLUMN sell_rate_currency TEXT DEFAULT 'EUR'",
 ];
 
 async function initDB() {

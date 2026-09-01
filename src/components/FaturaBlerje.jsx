@@ -5,6 +5,23 @@ import { showConfirm } from './ConfirmDialog.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
+// Toggle €/$ për kolonat e kursit — thjesht një etiketë valute. Formulat
+// përdorin vlerën numerike si-është, s'ka konvertim.
+function CurrencyToggle({ value, onChange }) {
+  const cur = value === 'USD' ? 'USD' : 'EUR'
+  const symbol = cur === 'USD' ? '$' : '€'
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(cur === 'EUR' ? 'USD' : 'EUR')}
+      title={`Valuta: ${cur} (kliko për të ndryshuar)`}
+      className="px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 leading-none shrink-0"
+    >
+      {symbol}
+    </button>
+  )
+}
+
 // Zgjedhës kategorie materiali me krijim/editim/fshirje inline. Slug ruhet te
 // products.material dhe label te products.category kur admin zgjedh një
 // kategori. Kategoritë built_in (flori/diamant/ora) mbrohen nga fshirja.
@@ -154,6 +171,9 @@ function emptyItem() {
     // llogaritur `sell_price` të pavarur nga kursi i blerjes (`has_rate`).
     // Default = has_rate kur rreshti krijohet; user-i mund ta ndryshojë manualisht.
     sell_rate: 0,
+    // Etiketa valute për kursin e blerjes/shitjes — marker (EUR/USD) që user-i
+    // të dijë në ç'valutë ka futur numrin. Formula përdor vlerën si-është.
+    has_rate_currency: 'EUR', sell_rate_currency: 'EUR',
   }
 }
 
@@ -1729,10 +1749,14 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         title={forcedCategory === 'flori' && n(it.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
                     </td>
                     <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-                      <MoneyInput value={it.has_rate}
-                        onChange={v => setItem(idx, { has_rate: v })}
-                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
-                        placeholder={hasRateLoading ? '…' : '0.00'} />
+                      <div className="flex items-center gap-1">
+                        <MoneyInput value={it.has_rate}
+                          onChange={v => setItem(idx, { has_rate: v })}
+                          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
+                          placeholder={hasRateLoading ? '…' : '0.00'} />
+                        <CurrencyToggle value={it.has_rate_currency}
+                          onChange={v => setItem(idx, { has_rate_currency: v })} />
+                      </div>
                     </td>
                     <td className="px-1 py-1">
                       <MoneyInput value={it.cost_price}
@@ -1743,10 +1767,14 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       />
                     </td>
                     <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
-                      <MoneyInput value={it.sell_rate}
-                        onChange={v => setItem(idx, { sell_rate: v })}
-                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
-                        placeholder={hasRateLoading ? '…' : '0.00'} />
+                      <div className="flex items-center gap-1">
+                        <MoneyInput value={it.sell_rate}
+                          onChange={v => setItem(idx, { sell_rate: v })}
+                          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
+                          placeholder={hasRateLoading ? '…' : '0.00'} />
+                        <CurrencyToggle value={it.sell_rate_currency}
+                          onChange={v => setItem(idx, { sell_rate_currency: v })} />
+                      </div>
                     </td>
                     <td className="px-1 py-1">
                       <input type="number" step="0.01" min="0" max="100" value={it.vat_rate}

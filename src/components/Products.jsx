@@ -101,9 +101,51 @@ const EMPTY = {
   // i shitjes. Kur mbushen (bashkë me gram), has_gram, cost_price, sell_price
   // llogariten auto sipas formulës flori te Fatura Blerje.
   kodi: '', multiplier: '', sell_rate: '',
+  has_rate_currency: 'EUR', sell_rate_currency: 'EUR',
 }
 
 const VAT_OPTIONS = [0, 6, 10, 20]
+
+// Toggle €/$ për etiketën e valutës — propagohet nga blerja te produkti dhe
+// mund të ndryshohet manualisht nga rreshti. Formulat përdorin vlerën numerike.
+function CurrencyToggle({ value, onChange }) {
+  const cur = value === 'USD' ? 'USD' : 'EUR'
+  const symbol = cur === 'USD' ? '$' : '€'
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(cur === 'EUR' ? 'USD' : 'EUR')}
+      title={`Valuta: ${cur} (kliko për të ndryshuar)`}
+      className="px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 leading-none shrink-0"
+    >
+      {symbol}
+    </button>
+  )
+}
+
+// Selector kompakt për kategorinë: shfaq vetëm ikonën në qelizë, por hap
+// një select nativ (opsione me ikonë + emër) kur user-i klikon. Selecti është
+// i mbivendosur me opacity 0, kështu klikimet regjistrohen normalisht dhe
+// dropdown-i i browser-it shfaqet i lexueshëm.
+function CategoryIconSelect({ value, onChange }) {
+  return (
+    <div className="relative inline-flex items-center justify-center w-12 h-8 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer" title={value}>
+      <span className="text-lg leading-none pointer-events-none select-none">
+        {CAT_ICONS[value] || '📦'}
+      </span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        aria-label="Kategoria"
+      >
+        {CATEGORIES.map(c => (
+          <option key={c} value={c}>{CAT_ICONS[c] || '📦'} {c}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const productNo = id => `GS-${String(id).padStart(4, '0')}`
@@ -719,20 +761,13 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           onChange={e => set('barcode', e.target.value)}
           className="input-field-sm font-mono text-xs" placeholder="—" />
       </td>
-      <td className="px-1 py-1">
-        <div className="flex items-center gap-1">
-          <span className="text-base">{CAT_ICONS[rowData.category] || '📦'}</span>
-          <input type="text" value={rowData.name} autoFocus
-            onChange={e => set('name', e.target.value)}
-            className="input-field-sm flex-1" placeholder="Emri i produktit *" />
-        </div>
+      <td className="px-1 py-1 min-w-[300px]">
+        <input type="text" value={rowData.name} autoFocus
+          onChange={e => set('name', e.target.value)}
+          className="input-field-sm w-full text-sm font-medium py-1.5" placeholder="Emri i produktit *" />
       </td>
-      <td className="px-1 py-1">
-        <select value={rowData.category}
-          onChange={e => set('category', e.target.value)}
-          className="input-field-sm text-xs">
-          {CATEGORIES.map(c => <option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}
-        </select>
+      <td className="px-1 py-1 w-16 text-center">
+        <CategoryIconSelect value={rowData.category} onChange={v => set('category', v)} />
       </td>
       <td className="px-1 py-1">
         <input type="number" min="0" value={rowData.stock}
@@ -764,10 +799,14 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           placeholder="HAS" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-        <MoneyInput value={rowData.has_rate}
-          onChange={v => set('has_rate', String(v))}
-          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
-          placeholder="0.00" />
+        <div className="flex items-center gap-1">
+          <MoneyInput value={rowData.has_rate}
+            onChange={v => set('has_rate', String(v))}
+            className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
+            placeholder="0.00" />
+          <CurrencyToggle value={rowData.has_rate_currency}
+            onChange={v => set('has_rate_currency', v)} />
+        </div>
       </td>
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
         <input type="number" step="0.01" min="0" value={rowData.multiplier}
@@ -776,10 +815,14 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           placeholder="1.8" />
       </td>
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
-        <MoneyInput value={rowData.sell_rate}
-          onChange={v => set('sell_rate', String(v))}
-          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
-          placeholder="0.00" />
+        <div className="flex items-center gap-1">
+          <MoneyInput value={rowData.sell_rate}
+            onChange={v => set('sell_rate', String(v))}
+            className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
+            placeholder="0.00" />
+          <CurrencyToggle value={rowData.sell_rate_currency}
+            onChange={v => set('sell_rate_currency', v)} />
+        </div>
       </td>
       <td className="px-1 py-1">
         <MoneyInput value={rowData.purchase_price_no_vat}
@@ -878,6 +921,8 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
     sell_price:            p.sell_price != null ? String(p.sell_price) : '',
     is_promotion:          !!p.is_promotion,
     promo_discount_pct:    p.promo_discount_pct != null && parseFloat(p.promo_discount_pct) > 0 ? String(p.promo_discount_pct) : '',
+    has_rate_currency:     p.has_rate_currency || 'EUR',
+    sell_rate_currency:    p.sell_rate_currency || 'EUR',
   })
   const [form, setForm] = useState(initForm)
   const [saving, setSaving] = useState(false)
@@ -967,6 +1012,8 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       sell_price:            parseFloat(currentForm.sell_price) || 0,
       is_promotion:          currentForm.is_promotion ? 1 : 0,
       promo_discount_pct:    currentForm.is_promotion ? Math.max(0, Math.min(100, parseFloat(currentForm.promo_discount_pct) || 0)) : 0,
+      has_rate_currency:     currentForm.has_rate_currency === 'USD' ? 'USD' : 'EUR',
+      sell_rate_currency:    currentForm.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
     }
     try {
       const res = await fetch(`/api/products/${p.id}`, {
@@ -1017,20 +1064,13 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           onChange={e => set('barcode', e.target.value)}
           className="input-field-sm font-mono text-xs" placeholder="—" />
       </td>
-      <td className="px-1 py-1">
-        <div className="flex items-center gap-1">
-          <span className="text-base">{CAT_ICONS[form.category] || '📦'}</span>
-          <input type="text" value={form.name}
-            onChange={e => set('name', e.target.value)}
-            className="input-field-sm flex-1" placeholder="Emri i produktit" />
-        </div>
+      <td className="px-1 py-1 min-w-[300px]">
+        <input type="text" value={form.name}
+          onChange={e => set('name', e.target.value)}
+          className="input-field-sm w-full text-sm font-medium py-1.5" placeholder="Emri i produktit" />
       </td>
-      <td className="px-1 py-1">
-        <select value={form.category}
-          onChange={e => set('category', e.target.value)}
-          className="input-field-sm text-xs">
-          {CATEGORIES.map(c => <option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}
-        </select>
+      <td className="px-1 py-1 w-16 text-center">
+        <CategoryIconSelect value={form.category} onChange={v => set('category', v)} />
       </td>
       <td className="px-1 py-1">
         <input type="number" min="0" value={form.stock}
@@ -1063,10 +1103,14 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           placeholder="HAS" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-        <MoneyInput value={form.has_rate}
-          onChange={v => set('has_rate', String(v))}
-          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
-          placeholder="0.00" />
+        <div className="flex items-center gap-1">
+          <MoneyInput value={form.has_rate}
+            onChange={v => set('has_rate', String(v))}
+            className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
+            placeholder="0.00" />
+          <CurrencyToggle value={form.has_rate_currency}
+            onChange={v => set('has_rate_currency', v)} />
+        </div>
       </td>
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
         <input type="number" step="0.01" min="0" value={form.multiplier}
@@ -1075,10 +1119,14 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           placeholder="1.8" />
       </td>
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
-        <MoneyInput value={form.sell_rate}
-          onChange={v => set('sell_rate', String(v))}
-          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
-          placeholder="0.00" />
+        <div className="flex items-center gap-1">
+          <MoneyInput value={form.sell_rate}
+            onChange={v => set('sell_rate', String(v))}
+            className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
+            placeholder="0.00" />
+          <CurrencyToggle value={form.sell_rate_currency}
+            onChange={v => set('sell_rate_currency', v)} />
+        </div>
       </td>
       <td className="px-1 py-1">
         <MoneyInput value={form.purchase_price_no_vat}
@@ -1994,8 +2042,8 @@ export default function Products() {
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pershkrimi</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase min-w-[300px]">Pershkrimi</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-16" title="Kategoria">Kat.</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Kodi i floririt (585, 750, ...)">Kodi</th>
