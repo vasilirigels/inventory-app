@@ -53,10 +53,13 @@ function emptyItem() {
   }
 }
 
-// Zbritje euro derivohet nga zbritje % dhe totali bruto i rreshtit.
+// Zbritje euro derivohet nga zbritje % dhe totali bruto i rreshtit ME TVSH.
+// User-i mendon te "shitja finale" (303€) kur shkruan zbritje 3€ — do te dojë
+// finalin -3€ (300€), jo -3€ off bazes pa TVSH (qe do te ishte -3.60€ off finalit).
 function discountEurFor(it) {
   const base = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0)
-  return base * ((parseFloat(it.discount_percent) || 0) / 100)
+  const vatFactor = 1 + (parseFloat(it.vat_rate) || 0) / 100
+  return base * vatFactor * ((parseFloat(it.discount_percent) || 0) / 100)
 }
 
 function computeLine(it) {
@@ -1978,7 +1981,11 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         value={discEur}
                         onChange={eur => {
                           if (base <= 0) { setItem(idx, { discount_percent: 0 }); return }
-                          const pct = Math.max(0, Math.min(100, (eur / base) * 100))
+                          // Zbritja € interpretohet si "eur off nga finali me TVSH".
+                          // discount_percent aplikohet mbi bazen pa-TVSH (te computeLine),
+                          // ndaj konvertojme: pct = eur / (base × (1 + vat/100)) × 100.
+                          const vatFactor = 1 + (parseFloat(it.vat_rate) || 0) / 100
+                          const pct = Math.max(0, Math.min(100, (eur / (base * vatFactor)) * 100))
                           setItem(idx, { discount_percent: +pct.toFixed(4) })
                         }}
                         className="input-field-sm text-right"
