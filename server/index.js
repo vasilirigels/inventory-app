@@ -2825,9 +2825,18 @@ async function applyProductPrices(items) {
     if (!it.product_id) continue;
     const updates = [];
     const params = [];
-    if (it.purchase_price_no_vat != null && it.purchase_price_no_vat !== '') {
+    // products.cost_price = "Cmim Blerje" qe shfaqet ne rreshtin e Blerjes.
+    // Per Flori auto-llogaritet (has_gram × has_rate) dhe eshte kostoja e vertete
+    // e materialit. Per te tjeret user-i e mbush ne kolonen "Cmim Blerje". Fallback
+    // te purchase_price_no_vat vetem nese it.cost_price mungon ose eshte 0.
+    const itemCost = parseFloat(it.cost_price) || 0;
+    const itemPurchaseNoVat = parseFloat(it.purchase_price_no_vat) || 0;
+    if (itemCost > 0) {
       updates.push('cost_price = ?');
-      params.push(parseFloat(it.purchase_price_no_vat) || 0);
+      params.push(itemCost);
+    } else if (it.purchase_price_no_vat != null && it.purchase_price_no_vat !== '') {
+      updates.push('cost_price = ?');
+      params.push(itemPurchaseNoVat);
     }
     if (it.sell_price != null && it.sell_price !== '' && parseFloat(it.sell_price) > 0) {
       updates.push('sell_price = ?');
