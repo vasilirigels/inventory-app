@@ -881,6 +881,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   })
   const [form, setForm] = useState(initForm)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(null)
   const initialMount = useRef(true)
   const savedSnapshot = useRef(JSON.stringify(initForm()))
   const savingRef = useRef(false)
@@ -888,15 +889,18 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   useEffect(() => { formRef.current = form }, [form])
 
   // Rifresko formin kur produkti ndryshon nga jashtë (reload, realtime sync),
-  // vetëm nëse s'kemi ndryshime lokale të pa-ruajtura.
+  // vetëm nëse s'kemi ndryshime lokale të pa-ruajtura. Krahasojmë form aktual
+  // (formRef) me savedSnapshot — nëse ndryshojnë, user-i po edit-on dhe s'guxojmë
+  // t'ia mbishkruajmë punën me të dhëna të vjetra nga një load() pas save-i.
   useEffect(() => {
     const fresh = initForm()
     const freshStr = JSON.stringify(fresh)
-    if (freshStr !== savedSnapshot.current) {
-      setForm(fresh)
-      savedSnapshot.current = freshStr
-      initialMount.current = true // ndalo save-in e ardhshëm auto
-    }
+    if (freshStr === savedSnapshot.current) return
+    const currentFormStr = JSON.stringify(formRef.current)
+    if (currentFormStr !== savedSnapshot.current) return // dirty — mos e prek
+    setForm(fresh)
+    savedSnapshot.current = freshStr
+    initialMount.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.id, p.updated_at, p.barcode, p.name, p.stock, p.cost_price, p.sell_price,
       p.gram, p.has_gram, p.has_rate, p.kodi, p.multiplier, p.sell_rate,
@@ -925,65 +929,80 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
     })
   }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate])
 
+  // Ekzekuton PUT me formin më të fundit. Përdoret nga debounce dhe nga
+  // butoni manual 💾. Pret çdo save të mëparshëm të mbarojë para se të nisë
+  // dhe surface-on error nëse server ktheu != 2xx.
+  const performSave = async () => {
+    while (savingRef.current) {
+      await new Promise(r => setTimeout(r, 100))
+    }
+    savingRef.current = true
+    setSaving(true)
+    setSaveError(null)
+    const currentForm = formRef.current
+    const payload = {
+      ...p,
+      barcode:               currentForm.barcode,
+      name:                  currentForm.name,
+      brand:                 currentForm.brand,
+      category:              currentForm.category,
+      stock:                 parseInt(currentForm.stock) || 0,
+      gram:                  parseFloat(currentForm.gram) || 0,
+      kodi:                  parseFloat(currentForm.kodi) || 0,
+      has_gram:              parseFloat(currentForm.has_gram) || 0,
+      has_currency:          currentForm.has_currency || 'HAS',
+      has_rate:              parseFloat(currentForm.has_rate) || 0,
+      multiplier:            parseFloat(currentForm.multiplier) || 0,
+      sell_rate:             parseFloat(currentForm.sell_rate) || 0,
+      purchase_price_no_vat: parseFloat(currentForm.purchase_price_no_vat) || 0,
+      vat_rate:              parseFloat(currentForm.vat_rate) || 0,
+      cost_price:            parseFloat(currentForm.cost_price) || 0,
+      sell_price:            parseFloat(currentForm.sell_price) || 0,
+      is_promotion:          currentForm.is_promotion ? 1 : 0,
+      promo_discount_pct:    currentForm.is_promotion ? Math.max(0, Math.min(100, parseFloat(currentForm.promo_discount_pct) || 0)) : 0,
+    }
+    try {
+      const res = await fetch(`/api/products/${p.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}${errBody ? ': ' + errBody.slice(0, 100) : ''}`)
+      }
+      savedSnapshot.current = JSON.stringify(currentForm)
+      onSaved?.()
+    } catch (e) {
+      console.error('Product save failed:', e)
+      setSaveError(e?.message || 'Gabim në ruajtje')
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
   // Debounced auto-save — 600ms pas ndalimit të shkrimit.
-  // Nëse një save është në progres kur user-i vazhdon të shkruajë, kjo pret
-  // për të parën të mbarojë, pastaj dërgon të renë me form-in më të fundit
-  // (formRef). Pa këtë, save-i i dytë hidhej silent dhe ndryshimi humbte.
   useEffect(() => {
     if (initialMount.current) { initialMount.current = false; return }
-    const t = setTimeout(async () => {
-      while (savingRef.current) {
-        await new Promise(r => setTimeout(r, 100))
-      }
-      savingRef.current = true
-      setSaving(true)
-      const currentForm = formRef.current
-      const payload = {
-        ...p,
-        barcode:               currentForm.barcode,
-        name:                  currentForm.name,
-        brand:                 currentForm.brand,
-        category:              currentForm.category,
-        stock:                 parseInt(currentForm.stock) || 0,
-        gram:                  parseFloat(currentForm.gram) || 0,
-        kodi:                  parseFloat(currentForm.kodi) || 0,
-        has_gram:              parseFloat(currentForm.has_gram) || 0,
-        has_currency:          currentForm.has_currency || 'HAS',
-        has_rate:              parseFloat(currentForm.has_rate) || 0,
-        multiplier:            parseFloat(currentForm.multiplier) || 0,
-        sell_rate:             parseFloat(currentForm.sell_rate) || 0,
-        purchase_price_no_vat: parseFloat(currentForm.purchase_price_no_vat) || 0,
-        vat_rate:              parseFloat(currentForm.vat_rate) || 0,
-        cost_price:            parseFloat(currentForm.cost_price) || 0,
-        sell_price:            parseFloat(currentForm.sell_price) || 0,
-        is_promotion:          currentForm.is_promotion ? 1 : 0,
-        promo_discount_pct:    currentForm.is_promotion ? Math.max(0, Math.min(100, parseFloat(currentForm.promo_discount_pct) || 0)) : 0,
-      }
-      try {
-        const res = await fetch(`/api/products/${p.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (res.ok) {
-          savedSnapshot.current = JSON.stringify(currentForm)
-          onSaved?.()
-        }
-      } catch (e) { console.error(e) }
-      finally {
-        savingRef.current = false
-        setSaving(false)
-      }
-    }, 600)
+    const t = setTimeout(performSave, 600)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form])
 
+  const isDirty = JSON.stringify(form) !== savedSnapshot.current
+
   return (
-    <tr className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
+    <tr className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors ${isDirty ? 'bg-amber-50/60 dark:bg-amber-900/20' : ''}`}>
       <td className="px-2 py-1 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
         {productNo(p.id)}
         {saving && <span className="ml-1 text-[10px] text-blue-500" title="Duke ruajtur...">⏳</span>}
+        {!saving && saveError && (
+          <span className="ml-1 text-[10px] text-red-600 cursor-help" title={`Ruajtja dështoi: ${saveError}. Kliko 💾 për të riprovuar.`}>⚠️</span>
+        )}
+        {!saving && !saveError && isDirty && (
+          <span className="ml-1 text-[10px] text-amber-500" title="Ndryshim i paruajtur">●</span>
+        )}
       </td>
       <td className="px-1 py-1">
         <input type="text" value={form.barcode}
@@ -1119,6 +1138,13 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       </td>
       <td className="px-2 py-1">
         <div className="flex items-center justify-center gap-1">
+          {(isDirty || saveError) && (
+            <button onClick={performSave} disabled={saving}
+              title={saveError ? `Ruaj sërish (${saveError})` : 'Ruaj ndryshimet e paruajtura'}
+              className={`px-1.5 py-0.5 rounded text-white text-xs font-bold disabled:opacity-40 ${saveError ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+              💾
+            </button>
+          )}
           <button onClick={() => onBarcode(p)} title="Gjenero & Printo Barkod"
             className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs">🏷️</button>
           <button onClick={() => onEdit(p)} title="Hap modal-in e plotë"
