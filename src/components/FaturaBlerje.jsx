@@ -5,8 +5,21 @@ import { showConfirm } from './ConfirmDialog.jsx'
 
 const CURRENCIES = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
-// Toggle €/$ për kolonat e kursit — thjesht një etiketë valute. Formulat
-// përdorin vlerën numerike si-është, s'ka konvertim.
+// Konverto vlerën e një kursi (has_rate/sell_rate) nga një valutë në tjetrën
+// duke përdorur `allRates` (LEK për njësi të secilës valutë). Nëse vlera është
+// bosh/zero ose ndonjë kurs mungon, kthehet si-është.
+function convertRateCurrency(value, from, to, allRates) {
+  if (from === to) return value
+  const num = Number(String(value ?? '').replace(',', '.'))
+  if (!Number.isFinite(num) || num === 0) return value
+  const fromRate = Number(allRates?.[from])
+  const toRate   = Number(allRates?.[to])
+  if (!Number.isFinite(fromRate) || !Number.isFinite(toRate) || fromRate <= 0 || toRate <= 0) return value
+  return +(num * fromRate / toRate).toFixed(4)
+}
+
+// Toggle €/$ për kolonat e kursit — konverton vlerën numerike sipas allRates
+// (LEK/valutë) kur ndryshohet valuta.
 function CurrencyToggle({ value, onChange }) {
   const cur = value === 'USD' ? 'USD' : 'EUR'
   const symbol = cur === 'USD' ? '$' : '€'
@@ -1669,9 +1682,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulë">Kodi</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
+                <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
+                <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
                 {forcedCategory === 'flori' && (
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
@@ -1755,7 +1768,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                           className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
                           placeholder={hasRateLoading ? '…' : '0.00'} />
                         <CurrencyToggle value={it.has_rate_currency}
-                          onChange={v => setItem(idx, { has_rate_currency: v })} />
+                          onChange={v => setItem(idx, {
+                            has_rate_currency: v,
+                            has_rate: convertRateCurrency(it.has_rate, it.has_rate_currency, v, allRates),
+                          })} />
                       </div>
                     </td>
                     <td className="px-1 py-1">
@@ -1773,7 +1789,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                           className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
                           placeholder={hasRateLoading ? '…' : '0.00'} />
                         <CurrencyToggle value={it.sell_rate_currency}
-                          onChange={v => setItem(idx, { sell_rate_currency: v })} />
+                          onChange={v => setItem(idx, {
+                            sell_rate_currency: v,
+                            sell_rate: convertRateCurrency(it.sell_rate, it.sell_rate_currency, v, allRates),
+                          })} />
                       </div>
                     </td>
                     <td className="px-1 py-1">
