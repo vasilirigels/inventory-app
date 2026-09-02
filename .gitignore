@@ -10,3 +10,4 @@ npm-debug.log*
 server/uploads/
 .claude/
 release/
+data/backups/

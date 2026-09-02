@@ -261,11 +261,24 @@ function ProductPickerCell({ value, onPick }) {
     setOpen(true)
   }
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && results.length > 0) {
-      e.preventDefault()
-      pick(results[0])
-    }
+  const handleKeyDown = async (e) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (results.length > 0) { pick(results[0]); return }
+    // Skanerët e barkodit e dërgojnë Enter menjëherë pas karaktereve — më shpejt
+    // se debounce-i 200ms. Bëj një kërkim direkt sinkron dhe zgjidh të parin
+    // (backend-i e rendit exact-barcode të parin).
+    const q = query.trim()
+    if (!q) return
+    clearTimeout(timerRef.current)
+    setLoading(true)
+    try {
+      const data = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`).then(r => r.json())
+      const arr = Array.isArray(data) ? data : []
+      if (arr.length > 0) pick(arr[0])
+      else setResults([])
+    } catch { /* ignore */ }
+    setLoading(false)
   }
 
   const pick = (p) => {
@@ -285,41 +298,160 @@ function ProductPickerCell({ value, onPick }) {
         className="input-field-sm"
       />
       {open && (results.length > 0 || loading) && (
-        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto min-w-[280px]">
-          {loading && <div className="p-2 text-[11px] text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
-          {results.map(p => {
-            const basePrice = parseFloat(p.sell_price) || 0
-            const onPromo = !!p.is_promotion && (parseFloat(p.promo_discount_pct) || 0) > 0
-            const promoPrice = onPromo ? basePrice * (1 - parseFloat(p.promo_discount_pct) / 100) : basePrice
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => pick(p)}
-                className={`w-full text-left px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0 ${onPromo ? 'hover:bg-rose-50 bg-rose-50/30' : 'hover:bg-blue-50'}`}
-              >
-                <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate flex items-center gap-1">
-                  {p.name}
-                  {onPromo && <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-semibold">🏷️ -{p.promo_discount_pct}%</span>}
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                  <span className="font-mono">{p.barcode || p.sku || '—'}</span>
-                  <span>
-                    {basePrice > 0 && (
-                      onPromo
-                        ? <><span className="line-through text-slate-400 dark:text-slate-500 mr-1">€{basePrice.toFixed(2)}</span><span className="text-rose-700 font-bold">€{promoPrice.toFixed(2)}</span></>
-                        : `€${basePrice}`
-                    )}
-                    {' · '}stok: {p.stock}
-                    {p.vat_rate != null ? ` · TVSH ${p.vat_rate}%` : ''}
-                  </span>
-                </div>
-              </button>
-            )
-          })}
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-96 overflow-y-auto min-w-[420px]">
+          {loading && <div className="p-3 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
+          {results.map(p => (
+            <ProductResultItem key={p.id} product={p} onPick={pick} />
+          ))}
         </div>
       )}
     </div>
+  )
+}
+
+// ── Barcode input për kolonën Barkodi te secili rresht ─────────────────────
+// Lejon shkrim/skanim manual: kërkon produkte me barkodin e shkruar dhe hap
+// dropdown me rezultatet; me Enter (nga skaneri ose tastiera) zgjedh të parin.
+function BarcodeSearchInput({ value, onTypedChange, onPick }) {
+  const [query, setQuery]     = useState(value || '')
+  const [results, setResults] = useState([])
+  const [open, setOpen]       = useState(false)
+  const [loading, setLoading] = useState(false)
+  const timerRef = useRef(null)
+  const boxRef   = useRef(null)
+
+  useEffect(() => { setQuery(value || '') }, [value])
+
+  useEffect(() => {
+    function onDoc(e) {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const runSearch = (q, immediate = false) => {
+    clearTimeout(timerRef.current)
+    if (!q.trim()) { setResults([]); return }
+    const fire = async () => {
+      setLoading(true)
+      try {
+        const data = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`).then(r => r.json())
+        setResults(Array.isArray(data) ? data : [])
+      } catch { setResults([]) }
+      setLoading(false)
+    }
+    if (immediate) return fire()
+    timerRef.current = setTimeout(fire, 200)
+  }
+
+  const pick = (p) => {
+    onPick(p)
+    setOpen(false)
+  }
+
+  const handleKeyDown = async (e) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (results.length > 0) { pick(results[0]); return }
+    // Skaneri e dërgon Enter menjëherë — bëj kërkim sinkron dhe pick të parin.
+    const q = query.trim()
+    if (!q) return
+    clearTimeout(timerRef.current)
+    setLoading(true)
+    try {
+      const data = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`).then(r => r.json())
+      const arr = Array.isArray(data) ? data : []
+      if (arr.length > 0) pick(arr[0])
+      else setResults([])
+    } catch { /* ignore */ }
+    setLoading(false)
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <input
+        type="text"
+        value={query}
+        placeholder="—"
+        onChange={e => {
+          const v = e.target.value
+          setQuery(v)
+          onTypedChange?.(v)
+          runSearch(v)
+          setOpen(true)
+        }}
+        onFocus={() => query && setOpen(true)}
+        onKeyDown={handleKeyDown}
+        className="input-field-sm font-mono"
+      />
+      {open && (results.length > 0 || loading) && (
+        <div className="absolute z-20 left-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-96 overflow-y-auto min-w-[420px]">
+          {loading && <div className="p-3 text-xs text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
+          {results.map(p => (
+            <ProductResultItem key={p.id} product={p} onPick={pick} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Rresht i vetëm në dropdown-in e kërkimit: thumbnail + emër + badge kategorie
+// + barkod + çmim (me PROMO nëse ka) + stok me ngjyra sipas gjendjes.
+const CAT_EMOJI = {
+  'Flori': '🟡', 'Diamant': '💎', 'Ora': '⌚', 'Unazë': '💍', 'Vathë': '✨',
+  'Byzylyk': '📿', 'Gjerdan / Varëse': '🏅', 'Komplet': '🎁', 'Tjeter': '📦',
+}
+function ProductResultItem({ product: p, onPick }) {
+  const basePrice  = parseFloat(p.sell_price) || 0
+  const onPromo    = !!p.is_promotion && (parseFloat(p.promo_discount_pct) || 0) > 0
+  const promoPrice = onPromo ? basePrice * (1 - parseFloat(p.promo_discount_pct) / 100) : basePrice
+  const stock      = parseInt(p.stock) || 0
+  const stockCls   = stock <= 0
+    ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+    : stock < 3
+      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+  const emoji      = CAT_EMOJI[p.category] || '📦'
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(p)}
+      className={`w-full text-left px-3 py-2 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 last:border-0 transition-colors ${onPromo ? 'hover:bg-rose-50 dark:hover:bg-rose-900/20' : 'hover:bg-blue-50 dark:hover:bg-blue-900/20'}`}
+    >
+      <div className="shrink-0 w-11 h-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center overflow-hidden">
+        {p.image_path ? (
+          <img src={`/uploads/products/${p.image_path}`} alt="" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} />
+        ) : (
+          <span className="text-xl leading-none">{emoji}</span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+          {onPromo && <span className="text-[10px] bg-rose-600 text-white px-1.5 py-0.5 rounded font-bold shrink-0">-{p.promo_discount_pct}%</span>}
+        </div>
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">{p.barcode || p.sku || '—'}</span>
+          {p.category && <span className="text-slate-500 dark:text-slate-400">{emoji} {p.category}</span>}
+          {p.gram > 0 && <span className="text-slate-400 dark:text-slate-500">· {parseFloat(p.gram).toFixed(2)}g</span>}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        {basePrice > 0 && (
+          onPromo ? (
+            <>
+              <div className="text-[10px] line-through text-slate-400 dark:text-slate-500 leading-none">€{basePrice.toFixed(2)}</div>
+              <div className="text-base font-bold text-rose-600 dark:text-rose-400 leading-tight">€{promoPrice.toFixed(2)}</div>
+            </>
+          ) : (
+            <div className="text-base font-bold text-slate-800 dark:text-slate-100 leading-tight">€{basePrice.toFixed(2)}</div>
+          )
+        )}
+        <div className={`inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded ${stockCls}`}>Stok: {stock}</div>
+      </div>
+    </button>
   )
 }
 
@@ -1930,10 +2062,10 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                   <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
-                      <input
-                        type="text" value={it.barcode} readOnly
-                        className="input-field-sm font-mono bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
-                        placeholder="—"
+                      <BarcodeSearchInput
+                        value={it.barcode}
+                        onTypedChange={v => setItem(idx, { barcode: v })}
+                        onPick={p => pickProduct(idx, p)}
                       />
                     </td>
                     <td className="px-1 py-1">
