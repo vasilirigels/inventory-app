@@ -457,6 +457,103 @@ async function downloadTemplate() {
   XLSX.writeFile(wb, 'gold_shop_template.xlsx')
 }
 
+// ── Export Fields Modal ────────────────────────────────────────────────────
+// Zgjedhësi i fushave për export në Excel. Ruaj zgjedhjen në localStorage që
+// të kujtohet herën tjetër.
+const EXPORT_FIELDS = [
+  { key: 'nr',         label: 'Nr' },
+  { key: 'barcode',    label: 'Barkodi' },
+  { key: 'name',       label: 'Pershkrimi' },
+  { key: 'category',   label: 'Kategoria' },
+  { key: 'brand',      label: 'Brendi' },
+  { key: 'sku',        label: 'SKU' },
+  { key: 'stock',      label: 'Sasia' },
+  { key: 'min_stock',  label: 'Stok Minimal' },
+  { key: 'gram',       label: 'Gram' },
+  { key: 'kodi',       label: 'Kodi (flori)' },
+  { key: 'has_gram',   label: 'Has (gram)' },
+  { key: 'has_rate',   label: 'Kursi Blerje' },
+  { key: 'sell_rate',  label: 'Kursi Shitje' },
+  { key: 'multiplier', label: 'Shumëzues' },
+  { key: 'cost_price', label: 'Cmim Blerje (€)' },
+  { key: 'sell_price', label: 'Cmim Shitje (€)' },
+  { key: 'vat_rate',   label: 'TVSH %' },
+  { key: 'promo',      label: 'Në promocion' },
+  { key: 'promo_pct',  label: 'Zbritje Promo %' },
+]
+const EXPORT_LS_KEY = 'products_export_fields_v1'
+const DEFAULT_EXPORT_KEYS = ['nr', 'barcode', 'name', 'category', 'brand', 'sku', 'cost_price', 'sell_price', 'stock', 'min_stock']
+
+function ExportFieldsModal({ count, onClose, onExport }) {
+  const [selected, setSelected] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(EXPORT_LS_KEY) || 'null')
+      if (Array.isArray(saved) && saved.length > 0) return saved
+    } catch {}
+    return DEFAULT_EXPORT_KEYS
+  })
+  const [exporting, setExporting] = useState(false)
+
+  const toggle = (key) => setSelected(prev =>
+    prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+  )
+  const selectAll  = () => setSelected(EXPORT_FIELDS.map(f => f.key))
+  const selectNone = () => setSelected([])
+
+  const handleExport = async () => {
+    if (selected.length === 0 || exporting) return
+    setExporting(true)
+    try {
+      localStorage.setItem(EXPORT_LS_KEY, JSON.stringify(selected))
+      await onExport(selected)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="modal-header">
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">⬇️ Export produkte në Excel</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{count} produkte · zgjidh cilat fusha të përfshihen</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <button onClick={selectAll}  className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-300 font-semibold">✓ Të gjitha</button>
+            <button onClick={selectNone} className="text-xs px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-300 font-semibold">Asnjë</button>
+            <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">{selected.length} / {EXPORT_FIELDS.length} të zgjedhura</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 border border-slate-200 dark:border-slate-700 rounded-xl p-3 max-h-80 overflow-y-auto">
+            {EXPORT_FIELDS.map(f => {
+              const on = selected.includes(f.key)
+              return (
+                <label key={f.key} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${on ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(f.key)} className="w-4 h-4 accent-blue-600" />
+                  <span className={`text-sm ${on ? 'font-semibold text-slate-800 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'}`}>{f.label}</span>
+                </label>
+              )
+            })}
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button onClick={onClose} className="btn-secondary">Anulo</button>
+            <button
+              onClick={handleExport}
+              disabled={selected.length === 0 || exporting}
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exporting ? 'Duke eksportuar...' : `⬇️ Export ${selected.length} fusha`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Import Modal ───────────────────────────────────────────────────────────────
 function ImportModal({ onClose, onDone }) {
   const fileRef = useRef()
@@ -1557,6 +1654,7 @@ export default function Products() {
   const [confirmDel, setConfirmDel] = useState(null)
   const [barcodeFor, setBarcodeFor] = useState(null)    // product | null
   const [showImport, setShowImport] = useState(false)
+  const [showExport, setShowExport] = useState(false)
   const [view, setView]             = useState('list')  // grid | list
   const [fromDate, setFromDate]     = useState('')
   const [toDate, setToDate]         = useState('')
@@ -1784,23 +1882,37 @@ export default function Products() {
     }
   }
 
-  const exportExcel = async () => {
+  const runExport = async (selectedKeys) => {
     const XLSX = await loadXLSX()
-    const rows = products.map(p => ({
-      Nr: productNo(p.id),
-      Emri: p.name,
-      Kategoria: p.category,
-      Brendi: p.brand || '',
-      SKU: p.sku || '',
-      Barkodi: p.barcode || '',
-      'Cmimi Kosto EUR': p.cost_price || 0,
-      'Cmimi Shitje EUR': p.sell_price || 0,
-      Stoku: p.stock || 0,
-      'Stok Minimal': p.min_stock || 5,
-    }))
+    // Përkufizim i fushave — çelës, etiketa e kolonës, extraktori dhe gjerësia.
+    // Renditja këtu është renditja që del në Excel.
+    const FIELDS = [
+      { key: 'nr',         label: 'Nr',                get: p => productNo(p.id),                       w: 10 },
+      { key: 'barcode',    label: 'Barkodi',           get: p => p.barcode || '',                        w: 16 },
+      { key: 'name',       label: 'Pershkrimi',        get: p => p.name || '',                           w: 30 },
+      { key: 'category',   label: 'Kategoria',         get: p => p.category || '',                       w: 14 },
+      { key: 'brand',      label: 'Brendi',            get: p => p.brand || '',                          w: 14 },
+      { key: 'sku',        label: 'SKU',               get: p => p.sku || '',                            w: 12 },
+      { key: 'stock',      label: 'Sasia',             get: p => p.stock || 0,                           w: 8 },
+      { key: 'min_stock',  label: 'Stok Minimal',      get: p => p.min_stock || 5,                       w: 12 },
+      { key: 'gram',       label: 'Gram',              get: p => p.gram || 0,                            w: 10 },
+      { key: 'kodi',       label: 'Kodi',              get: p => p.kodi || '',                           w: 8 },
+      { key: 'has_gram',   label: 'Has (gram)',        get: p => p.has_gram || 0,                        w: 12 },
+      { key: 'has_rate',   label: 'Kursi Blerje',      get: p => p.has_rate || 0,                        w: 14 },
+      { key: 'sell_rate',  label: 'Kursi Shitje',      get: p => p.sell_rate || 0,                       w: 14 },
+      { key: 'multiplier', label: 'Shumëzues',         get: p => p.multiplier || 0,                      w: 12 },
+      { key: 'cost_price', label: 'Cmim Blerje (€)',   get: p => p.cost_price || 0,                      w: 16 },
+      { key: 'sell_price', label: 'Cmim Shitje (€)',   get: p => p.sell_price || 0,                      w: 16 },
+      { key: 'vat_rate',   label: 'TVSH %',            get: p => p.vat_rate ?? 0,                        w: 8 },
+      { key: 'promo',      label: 'Në promocion',      get: p => p.is_promotion ? 'Po' : '',             w: 12 },
+      { key: 'promo_pct',  label: 'Zbritje Promo %',   get: p => p.is_promotion ? (p.promo_discount_pct || 0) : '', w: 14 },
+    ]
+    const active = FIELDS.filter(f => selectedKeys.includes(f.key))
+    if (active.length === 0) return
+    const rows = products.map(p => Object.fromEntries(active.map(f => [f.label, f.get(p)])))
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [8,30,14,14,12,14,16,16,8,12].map(w => ({ wch: w }))
+    ws['!cols'] = active.map(f => ({ wch: f.w }))
     XLSX.utils.book_append_sheet(wb, ws, 'Produktet')
     XLSX.writeFile(wb, `gold_shop_produktet_${new Date().toISOString().split('T')[0]}.xlsx`)
   }
@@ -1851,7 +1963,7 @@ export default function Products() {
           <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'list' ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>☰</button>
         </div>
 
-        <button onClick={exportExcel} className="btn-secondary flex-shrink-0">
+        <button onClick={() => setShowExport(true)} className="btn-secondary flex-shrink-0">
           ⬇️ Export
         </button>
         <button onClick={() => setShowImport(true)} className="btn-secondary flex-shrink-0">
@@ -2200,6 +2312,15 @@ export default function Products() {
         <ImportModal
           onClose={() => setShowImport(false)}
           onDone={() => { load() }}
+        />
+      )}
+
+      {/* ── Export Modal ── */}
+      {showExport && (
+        <ExportFieldsModal
+          count={products.length}
+          onClose={() => setShowExport(false)}
+          onExport={async (keys) => { await runExport(keys); setShowExport(false) }}
         />
       )}
 

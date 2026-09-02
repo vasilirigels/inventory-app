@@ -173,6 +173,10 @@ function emptyItem() {
     category: '', unit: 'copë', gram: 0,
     qty: 1, purchase_price_no_vat: 0, cost_price: 0, discount_percent: 0,
     vat_rate: 0, sell_price: 0, material: '',
+    // Zbritje mbi Cmim Shitje (përdoret vetëm te Blerje Diamant për të reduktuar
+    // sell_price nga formula bazë cost_price × multiplier). Nuk ndikon në total-in
+    // e blerjes (discount_percent bën atë).
+    sell_discount_percent: 0,
     is_promotion: false, promo_discount_pct: 0,
     // Blerje në gram HAS (peshë floriri të pastër) + kursi EUR/gram HAS që
     // mbushet automatikisht nga /api/gold-spot-price kur hapet editori.
@@ -731,7 +735,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
 // up in the Products page), then ➋ appends them as line items on the open
 // purchase invoice — linked by the freshly-minted product_id so saving the
 // invoice tracks stock correctly via adjustPurchaseStock.
-function ImportExcelModal({ onClose, onImported, overrideCategoryLabel }) {
+function ImportExcelModal({ onClose, onImported, overrideCategoryLabel, forcedCategory }) {
   const fileRef = useRef()
   const [step, setStep]               = useState('upload') // upload | preview
   const [fileName, setFileName]       = useState('')
@@ -740,6 +744,12 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel }) {
   const [dataRows, setDataRows]       = useState([])
   const [error, setError]             = useState('')
   const [importing, setImporting]     = useState(false)
+
+  // Për Blerje Diamant lejohen vetëm 5 fusha nga Excel-i — të tjerat s'shfaqen
+  // dhe s'importohen. Për Blerje Flori / Artikuj të tjerë, të gjitha fushat.
+  const allowedFields = forcedCategory === 'diamant'
+    ? ['barcode', 'name', 'stock', 'gram', 'cost_price']
+    : null // null = të gjitha
 
   const handleFile = e => {
     const file = e.target.files[0]
@@ -760,7 +770,15 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel }) {
         const rows = raw.slice(hdrIdx + 1).filter(r => r.some(c => String(c).trim() !== ''))
         setHeaders(hdrs)
         setDataRows(rows)
-        setMapping(detectMapping(hdrs))
+        const detected = detectMapping(hdrs)
+        // Nëse janë të lejuara vetëm disa fusha, pastrojmë të tjerat te -1
+        // që të mos importohen edhe nëse Excel-i i ka.
+        if (allowedFields) {
+          for (const k of Object.keys(detected)) {
+            if (!allowedFields.includes(k)) detected[k] = -1
+          }
+        }
+        setMapping(detected)
         setStep('preview')
       } catch (err) {
         setError('Gabim gjatë leximit: ' + err.message)
@@ -808,18 +826,21 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel }) {
 
   const setMap = (key, val) => setMapping(m => ({ ...m, [key]: parseInt(val) }))
 
-  const COL_FIELDS = [
-    { key: 'name',       label: 'Emri *' },
+  const ALL_COL_FIELDS = [
+    { key: 'name',       label: 'Pershkrimi *' },
     { key: 'category',   label: 'Kategoria' },
     { key: 'brand',      label: 'Brendi' },
     { key: 'sku',        label: 'Kodi SKU' },
-    { key: 'barcode',    label: 'Barcode' },
-    { key: 'cost_price', label: 'Çm. Blerje (€)' },
+    { key: 'barcode',    label: 'Barkodi' },
+    { key: 'cost_price', label: 'Cmim Blerje (€)' },
     { key: 'sell_price', label: 'Çm. Shitje (€)' },
-    { key: 'stock',      label: 'Sasia' },
+    { key: 'stock',      label: 'Sasi / Sasia' },
     { key: 'gram',       label: 'Gram' },
     { key: 'min_stock',  label: 'Stok Minimal' },
   ]
+  const COL_FIELDS = allowedFields
+    ? ALL_COL_FIELDS.filter(f => allowedFields.includes(f.key))
+    : ALL_COL_FIELDS
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -991,7 +1012,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // vjen njësoj se blerja bëhet në të njëjtën ditë.
   const [hasRate, setHasRate]           = useState(0)
   const [hasRateLoading, setHasRateLoading] = useState(false)
-  const [defaultMultiplier, setDefaultMultiplier] = useState('')
 
   const loadMaterialCategories = async () => {
     try {
@@ -1157,21 +1177,41 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
     ...emptyItem(),
     has_rate: hasRate || 0,
     sell_rate: hasRate || 0,
-    multiplier: parseFloat(String(defaultMultiplier).replace(',', '.')) || 0,
   }])
 
-  // Kur ndryshon shumëzuesi default (input global), mbush të njëjtën vlerë te
-  // çdo rresht. User-i mund të bëjë override për një rresht të caktuar pastaj.
+  // Blerje Diamant: (1) migro çdo discount_percent të vjetër → sell_discount_percent
+  // dhe reseto discount_percent në 0 (që të mos zbresë nga total-i i blerjes).
+  // (2) llogarit sell_price = cost_price × multiplier × (1 − sell_disc/100).
   useEffect(() => {
-    if (forcedCategory !== 'flori') return
-    const m = parseFloat(String(defaultMultiplier).replace(',', '.')) || 0
-    if (m <= 0) return
+    if (forcedCategory !== 'diamant') return
     setItems(prev => {
-      if (prev.every(it => Math.abs(n(it.multiplier) - m) < 0.0001)) return prev
-      return prev.map(it => ({ ...it, multiplier: m }))
+      let changed = false
+      const next = prev.map(it => {
+        let out = it
+        // Migrimi i njëhershëm: nëse discount_percent > 0 dhe sell_discount_percent
+        // është ende bosh, transfero. Pastaj hiq discount_percent.
+        if (n(it.discount_percent) > 0) {
+          out = {
+            ...out,
+            sell_discount_percent: n(out.sell_discount_percent) > 0
+              ? n(out.sell_discount_percent)
+              : n(it.discount_percent),
+            discount_percent: 0,
+          }
+          changed = true
+        }
+        const cp  = n(out.cost_price)
+        const mul = n(out.multiplier)
+        const dsc = n(out.sell_discount_percent) || 0
+        if (cp <= 0 || mul <= 0) return out
+        const newSell = +(cp * mul * (1 - dsc / 100)).toFixed(2)
+        if (Math.abs(newSell - n(out.sell_price)) < 0.005) return out
+        changed = true
+        return { ...out, sell_price: newSell }
+      })
+      return changed ? next : prev
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultMultiplier, forcedCategory])
+  }, [items, forcedCategory])
   const removeItem = (idx) =>
     setItems(prev => prev.length === 1 ? [emptyItem()] : prev.filter((_, i) => i !== idx))
 
@@ -1522,22 +1562,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             disabled={currency === 'LEK'} className="input-field disabled:bg-slate-50" />
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
         </div>
-        {forcedCategory === 'flori' && (
-          <div>
-            <label className="form-label">
-              Shumëzues Shitjeje
-              <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">(p.sh. 1.8)</span>
-            </label>
-            <input
-              type="text" inputMode="decimal"
-              value={defaultMultiplier}
-              onChange={e => setDefaultMultiplier(e.target.value)}
-              className="input-field font-bold text-emerald-700 dark:text-emerald-300"
-              placeholder="p.sh. 1.8"
-            />
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Aplikohet për të gjitha rreshtat</p>
-          </div>
-        )}
         <div>
           <label className="form-label">Kategoria</label>
           {forcedCategory ? (() => {
@@ -1681,12 +1705,24 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 {forcedCategory === 'flori' && (
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulë">Kodi</th>
                 )}
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
-                <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
+                {forcedCategory !== 'diamant' && (
+                  <>
+                    <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
+                    <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
+                  </>
+                )}
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
-                <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
+                {forcedCategory === 'diamant' && (
+                  <>
+                    <th className="px-2 py-2 text-right font-semibold w-24 bg-orange-50 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200" title="Zbritje në € — konvertohet auto në % dhe zbritet nga totali (pa TVSH)">Zbritje €</th>
+                    <th className="px-2 py-2 text-right font-semibold w-16 bg-orange-50 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200" title="Zbritje në % mbi çmimin pa TVSH">Zbritje %</th>
+                  </>
+                )}
+                {forcedCategory !== 'diamant' && (
+                  <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
+                )}
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
-                {forcedCategory === 'flori' && (
+                {(forcedCategory === 'flori' || forcedCategory === 'diamant') && (
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">Cmim Shitje €</th>
@@ -1753,27 +1789,31 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                           placeholder="585" />
                       </td>
                     )}
-                    <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-                      <input type="number" step="0.001" min="0" value={it.has_gram || ''}
-                        onChange={e => setItem(idx, { has_gram: e.target.value })}
-                        disabled={forcedCategory === 'flori' && n(it.kodi) > 0}
-                        className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-                        placeholder="0.00"
-                        title={forcedCategory === 'flori' && n(it.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
-                    </td>
-                    <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-                      <div className="flex items-center gap-1">
-                        <MoneyInput value={it.has_rate}
-                          onChange={v => setItem(idx, { has_rate: v })}
-                          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
-                          placeholder={hasRateLoading ? '…' : '0.00'} />
-                        <CurrencyToggle value={it.has_rate_currency}
-                          onChange={v => setItem(idx, {
-                            has_rate_currency: v,
-                            has_rate: convertRateCurrency(it.has_rate, it.has_rate_currency, v, allRates),
-                          })} />
-                      </div>
-                    </td>
+                    {forcedCategory !== 'diamant' && (
+                      <>
+                        <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+                          <input type="number" step="0.001" min="0" value={it.has_gram || ''}
+                            onChange={e => setItem(idx, { has_gram: e.target.value })}
+                            disabled={forcedCategory === 'flori' && n(it.kodi) > 0}
+                            className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+                            placeholder="0.00"
+                            title={forcedCategory === 'flori' && n(it.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
+                        </td>
+                        <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
+                          <div className="flex items-center gap-1">
+                            <MoneyInput value={it.has_rate}
+                              onChange={v => setItem(idx, { has_rate: v })}
+                              className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
+                              placeholder={hasRateLoading ? '…' : '0.00'} />
+                            <CurrencyToggle value={it.has_rate_currency}
+                              onChange={v => setItem(idx, {
+                                has_rate_currency: v,
+                                has_rate: convertRateCurrency(it.has_rate, it.has_rate_currency, v, allRates),
+                              })} />
+                          </div>
+                        </td>
+                      </>
+                    )}
                     <td className="px-1 py-1">
                       <MoneyInput value={it.cost_price}
                         onChange={v => setItem(idx, { cost_price: v })}
@@ -1782,25 +1822,62 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         {...(forcedCategory === 'flori' ? { title: 'Auto: has_gram × Kursi' } : {})}
                       />
                     </td>
-                    <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
-                      <div className="flex items-center gap-1">
-                        <MoneyInput value={it.sell_rate}
-                          onChange={v => setItem(idx, { sell_rate: v })}
-                          className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
-                          placeholder={hasRateLoading ? '…' : '0.00'} />
-                        <CurrencyToggle value={it.sell_rate_currency}
-                          onChange={v => setItem(idx, {
-                            sell_rate_currency: v,
-                            sell_rate: convertRateCurrency(it.sell_rate, it.sell_rate_currency, v, allRates),
-                          })} />
-                      </div>
-                    </td>
+                    {forcedCategory === 'diamant' && (() => {
+                      // Zbritja mbi Cmim Shitje: reduktohet sell_price = cost × mul × (1 − disc/100).
+                      // Base = qty × cost_price × multiplier (para zbritjes, pa TVSH).
+                      // Zbritje € interpretohet pa TVSH — përputhet me Cmim Shitje që shfaqet pa TVSH.
+                      const qty  = n(it.qty)
+                      const cp   = n(it.cost_price)
+                      const mul  = n(it.multiplier)
+                      const dsc  = n(it.sell_discount_percent) || 0
+                      const base = qty * cp * mul
+                      const discEur = base > 0 ? +(base * dsc / 100).toFixed(2) : 0
+                      return (
+                        <>
+                          <td className="px-1 py-1 bg-orange-50/40 dark:bg-orange-900/10">
+                            <MoneyInput
+                              value={discEur}
+                              onChange={eur => {
+                                if (base <= 0) { setItem(idx, { sell_discount_percent: 0 }); return }
+                                const pct = Math.max(0, Math.min(100, (eur / base) * 100))
+                                setItem(idx, { sell_discount_percent: +pct.toFixed(4) })
+                              }}
+                              className="input-field-sm text-right font-semibold text-orange-800 dark:text-orange-200"
+                              placeholder="0.00"
+                            />
+                          </td>
+                          <td className="px-1 py-1 bg-orange-50/40 dark:bg-orange-900/10">
+                            <input
+                              type="number" step="0.01" min="0" max="100" value={it.sell_discount_percent ?? 0}
+                              onChange={e => setItem(idx, { sell_discount_percent: e.target.value })}
+                              className="input-field-sm text-right font-semibold text-orange-800 dark:text-orange-200"
+                              placeholder="0"
+                            />
+                          </td>
+                        </>
+                      )
+                    })()}
+                    {forcedCategory !== 'diamant' && (
+                      <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+                        <div className="flex items-center gap-1">
+                          <MoneyInput value={it.sell_rate}
+                            onChange={v => setItem(idx, { sell_rate: v })}
+                            className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
+                            placeholder={hasRateLoading ? '…' : '0.00'} />
+                          <CurrencyToggle value={it.sell_rate_currency}
+                            onChange={v => setItem(idx, {
+                              sell_rate_currency: v,
+                              sell_rate: convertRateCurrency(it.sell_rate, it.sell_rate_currency, v, allRates),
+                            })} />
+                        </div>
+                      </td>
+                    )}
                     <td className="px-1 py-1">
                       <input type="number" step="0.01" min="0" max="100" value={it.vat_rate}
                         onChange={e => setItem(idx, { vat_rate: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
-                    {forcedCategory === 'flori' && (
+                    {(forcedCategory === 'flori' || forcedCategory === 'diamant') && (
                       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
                         <input type="number" step="0.01" min="0" value={it.multiplier || ''}
                           onChange={e => setItem(idx, { multiplier: e.target.value })}
@@ -1810,11 +1887,21 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       </td>
                     )}
 <td className="px-1 py-1 bg-emerald-50 dark:bg-emerald-900/30">
-                      <MoneyInput value={it.sell_price}
-                        onChange={v => setItem(idx, { sell_price: v })}
-                        disabled={forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0}
-                        className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-                        {...(forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0 ? { title: 'Auto: has_gram × Shumëzues × Kursi' } : {})} />
+                      {(() => {
+                        const floriAuto = forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0
+                        const diamAuto  = forcedCategory === 'diamant' && n(it.cost_price) > 0 && n(it.multiplier) > 0
+                        const auto      = floriAuto || diamAuto
+                        const autoTitle = floriAuto ? 'Auto: has_gram × Shumëzues × Kursi'
+                                        : diamAuto  ? 'Auto: Cmim Blerje × Shumëzues'
+                                                    : undefined
+                        return (
+                          <MoneyInput value={it.sell_price}
+                            onChange={v => setItem(idx, { sell_price: v })}
+                            disabled={auto}
+                            className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 ${auto ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+                            {...(autoTitle ? { title: autoTitle } : {})} />
+                        )
+                      })()}
                     </td>
                     {forcedCategory === 'flori' && (() => {
                       const cp = n(it.cost_price), sp = n(it.sell_price)
@@ -1869,7 +1956,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={forcedCategory === 'flori' ? 15 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                <td colSpan={forcedCategory === 'flori' ? 15 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
@@ -1980,11 +2067,15 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         <ImportExcelModal
           onClose={() => setShowImport(false)}
           onImported={handleImported}
-          overrideCategoryLabel={
-            category
-              ? (materialCategories.find(c => c.slug === category)?.label || null)
-              : null
-          }
+          forcedCategory={forcedCategory}
+          overrideCategoryLabel={(() => {
+            if (!category) return null
+            const found = materialCategories.find(c => c.slug === category)?.label
+            if (found) return found
+            // Fallback kur material_categories është bosh (p.sh. pas reset-i):
+            // kapitalizo slug-un — 'flori' → 'Flori', 'diamant' → 'Diamant'.
+            return category.charAt(0).toUpperCase() + category.slice(1)
+          })()}
         />
       )}
 
