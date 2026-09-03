@@ -1060,7 +1060,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // Blerje Flori: formula — nëse kodi > 0, llogarit auto:
   //   has_gram    = (kodi/1000 + kursi_blerje/1000) × gram
   //   cost_price  = has_gram × kursi_blerje              (has_rate — per rresht)
-  //   sell_price  = has_gram × multiplier × kursi_shitje (sell_rate — per rresht; fallback te has_rate)
+  //   sell_price  = has_gram × multiplier × kursi_shitje × (1 + tvsh/100)
+  //                 (sell_rate — per rresht; fallback te has_rate)
   // Nëse kodi = 0 (fatura të vjetra) nuk mbishkruajmë asgjë — të dhënat mbeten.
   useEffect(() => {
     if (forcedCategory !== 'flori') return
@@ -1071,11 +1072,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         const k   = n(it.kodi)
         const hr  = n(it.has_rate)
         const mul = n(it.multiplier)
+        const vat = n(it.vat_rate) || 0
         if (k <= 0 || g <= 0 || hr <= 0) return it
         const sellR    = n(it.sell_rate) > 0 ? n(it.sell_rate) : hr
         const newHas   = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
         const newCost  = +(newHas * hr).toFixed(2)
-        const newSell  = mul > 0 ? +(newHas * mul * sellR).toFixed(2) : n(it.sell_price)
+        const newSell  = mul > 0 ? +(newHas * mul * sellR * (1 + vat / 100)).toFixed(2) : n(it.sell_price)
         if (
           Math.abs(newHas  - n(it.has_gram))   < 0.00005 &&
           Math.abs(newCost - n(it.cost_price)) < 0.005 &&
@@ -1181,7 +1183,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
 
   // Blerje Diamant: (1) migro çdo discount_percent të vjetër → sell_discount_percent
   // dhe reseto discount_percent në 0 (që të mos zbresë nga total-i i blerjes).
-  // (2) llogarit sell_price = cost_price × multiplier × (1 − sell_disc/100).
+  // (2) llogarit sell_price = cost_price × multiplier × (1 + tvsh/100) × (1 − sell_disc/100).
   useEffect(() => {
     if (forcedCategory !== 'diamant') return
     setItems(prev => {
@@ -1202,9 +1204,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         }
         const cp  = n(out.cost_price)
         const mul = n(out.multiplier)
+        const vat = n(out.vat_rate) || 0
         const dsc = n(out.sell_discount_percent) || 0
         if (cp <= 0 || mul <= 0) return out
-        const newSell = +(cp * mul * (1 - dsc / 100)).toFixed(2)
+        const newSell = +(cp * mul * (1 + vat / 100) * (1 - dsc / 100)).toFixed(2)
         if (Math.abs(newSell - n(out.sell_price)) < 0.005) return out
         changed = true
         return { ...out, sell_price: newSell }
@@ -1823,14 +1826,15 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       />
                     </td>
                     {forcedCategory === 'diamant' && (() => {
-                      // Zbritja mbi Cmim Shitje: reduktohet sell_price = cost × mul × (1 − disc/100).
-                      // Base = qty × cost_price × multiplier (para zbritjes, pa TVSH).
-                      // Zbritje € interpretohet pa TVSH — përputhet me Cmim Shitje që shfaqet pa TVSH.
+                      // Zbritja mbi Cmim Shitje: reduktohet sell_price = cost × mul × (1 + tvsh/100) × (1 − disc/100).
+                      // Base = qty × cost_price × multiplier × (1 + tvsh/100) (para zbritjes, me TVSH).
+                      // Zbritje € interpretohet me TVSH — përputhet me Cmim Shitje që shfaqet me TVSH.
                       const qty  = n(it.qty)
                       const cp   = n(it.cost_price)
                       const mul  = n(it.multiplier)
+                      const vat  = n(it.vat_rate) || 0
                       const dsc  = n(it.sell_discount_percent) || 0
-                      const base = qty * cp * mul
+                      const base = qty * cp * mul * (1 + vat / 100)
                       const discEur = base > 0 ? +(base * dsc / 100).toFixed(2) : 0
                       return (
                         <>
@@ -1891,8 +1895,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         const floriAuto = forcedCategory === 'flori' && n(it.kodi) > 0 && n(it.multiplier) > 0
                         const diamAuto  = forcedCategory === 'diamant' && n(it.cost_price) > 0 && n(it.multiplier) > 0
                         const auto      = floriAuto || diamAuto
-                        const autoTitle = floriAuto ? 'Auto: has_gram × Shumëzues × Kursi'
-                                        : diamAuto  ? 'Auto: Cmim Blerje × Shumëzues'
+                        const autoTitle = floriAuto ? 'Auto: has_gram × Shumëzues × Kursi × (1 + TVSH%)'
+                                        : diamAuto  ? 'Auto: Cmim Blerje × Shumëzues × (1 + TVSH%)'
                                                     : undefined
                         return (
                           <MoneyInput value={it.sell_price}
