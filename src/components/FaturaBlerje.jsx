@@ -1042,14 +1042,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // Auto-mbush has_rate + sell_rate te çdo rresht që ende s'ka kurs të vetin,
   // kur hasRate vjen nga API-ja. Nuk mbishkruajmë kursin që erdhi tashmë me
   // faturën ekzistuese. Fire edhe kur items ndryshojnë (p.sh. fatura ekzistuese
-  // ngarkohet pas hasRate).
+  // ngarkohet pas hasRate). Për Blerje Flori NUK auto-mbushim has_rate — user-i
+  // e vendos vetë Kursin e Blerjes.
   useEffect(() => {
     if (!hasRate) return
+    const skipHasRate = forcedCategory === 'flori'
     setItems(prev => {
-      if (!prev.some(it => !(n(it.has_rate) > 0) || !(n(it.sell_rate) > 0))) return prev
+      if (!prev.some(it => (!skipHasRate && !(n(it.has_rate) > 0)) || !(n(it.sell_rate) > 0))) return prev
       return prev.map(it => {
         const patch = {}
-        if (!(n(it.has_rate) > 0))  patch.has_rate  = hasRate
+        if (!skipHasRate && !(n(it.has_rate) > 0)) patch.has_rate = hasRate
         if (!(n(it.sell_rate) > 0)) patch.sell_rate = hasRate
         return Object.keys(patch).length ? { ...it, ...patch } : it
       })
@@ -1075,11 +1077,13 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         const vat = n(it.vat_rate) || 0
         if (k <= 0 || g <= 0 || hr <= 0) return it
         const sellR    = n(it.sell_rate) > 0 ? n(it.sell_rate) : hr
-        const newHas   = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
+        // has_gram rrumbullakoset gjithmonë në 2 shifra (p.sh. 1.3962 → 1.40)
+        // që të përputhet me shfaqjen; cost/sell përdorin këtë vlerë të rrumbullakosur.
+        const newHas   = +(((k / 1000) + (hr / 1000)) * g).toFixed(2)
         const newCost  = +(newHas * hr).toFixed(2)
         const newSell  = mul > 0 ? +(newHas * mul * sellR * (1 + vat / 100)).toFixed(2) : n(it.sell_price)
         if (
-          Math.abs(newHas  - n(it.has_gram))   < 0.00005 &&
+          Math.abs(newHas  - n(it.has_gram))   < 0.005 &&
           Math.abs(newCost - n(it.cost_price)) < 0.005 &&
           Math.abs(newSell - n(it.sell_price)) < 0.005
         ) return it
@@ -1177,7 +1181,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
 
   const addItem = () => setItems(prev => [...prev, {
     ...emptyItem(),
-    has_rate: hasRate || 0,
+    // Për Blerje Flori, Kursi Blerje (has_rate) vendoset manualisht.
+    has_rate: forcedCategory === 'flori' ? 0 : (hasRate || 0),
     sell_rate: hasRate || 0,
   }])
 
@@ -1711,7 +1716,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 {forcedCategory !== 'diamant' && (
                   <>
                     <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
-                    <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit">Kursi Blerje</th>
+                    <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title={forcedCategory === 'flori' ? 'Kursi i Blerjes — EUR / gram HAS; vendoset manualisht nga user-i' : 'Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit'}>Kursi Blerje</th>
                   </>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
@@ -1720,6 +1725,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                     <th className="px-2 py-2 text-right font-semibold w-24 bg-orange-50 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200" title="Zbritje në € — konvertohet auto në % dhe zbritet nga totali (pa TVSH)">Zbritje €</th>
                     <th className="px-2 py-2 text-right font-semibold w-16 bg-orange-50 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200" title="Zbritje në % mbi çmimin pa TVSH">Zbritje %</th>
                   </>
+                )}
+                {forcedCategory === 'flori' && (
+                  <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="HAS ne Shitje = Blerje Ne HAS × Shumëzues">HAS ne Shitje</th>
                 )}
                 {forcedCategory !== 'diamant' && (
                   <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
@@ -1807,7 +1815,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                             <MoneyInput value={it.has_rate}
                               onChange={v => setItem(idx, { has_rate: v })}
                               className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
-                              placeholder={hasRateLoading ? '…' : '0.00'} />
+                              placeholder={forcedCategory !== 'flori' && hasRateLoading ? '…' : '0.00'} />
                             <CurrencyToggle value={it.has_rate_currency}
                               onChange={v => setItem(idx, {
                                 has_rate_currency: v,
@@ -1859,6 +1867,18 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                             />
                           </td>
                         </>
+                      )
+                    })()}
+                    {forcedCategory === 'flori' && (() => {
+                      // HAS ne Shitje = Blerje Ne HAS × Shumëzues
+                      const hg  = n(it.has_gram)
+                      const mul = n(it.multiplier)
+                      const hasSell = hg > 0 && mul > 0 ? +(hg * mul).toFixed(2) : 0
+                      return (
+                        <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10 text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                            title="Auto: Blerje Ne HAS × Shumëzues">
+                          {hasSell > 0 ? hasSell.toFixed(2) : '—'}
+                        </td>
                       )
                     })()}
                     {forcedCategory !== 'diamant' && (
@@ -1960,7 +1980,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={forcedCategory === 'flori' ? 15 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                <td colSpan={forcedCategory === 'flori' ? 16 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
