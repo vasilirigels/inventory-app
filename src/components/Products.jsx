@@ -99,7 +99,8 @@ const EMPTY = {
   has_gram: '', has_currency: 'HAS', has_rate: '',
   // Fusha flori: kodi (585/750...), shumëzuesi për çmim shitjeje, dhe kursi
   // i shitjes. Kur mbushen (bashkë me gram), has_gram, cost_price, sell_price
-  // llogariten auto sipas formulës flori te Fatura Blerje.
+  // llogariten auto sipas formulës flori te Fatura Blerje:
+  //   has_gram = (kodi/1000) × gram.
   kodi: '', multiplier: '', sell_rate: '',
   has_rate_currency: 'EUR', sell_rate_currency: 'EUR',
 }
@@ -828,25 +829,22 @@ function ImportModal({ onClose, onDone }) {
 function NewProductRow({ rowData, onChange, onSave, onCancel }) {
   const set = (k, v) => onChange({ [k]: v })
 
-  // Formula flori
+  // Formula flori — vetëm çmimi i shitjes:
+  //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
+  // has_gram, cost_price, has_rate merren nga importi/user-i pa formulë.
   useEffect(() => {
-    const g   = parseFloat(rowData.gram) || 0
-    const k   = parseFloat(rowData.kodi) || 0
-    const hr  = parseFloat(rowData.has_rate) || 0
+    const hg  = parseFloat(rowData.has_gram) || 0
     const mul = parseFloat(rowData.multiplier) || 0
+    const hr  = parseFloat(rowData.has_rate) || 0
     const sr  = parseFloat(rowData.sell_rate) || 0
-    if (k <= 0 || g <= 0 || hr <= 0) return
+    if (hg <= 0 || mul <= 0) return
     const effSell = sr > 0 ? sr : hr
-    const newHas  = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
-    const newCost = +(newHas * hr).toFixed(2)
-    const newSell = mul > 0 ? +(newHas * mul * effSell).toFixed(2) : null
-    const patch = {}
-    if (String(newHas)  !== String(parseFloat(rowData.has_gram)   || 0)) patch.has_gram   = String(newHas)
-    if (String(newCost) !== String(parseFloat(rowData.cost_price) || 0)) patch.cost_price = String(newCost)
-    if (newSell != null && String(newSell) !== String(parseFloat(rowData.sell_price) || 0)) patch.sell_price = String(newSell)
-    if (Object.keys(patch).length) onChange(patch)
+    if (effSell <= 0) return
+    const newSell = +(hg * mul * effSell).toFixed(2)
+    if (String(newSell) === String(parseFloat(rowData.sell_price) || 0)) return
+    onChange({ sell_price: String(newSell) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowData.gram, rowData.kodi, rowData.has_rate, rowData.multiplier, rowData.sell_rate])
+  }, [rowData.has_gram, rowData.multiplier, rowData.has_rate, rowData.sell_rate])
 
   return (
     <tr className="border-b border-slate-200 dark:border-slate-700 bg-blue-50/40 dark:bg-blue-900/10">
@@ -885,8 +883,7 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <input type="number" step="0.001" min="0" value={rowData.has_gram}
           onChange={e => set('has_gram', e.target.value)}
-          disabled={parseFloat(rowData.kodi) > 0}
-          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${parseFloat(rowData.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          className="input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300"
           placeholder="0.000" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
@@ -905,12 +902,29 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
             onChange={v => set('has_rate_currency', v)} />
         </div>
       </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={rowData.cost_price}
+          onChange={v => set('cost_price', String(v))}
+          className="input-field-sm text-right font-semibold"
+          placeholder="0.00" />
+      </td>
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
         <input type="number" step="0.01" min="0" value={rowData.multiplier}
           onChange={e => set('multiplier', e.target.value)}
           className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
           placeholder="1.8" />
       </td>
+      {(() => {
+        const hg  = parseFloat(rowData.has_gram) || 0
+        const mul = parseFloat(rowData.multiplier) || 0
+        const hasSell = hg > 0 && mul > 0 ? +(hg * mul).toFixed(2) : 0
+        return (
+          <td className="px-2 py-1 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200"
+              title="Auto: Cmim Blerje Has × Shumëzues">
+            {hasSell > 0 ? hasSell.toFixed(2) : '—'}
+          </td>
+        )
+      })()}
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
         <div className="flex items-center gap-1">
           <MoneyInput value={rowData.sell_rate}
@@ -932,17 +946,10 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           className="input-field-sm text-center" />
       </td>
       <td className="px-1 py-1">
-        <MoneyInput value={rowData.cost_price}
-          onChange={v => set('cost_price', String(v))}
-          disabled={parseFloat(rowData.kodi) > 0}
-          className={`input-field-sm text-right font-semibold ${parseFloat(rowData.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-          placeholder="0.00" />
-      </td>
-      <td className="px-1 py-1">
         <MoneyInput value={rowData.sell_price}
           onChange={v => set('sell_price', String(v))}
-          disabled={parseFloat(rowData.kodi) > 0 && parseFloat(rowData.multiplier) > 0}
-          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(rowData.kodi) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          disabled={parseFloat(rowData.has_gram) > 0 && parseFloat(rowData.multiplier) > 0}
+          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(rowData.has_gram) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
           placeholder="0.00" />
       </td>
       {(() => {
@@ -1053,26 +1060,23 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  // Formula flori — llogarit auto has_gram, cost_price, sell_price
+  // Formula flori — vetëm çmimi i shitjes:
+  //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
+  // has_gram, cost_price, has_rate, gram, kodi merren nga importi/user-i pa formulë.
   useEffect(() => {
-    const g   = parseFloat(form.gram) || 0
-    const k   = parseFloat(form.kodi) || 0
-    const hr  = parseFloat(form.has_rate) || 0
+    const hg  = parseFloat(form.has_gram) || 0
     const mul = parseFloat(form.multiplier) || 0
+    const hr  = parseFloat(form.has_rate) || 0
     const sr  = parseFloat(form.sell_rate) || 0
-    if (k <= 0 || g <= 0 || hr <= 0) return
+    if (hg <= 0 || mul <= 0) return
     const effSell = sr > 0 ? sr : hr
-    const newHas  = +(((k / 1000) + (hr / 1000)) * g).toFixed(4)
-    const newCost = +(newHas * hr).toFixed(2)
-    const newSell = mul > 0 ? +(newHas * mul * effSell).toFixed(2) : null
+    if (effSell <= 0) return
+    const newSell = +(hg * mul * effSell).toFixed(2)
     setForm(prev => {
-      const patch = {}
-      if (String(newHas)  !== String(parseFloat(prev.has_gram)   || 0)) patch.has_gram   = String(newHas)
-      if (String(newCost) !== String(parseFloat(prev.cost_price) || 0)) patch.cost_price = String(newCost)
-      if (newSell != null && String(newSell) !== String(parseFloat(prev.sell_price) || 0)) patch.sell_price = String(newSell)
-      return Object.keys(patch).length ? { ...prev, ...patch } : prev
+      if (String(newSell) === String(parseFloat(prev.sell_price) || 0)) return prev
+      return { ...prev, sell_price: String(newSell) }
     })
-  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate])
+  }, [form.has_gram, form.multiplier, form.has_rate, form.sell_rate])
 
   // Ekzekuton PUT me formin më të fundit. Përdoret nga debounce dhe nga
   // butoni manual 💾. Pret çdo save të mëparshëm të mbarojë para se të nisë
@@ -1188,9 +1192,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <input type="number" step="0.001" min="0" value={form.has_gram}
           onChange={e => set('has_gram', e.target.value)}
-          disabled={parseFloat(form.kodi) > 0}
-          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${parseFloat(form.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-          title={parseFloat(form.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined}
+          className="input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300"
           placeholder="0.000" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
@@ -1209,12 +1211,29 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
             onChange={v => set('has_rate_currency', v)} />
         </div>
       </td>
+      <td className="px-1 py-1">
+        <MoneyInput value={form.cost_price}
+          onChange={v => set('cost_price', String(v))}
+          className="input-field-sm text-right font-semibold"
+          placeholder="0.00" />
+      </td>
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
         <input type="number" step="0.01" min="0" value={form.multiplier}
           onChange={e => set('multiplier', e.target.value)}
           className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
           placeholder="1.8" />
       </td>
+      {(() => {
+        const hg  = parseFloat(form.has_gram) || 0
+        const mul = parseFloat(form.multiplier) || 0
+        const hasSell = hg > 0 && mul > 0 ? +(hg * mul).toFixed(2) : 0
+        return (
+          <td className="px-2 py-1 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200"
+              title="Auto: Cmim Blerje Has × Shumëzues">
+            {hasSell > 0 ? hasSell.toFixed(2) : '—'}
+          </td>
+        )
+      })()}
       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
         <div className="flex items-center gap-1">
           <MoneyInput value={form.sell_rate}
@@ -1236,19 +1255,11 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           className="input-field-sm text-center" />
       </td>
       <td className="px-1 py-1">
-        <MoneyInput value={form.cost_price}
-          onChange={v => set('cost_price', String(v))}
-          disabled={parseFloat(form.kodi) > 0}
-          className={`input-field-sm text-right font-semibold ${parseFloat(form.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-          title={parseFloat(form.kodi) > 0 ? 'Auto: has_gram × Kursi Blerje' : undefined}
-          placeholder="0.00" />
-      </td>
-      <td className="px-1 py-1">
         <MoneyInput value={form.sell_price}
           onChange={v => set('sell_price', String(v))}
-          disabled={parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0}
-          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-          title={parseFloat(form.kodi) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: has_gram × Shumëzues × Kursi Shitje' : undefined}
+          disabled={parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0}
+          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          title={parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: Cmim Blerje Has × Shumëzues × Kursi Shitje' : undefined}
           placeholder="0.00" />
       </td>
       {(() => {
@@ -1513,11 +1524,9 @@ function ProductModal({ product, onClose, onSave }) {
                 <div>
                   <label className="form-label">Blerje Ne Monedhe</label>
                   <input type="number" step="0.001" min="0" value={form.has_gram}
-                    disabled={parseFloat(form.kodi) > 0}
                     onChange={e => set('has_gram', e.target.value)}
-                    className={`input-field ${parseFloat(form.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
-                    placeholder="0.000"
-                    title={parseFloat(form.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
+                    className="input-field"
+                    placeholder="0.000" />
                 </div>
                 <div>
                   <label className="form-label">Monedha</label>
@@ -1733,6 +1742,10 @@ export default function Products() {
   })()
 
   const filtered = products.filter(p => {
+    // Produkte pa stok fshihen nga lista e inventarit derisa të bëhet një
+    // blerje e re që i shton stokun. Numëratori i shpejtë "pa stok" në
+    // përmbledhëse mbetet aktiv sepse bazohet te `products` (jo `filtered`).
+    if ((parseInt(p.stock) || 0) <= 0) return false
     const q = search.toLowerCase()
     const matchSearch = !q ||
       p.name.toLowerCase().includes(q) ||
@@ -2149,7 +2162,7 @@ export default function Products() {
       {(filtered.length > 0 || newRows.length > 0) && view === 'list' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1500px]">
+          <table className="w-full text-sm min-w-[1700px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
@@ -2159,14 +2172,15 @@ export default function Products() {
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Kodi i floririt (585, 750, ...)">Kodi</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Blerje Ne Monedhe</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Cmim Blerje Has</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Mon</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 min-w-[160px]" title="EUR / gram HAS në kohën e blerjes">Kursi Blerje</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Shumëzuesi për çmim shitjeje">Shumëzues</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Cmim Shitje Has = Cmim Blerje Has × Shumëzues">Cmim Shitje Has</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 min-w-[160px]" title="EUR / gram HAS për çmim shitjeje">Kursi Shitje</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmimi PA</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Shitje €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" title="Fitim % = (Cmim Shitje − Cmim Kosto) / Cmim Kosto × 100">Fitim %</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" title="Marzh % = (Cmim Shitje − Cmim Kosto) / Cmim Shitje × 100">Marzh %</th>

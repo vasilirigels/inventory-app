@@ -404,6 +404,8 @@ const ADMIN_ONLY_PATH_REGEX = [
   /^\/api\/invoice-payments/,
   // Marketing — admin
   /^\/api\/marketing-expenses/,
+  /^\/api\/marketing-contracts/,
+  /^\/api\/marketing-contract-entries/,
   // Kategoritë e materialit (Fatura Blerje) — admin
   /^\/api\/material-categories/,
 ];
@@ -1301,19 +1303,32 @@ app.get('/api/products/lookup', async (req, res) => {
 app.get('/api/products/search', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
-    if (!q) return res.json([]);
+    const giftsOnly = req.query.gifts_only === '1' || req.query.gifts_only === 'true';
+    // Gjatë përzgjedhjes së Dhuratës në Fatura Shitje, lejoj kërkim bosh që
+    // të shfaqet lista e plotë e produkteve dhuratë me stok > 0.
+    if (!q && !giftsOnly) return res.json([]);
     const like = `%${q}%`;
+    const giftClause = giftsOnly ? ' AND is_gift = 1 AND stock > 0' : '';
+    const searchClause = q
+      ? ' AND (barcode LIKE ? OR sku LIKE ? OR name LIKE ? OR serial_no LIKE ?)'
+      : '';
+    const orderClause = q
+      ? 'ORDER BY (CASE WHEN barcode = ? THEN 0 WHEN sku = ? THEN 1 WHEN serial_no = ? THEN 2 ELSE 3 END), name'
+      : 'ORDER BY name';
+    const params = [];
+    if (q) params.push(like, like, like, like);
+    if (q) params.push(q, q, q);
     const rows = await queryAll(
       `SELECT id, name, sku, barcode, category, sell_price, cost_price, vat_rate, stock, image_path, gram,
               is_promotion, promo_discount_pct, serial_no, purchase_price_no_vat,
               has_gram, has_currency, has_rate,
-              kodi, multiplier, sell_rate
+              kodi, koeficent_pune, multiplier, sell_rate,
+              is_gift
          FROM products
-        WHERE active = 1
-          AND (barcode LIKE ? OR sku LIKE ? OR name LIKE ? OR serial_no LIKE ?)
-        ORDER BY (CASE WHEN barcode = ? THEN 0 WHEN sku = ? THEN 1 WHEN serial_no = ? THEN 2 ELSE 3 END), name
-        LIMIT 12`,
-      [like, like, like, like, q, q, q]
+        WHERE active = 1${giftClause}${searchClause}
+        ${orderClause}
+        LIMIT 30`,
+      params
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1392,8 +1407,8 @@ app.post('/api/products', async (req, res) => {
       ? Math.max(0, Math.min(100, parseFloat(d.promo_discount_pct) || 0))
       : 0;
     await run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, is_promotion, promo_discount_pct, gram, serial_no, purchase_price_no_vat, has_gram, has_currency, has_rate, has_rate_currency, kodi, multiplier, sell_rate, sell_rate_currency, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
+      `INSERT INTO products (name, sku, barcode, category, brand, description, cost_price, sell_price, stock, min_stock, vat_rate, unit, is_promotion, promo_discount_pct, gram, serial_no, purchase_price_no_vat, has_gram, has_currency, has_rate, has_rate_currency, kodi, koeficent_pune, multiplier, sell_rate, sell_rate_currency, is_gift, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_TS_SQL})`,
       [
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
@@ -1411,9 +1426,11 @@ app.post('/api/products', async (req, res) => {
         parseFloat(d.has_rate) || 0,
         d.has_rate_currency === 'USD' ? 'USD' : 'EUR',
         parseFloat(d.kodi) || 0,
+        parseFloat(d.koeficent_pune) || 0,
         parseFloat(d.multiplier) || 0,
         parseFloat(d.sell_rate) || 0,
         d.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
+        d.is_gift ? 1 : 0,
       ]
     );
     res.json({ success: true });
@@ -1449,7 +1466,8 @@ app.put('/api/products/:id', async (req, res) => {
            is_promotion=?, promo_discount_pct=?, gram=?,
            serial_no=?, purchase_price_no_vat=?,
            has_gram=?, has_currency=?, has_rate=?, has_rate_currency=?,
-           kodi=?, multiplier=?, sell_rate=?, sell_rate_currency=?,
+           kodi=?, koeficent_pune=?, multiplier=?, sell_rate=?, sell_rate_currency=?,
+           is_gift=?,
            updated_at=${NOW_TS_SQL}
        WHERE id=?`,
       [
@@ -1469,9 +1487,11 @@ app.put('/api/products/:id', async (req, res) => {
         parseFloat(d.has_rate) || 0,
         d.has_rate_currency === 'USD' ? 'USD' : 'EUR',
         parseFloat(d.kodi) || 0,
+        parseFloat(d.koeficent_pune) || 0,
         parseFloat(d.multiplier) || 0,
         parseFloat(d.sell_rate) || 0,
         d.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
+        d.is_gift ? 1 : 0,
         id,
       ]
     );
@@ -1555,8 +1575,9 @@ app.post('/api/products/import', async (req, res) => {
       await run(
         `INSERT INTO products (name, sku, barcode, category, brand, description,
            cost_price, sell_price, stock, min_stock,
-           serial_no, purchase_price_no_vat, vat_rate, unit, gram)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           serial_no, purchase_price_no_vat, vat_rate, unit, gram,
+           kodi, has_gram, has_rate, has_currency)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           String(d.name).trim(),
           sku, barcode,
@@ -1568,6 +1589,10 @@ app.post('/api/products/import', async (req, res) => {
           d.vat_rate != null && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
           d.unit || 'copë',
           parseFloat(d.gram) || 0,
+          parseInt(d.kodi) || 0,
+          parseFloat(d.has_gram) || 0,
+          parseFloat(d.has_rate) || 0,
+          'HAS',
         ]
       );
       const row = await queryOne('SELECT last_insert_rowid() AS id');
@@ -2026,8 +2051,8 @@ app.post('/api/invoices', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invoiceId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
@@ -2035,6 +2060,7 @@ app.post('/api/invoices', async (req, res) => {
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
           parseFloat(it.sell_rate) || 0,
           parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
+          it.is_gift ? 1 : 0,
         ]
       );
     }
@@ -2146,8 +2172,8 @@ app.put('/api/invoices/:id', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
@@ -2155,6 +2181,7 @@ app.put('/api/invoices/:id', async (req, res) => {
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
           parseFloat(it.sell_rate) || 0,
           parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
+          it.is_gift ? 1 : 0,
         ]
       );
     }
@@ -2372,8 +2399,8 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
       await run(
         `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
-          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           -(it.qty || 0), -(parseFloat(it.gram) || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
@@ -2382,6 +2409,7 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
           it.on_promotion ? 1 : 0, parseFloat(it.promo_discount_pct) || 0,
           parseFloat(it.sell_rate) || 0,
           parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
+          it.is_gift ? 1 : 0,
         ]
       );
     }
@@ -2900,6 +2928,10 @@ async function applyProductPrices(items) {
       updates.push('multiplier = ?');
       params.push(parseFloat(it.multiplier));
     }
+    if (it.koeficent_pune != null && it.koeficent_pune !== '' && parseFloat(it.koeficent_pune) > 0) {
+      updates.push('koeficent_pune = ?');
+      params.push(parseFloat(it.koeficent_pune));
+    }
     if (it.sell_rate != null && it.sell_rate !== '' && parseFloat(it.sell_rate) > 0) {
       updates.push('sell_rate = ?');
       params.push(parseFloat(it.sell_rate));
@@ -2948,17 +2980,46 @@ function purchaseGramSubquery(material) {
   return { sql, params };
 }
 
+// Totali i Cmim Blerje (me TVSH) dhe Cmim Shitje për artikujt e faturës,
+// filtruar sipas materialit — përdoret në listat Blerje Flori/Diamant për
+// të llogaritur Fitim %/Marzh % mesatar në rreshtin e totalit.
+function purchaseBuyTotalSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND EXISTS (SELECT 1 FROM products xp3 WHERE xp3.id = xpit3.product_id AND COALESCE(xp3.material,'') = ?)`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xpit3.total_with_vat,0)), 0)
+     FROM purchase_items xpit3
+     WHERE xpit3.purchase_id = pi.id ${matClause}) AS total_buy_price`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
+function purchaseSellTotalSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND EXISTS (SELECT 1 FROM products xp4 WHERE xp4.id = xpit4.product_id AND COALESCE(xp4.material,'') = ?)`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xpit4.qty,0) * COALESCE(xpit4.sell_price,0)), 0)
+     FROM purchase_items xpit4
+     WHERE xpit4.purchase_id = pi.id ${matClause}) AS total_sell_price`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
 app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
     const mat = buildPurchaseMaterialFilter(req.query.material);
     const gram = purchaseGramSubquery(req.query.material);
+    const buy = purchaseBuyTotalSubquery(req.query.material);
+    const sell = purchaseSellTotalSubquery(req.query.material);
     res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
-         ${gram.sql}
+         ${gram.sql},
+         ${buy.sql},
+         ${sell.sql}
        FROM purchase_invoices pi WHERE pi.date = ? ${mat.sql} ORDER BY pi.id ASC`,
-      [...gram.params, date, ...mat.params]
+      [...gram.params, ...buy.params, ...sell.params, date, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2969,12 +3030,16 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const mat = buildPurchaseMaterialFilter(req.query.material);
     const gram = purchaseGramSubquery(req.query.material);
+    const buy = purchaseBuyTotalSubquery(req.query.material);
+    const sell = purchaseSellTotalSubquery(req.query.material);
     res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
-         ${gram.sql}
+         ${gram.sql},
+         ${buy.sql},
+         ${sell.sql}
        FROM purchase_invoices pi WHERE pi.date BETWEEN ? AND ? ${mat.sql} ORDER BY pi.date ASC, pi.id ASC`,
-      [...gram.params, from, to, ...mat.params]
+      [...gram.params, ...buy.params, ...sell.params, from, to, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3045,14 +3110,15 @@ app.post('/api/purchase-invoices', async (req, res) => {
 
     const doInsertPurchase = (invNo) => run(
       `INSERT INTO purchase_invoices (date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
-        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes, is_gift)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         d.date, invNo, d.supplier_name || '', d.supplier_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
         sub, totalDiscount, vat, tot,
         pmI, amountPaidI, amountDueI,
         d.notes || '',
+        d.is_gift ? 1 : 0,
       ]
     );
     const invoice_no = userProvidedNo
@@ -3072,8 +3138,8 @@ app.post('/api/purchase-invoices', async (req, res) => {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
           purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-          has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
@@ -3083,11 +3149,20 @@ app.post('/api/purchase-invoices', async (req, res) => {
           parseFloat(it.has_gram) || 0, it.has_currency || 'HAS', parseFloat(it.has_rate) || 0,
           parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
           it.has_rate_currency === 'USD' ? 'USD' : 'EUR', it.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
+          parseFloat(it.koeficent_pune) || 0,
         ]
       );
     }
     await adjustPurchaseStock(items, +1);
     await applyProductPrices(items);
+    // Nëse fatura është shënuar si dhuratë, marko të gjithë produktet e saj
+    // si is_gift = 1 që të filtrohen te picker-i i Dhuratës në Fatura Shitje.
+    if (d.is_gift) {
+      const productIds = items.map(it => it.product_id).filter(Boolean);
+      for (const pid of productIds) {
+        await run('UPDATE products SET is_gift = 1 WHERE id = ?', [pid]);
+      }
+    }
     res.json({ success: true, id: newId, invoice_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3142,7 +3217,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
 
     await run(
       `UPDATE purchase_invoices SET date=?, supplier_name=?, supplier_nipt=?, currency=?, exchange_rate=?,
-        subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?, notes=?
+        subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?, notes=?, is_gift=?
        WHERE id=?`,
       [
         d.date || existing.date,
@@ -3151,6 +3226,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         sub, totalDiscount, vat, tot,
         pmU, amountPaidU, amountDueU,
         d.notes || '',
+        d.is_gift ? 1 : 0,
         id,
       ]
     );
@@ -3170,8 +3246,8 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
       await run(
         `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
           purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-          has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
@@ -3181,11 +3257,21 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
           parseFloat(it.has_gram) || 0, it.has_currency || 'HAS', parseFloat(it.has_rate) || 0,
           parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
           it.has_rate_currency === 'USD' ? 'USD' : 'EUR', it.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
+          parseFloat(it.koeficent_pune) || 0,
         ]
       );
     }
     await adjustPurchaseStock(items, +1);
     await applyProductPrices(items);
+    // Sync is_gift te produktet (nga fatura). Nëse fatura është dhuratë,
+    // marko produktet e saj; nëse jo më dhuratë, hiq flag-un (vetëm për
+    // produkte që nuk janë pjesë e ndonjë faturë tjetër dhuratë).
+    if (d.is_gift) {
+      const productIds = items.map(it => it.product_id).filter(Boolean);
+      for (const pid of productIds) {
+        await run('UPDATE products SET is_gift = 1 WHERE id = ?', [pid]);
+      }
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4398,6 +4484,14 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       const c = (r.cur || 'LEK').toUpperCase();
       if (c in expenses) expenses[c] += r.amt;
     }
+    // Marketing contract cash EUR entries — shpenzime EUR në arkë.
+    const mktCashRows = await queryAll(
+      `SELECT COALESCE(amount_eur, 0) AS amt
+         FROM marketing_contract_entries
+        WHERE date = ? AND type = 'cash'`,
+      [date]
+    );
+    for (const r of mktCashRows) expenses.EUR += r.amt;
 
     // Fatura Blerje kesh (payment_method='cash') → amount_paid në monedhën origjinale.
     const purRows = await queryAll(
@@ -4637,6 +4731,13 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       const c = (r.cur || 'LEK').toUpperCase();
       if (c in expenses) expenses[c] += r.amt;
     }
+    const mktCashRangeRows = await queryAll(
+      `SELECT COALESCE(amount_eur, 0) AS amt
+         FROM marketing_contract_entries
+        WHERE date BETWEEN ? AND ? AND type = 'cash'`,
+      [from, to]
+    );
+    for (const r of mktCashRangeRows) expenses.EUR += r.amt;
 
     const purRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur, COALESCE(amount_paid, 0) AS amt
@@ -6318,6 +6419,175 @@ app.delete('/api/marketing-entries/:id', async (req, res) => {
     await run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
     // Nëse ishte një produkt nga inventari, riktheje stokun te produkti.
     if (existing?.product_id && existing.product_qty > 0) {
+      await run(
+        'UPDATE products SET stock = stock + ? WHERE id = ?',
+        [existing.product_qty, existing.product_id]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// MARKETING — KONTRATAT (budget + entries)
+// ============================================================
+// Kontrata ka një buxhet total EUR dhe përmban zëra (product ose cash EUR)
+// që zbriten nga buxheti derisa arrihet totali. Cash EUR entries reflektohen
+// si shpenzim në Arkën Ditore.
+
+app.get('/api/marketing-contracts', async (req, res) => {
+  try {
+    const rows = await queryAll(
+      `SELECT mc.*,
+              COALESCE((SELECT SUM(amount_eur) FROM marketing_contract_entries WHERE contract_id = mc.id), 0) AS used_eur,
+              COALESCE((SELECT COUNT(*) FROM marketing_contract_entries WHERE contract_id = mc.id), 0) AS entries_count
+         FROM marketing_contracts mc
+        ORDER BY (mc.status = 'closed') ASC, mc.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/marketing-contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const contract = await queryOne('SELECT * FROM marketing_contracts WHERE id = ?', [id]);
+    if (!contract) return res.status(404).json({ error: 'not found' });
+    const entries = await queryAll(
+      `SELECT e.*,
+              p.name AS product_name, p.barcode AS product_barcode,
+              p.sell_price AS product_sell_price, p.stock AS product_stock
+         FROM marketing_contract_entries e
+         LEFT JOIN products p ON p.id = e.product_id
+        WHERE e.contract_id = ?
+        ORDER BY e.date ASC, e.id ASC`,
+      [id]
+    );
+    const usedRow = await queryOne(
+      'SELECT COALESCE(SUM(amount_eur), 0) AS used FROM marketing_contract_entries WHERE contract_id = ?',
+      [id]
+    );
+    res.json({ ...contract, entries, used_eur: usedRow?.used || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/marketing-contracts', async (req, res) => {
+  try {
+    const { name, total_amount_eur, notes } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'name required' });
+    const total = parseFloat(total_amount_eur) || 0;
+    if (total <= 0) return res.status(400).json({ error: 'total_amount_eur must be > 0' });
+    await run(
+      `INSERT INTO marketing_contracts (name, total_amount_eur, notes, status) VALUES (?, ?, ?, 'open')`,
+      [String(name).trim(), total, notes || '']
+    );
+    const row = await queryOne('SELECT * FROM marketing_contracts ORDER BY id DESC LIMIT 1');
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/marketing-contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne('SELECT * FROM marketing_contracts WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const { name, total_amount_eur, notes, status } = req.body || {};
+    const newStatus = status === 'closed' ? 'closed' : 'open';
+    const closedAt = newStatus === 'closed' && existing.status !== 'closed'
+      ? "strftime('%Y-%m-%d %H:%M:%f','now')"
+      : (newStatus === 'open' ? 'NULL' : 'closed_at');
+    await run(
+      `UPDATE marketing_contracts
+         SET name = ?, total_amount_eur = ?, notes = ?, status = ?, closed_at = ${closedAt}
+       WHERE id = ?`,
+      [
+        name != null ? String(name).trim() : existing.name,
+        total_amount_eur != null ? parseFloat(total_amount_eur) || 0 : existing.total_amount_eur,
+        notes != null ? notes : existing.notes,
+        newStatus,
+        id,
+      ]
+    );
+    res.json(await queryOne('SELECT * FROM marketing_contracts WHERE id = ?', [id]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/marketing-contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Riktheji stokun për të gjitha product entries përpara fshirjes.
+    const productEntries = await queryAll(
+      `SELECT product_id, product_qty FROM marketing_contract_entries
+        WHERE contract_id = ? AND type = 'product' AND product_id IS NOT NULL`,
+      [id]
+    );
+    for (const e of productEntries) {
+      if (e.product_qty > 0) {
+        await run('UPDATE products SET stock = stock + ? WHERE id = ?', [e.product_qty, e.product_id]);
+      }
+    }
+    await run('DELETE FROM marketing_contracts WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/marketing-contracts/:id/entries', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const contract = await queryOne('SELECT * FROM marketing_contracts WHERE id = ?', [id]);
+    if (!contract) return res.status(404).json({ error: 'contract not found' });
+    const { date, type, amount_eur, product_id, product_qty, description } = req.body || {};
+    if (!date) return res.status(400).json({ error: 'date required' });
+    if (type !== 'product' && type !== 'cash') return res.status(400).json({ error: 'type must be product or cash' });
+    if (type === 'product') {
+      const pid = parseInt(product_id);
+      const qty = Math.max(1, parseInt(product_qty) || 1);
+      if (!pid) return res.status(400).json({ error: 'product_id required' });
+      const prod = await queryOne('SELECT id, sell_price, stock, vat_rate FROM products WHERE id = ?', [pid]);
+      if (!prod) return res.status(404).json({ error: 'product not found' });
+      if ((prod.stock || 0) < qty) {
+        return res.status(400).json({ error: `insufficient stock (aktual: ${prod.stock || 0})` });
+      }
+      const provided = parseFloat(amount_eur);
+      const amt = provided > 0
+        ? +provided.toFixed(2)
+        : +((parseFloat(prod.sell_price) || 0) * qty * (1 + (parseFloat(prod.vat_rate) || 0) / 100)).toFixed(2);
+      await run(
+        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, product_id, product_qty, description)
+         VALUES (?, ?, 'product', ?, ?, ?, ?)`,
+        [id, date, amt, pid, qty, description || '']
+      );
+      await run('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, pid]);
+    } else {
+      const amt = parseFloat(amount_eur) || 0;
+      if (amt <= 0) return res.status(400).json({ error: 'amount_eur must be > 0' });
+      await run(
+        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, description)
+         VALUES (?, ?, 'cash', ?, ?)`,
+        [id, date, +amt.toFixed(2), description || '']
+      );
+    }
+    const row = await queryOne(
+      `SELECT e.*, p.name AS product_name, p.barcode AS product_barcode,
+              p.sell_price AS product_sell_price, p.stock AS product_stock
+         FROM marketing_contract_entries e
+         LEFT JOIN products p ON p.id = e.product_id
+        ORDER BY e.id DESC LIMIT 1`
+    );
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/marketing-contract-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne(
+      'SELECT type, product_id, product_qty FROM marketing_contract_entries WHERE id = ?',
+      [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    await run('DELETE FROM marketing_contract_entries WHERE id = ?', [id]);
+    if (existing.type === 'product' && existing.product_id && existing.product_qty > 0) {
       await run(
         'UPDATE products SET stock = stock + ? WHERE id = ?',
         [existing.product_qty, existing.product_id]

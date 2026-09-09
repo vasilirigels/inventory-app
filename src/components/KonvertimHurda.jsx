@@ -504,10 +504,19 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
           {spotError && <p className="text-[10px] text-red-600 mt-0.5">{spotError}</p>}
         </div>
         <div className="col-span-2">
-          <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali për Pagesë (EUR)</label>
-          <div className="input-field bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 border-emerald-200 tabular-nums font-bold text-base">
-            {fmt(totalEur)}
-          </div>
+          <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">
+            Totali për Pagesë (EUR) <span className="text-slate-400 dark:text-slate-500 normal-case">— mund ta ndryshosh; çmimi/gram rillogaritet</span>
+          </label>
+          <MoneyInput
+            value={totalEur}
+            onChange={v => {
+              const g = n(gram)
+              if (!(g > 0)) { alert('Vendos më parë sasinë në gram.'); return }
+              setPricePerGram(String(+(n(v) / g).toFixed(4)))
+            }}
+            className="input-field bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 border-emerald-200 tabular-nums font-bold text-base"
+            placeholder="0.00"
+          />
         </div>
 
         <div className="col-span-2">

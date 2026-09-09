@@ -265,6 +265,432 @@ function snapshotFromProduct(p) {
   }
 }
 
+// ── Marketing Kontratat ──────────────────────────────────────────────────
+// Një kontratë mban një buxhet total EUR dhe përmban zëra (product ose cash EUR)
+// që zbriten nga buxheti derisa arrihet totali. Cash EUR entries shfaqen si
+// shpenzim në Arkën Ditore.
+function ContractsSection({ date }) {
+  const [contracts, setContracts] = useState([])
+  const [expandedId, setExpandedId] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [showNew, setShowNew] = useState(false)
+  const [newDraft, setNewDraft] = useState({ name: '', total_amount_eur: '', notes: '' })
+  const [entryDraft, setEntryDraft] = useState({
+    type: 'cash', amount_eur: '', description: '',
+    product: null, product_qty: '1', unit_price: '', vat_rate: '',
+  })
+  const [busy, setBusy] = useState(false)
+
+  const loadContracts = useCallback(async () => {
+    setLoading(true)
+    try {
+      const rows = await fetch('/api/marketing-contracts').then(r => r.json())
+      setContracts(Array.isArray(rows) ? rows : [])
+    } finally { setLoading(false) }
+  }, [])
+
+  const loadDetail = useCallback(async (id) => {
+    if (!id) { setDetail(null); return }
+    try {
+      const row = await fetch(`/api/marketing-contracts/${id}`).then(r => r.json())
+      setDetail(row)
+    } catch { setDetail(null) }
+  }, [])
+
+  useEffect(() => { loadContracts() }, [loadContracts])
+  useEffect(() => { if (expandedId) loadDetail(expandedId) }, [expandedId, loadDetail])
+
+  const createContract = async () => {
+    const name = String(newDraft.name || '').trim()
+    const total = parseFloat(newDraft.total_amount_eur) || 0
+    if (!name) { alert('Vendos një emër.'); return }
+    if (total <= 0) { alert('Buxheti duhet të jetë > 0.'); return }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/marketing-contracts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, total_amount_eur: total, notes: newDraft.notes || '' }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      setNewDraft({ name: '', total_amount_eur: '', notes: '' })
+      setShowNew(false)
+      await loadContracts()
+    } finally { setBusy(false) }
+  }
+
+  const addEntry = async (contractId) => {
+    if (entryDraft.type === 'product') {
+      if (!entryDraft.product?.id) { alert('Zgjidh një produkt.'); return }
+      const qty = parseInt(entryDraft.product_qty) || 1
+      if (qty <= 0) { alert('Sasia duhet të jetë > 0.'); return }
+      if ((entryDraft.product.stock || 0) < qty) {
+        alert(`Stoku nuk mjafton (aktual: ${entryDraft.product.stock || 0}).`); return
+      }
+    } else {
+      if (!(parseFloat(entryDraft.amount_eur) > 0)) { alert('Vendos vlerën në EUR.'); return }
+    }
+    setBusy(true)
+    try {
+      const body = entryDraft.type === 'product'
+        ? {
+            date, type: 'product',
+            product_id: entryDraft.product.id,
+            product_qty: parseInt(entryDraft.product_qty) || 1,
+            // amount_eur = unit_price × qty × (1 + vat/100). E llogaris në frontend
+            // që user-i të shohë të njëjtin numër që dërgohet në DB.
+            amount_eur: +((parseFloat(entryDraft.unit_price) || 0)
+              * (parseInt(entryDraft.product_qty) || 1)
+              * (1 + (parseFloat(entryDraft.vat_rate) || 0) / 100)).toFixed(2),
+            description: entryDraft.description || '',
+          }
+        : {
+            date, type: 'cash',
+            amount_eur: parseFloat(entryDraft.amount_eur) || 0,
+            description: entryDraft.description || '',
+          }
+      const res = await fetch(`/api/marketing-contracts/${contractId}/entries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      setEntryDraft({
+        type: entryDraft.type, amount_eur: '', description: '',
+        product: null, product_qty: '1', unit_price: '', vat_rate: '',
+      })
+      await Promise.all([loadContracts(), loadDetail(contractId)])
+    } finally { setBusy(false) }
+  }
+
+  const deleteEntry = async (entryId, contractId) => {
+    const ok = await showConfirm('Nëse është produkt, stoku rikthehet.', { title: 'Fshi zërin?', danger: true, confirmLabel: 'Fshi' })
+    if (!ok) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/marketing-contract-entries/${entryId}`, { method: 'DELETE' })
+      if (!res.ok) { alert('Gabim gjatë fshirjes'); return }
+      await Promise.all([loadContracts(), loadDetail(contractId)])
+    } finally { setBusy(false) }
+  }
+
+  const toggleStatus = async (contract) => {
+    const newStatus = contract.status === 'closed' ? 'open' : 'closed'
+    if (newStatus === 'closed') {
+      const ok = await showConfirm('Mund ta rihapësh më vonë.', { title: 'Mbylle kontratën?', confirmLabel: 'Mbylle' })
+      if (!ok) return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/marketing-contracts/${contract.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (!res.ok) { alert('Gabim'); return }
+      await Promise.all([loadContracts(), expandedId === contract.id ? loadDetail(contract.id) : Promise.resolve()])
+    } finally { setBusy(false) }
+  }
+
+  const deleteContract = async (contract) => {
+    const ok = await showConfirm(
+      'Të gjithë zërat brenda saj do të fshihen dhe stoku i produkteve do të rikthehet.',
+      { title: `Fshi kontratën "${contract.name}"?`, danger: true, confirmLabel: 'Fshi' }
+    )
+    if (!ok) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/marketing-contracts/${contract.id}`, { method: 'DELETE' })
+      if (!res.ok) { alert('Gabim'); return }
+      if (expandedId === contract.id) { setExpandedId(null); setDetail(null) }
+      await loadContracts()
+    } finally { setBusy(false) }
+  }
+
+  const fmtEur = (v) => (parseFloat(v) || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">📋 Kontratat Marketing</h3>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">Buxhet EUR që plotësohet me zëra produkti (zbret stokun) ose me cash EUR (shpenzim në Arkë).</p>
+        </div>
+        <button onClick={() => setShowNew(v => !v)} className="btn-primary text-xs">
+          {showNew ? '× Anulo' : '+ Kontratë e Re'}
+        </button>
+      </div>
+
+      {showNew && (
+        <div className="mb-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+            <div className="md:col-span-2">
+              <label className="form-label">Emri</label>
+              <input type="text" value={newDraft.name}
+                onChange={e => setNewDraft(d => ({ ...d, name: e.target.value }))}
+                className="input-field" placeholder="p.sh. Biben" />
+            </div>
+            <div>
+              <label className="form-label">Buxheti (EUR)</label>
+              <MoneyInput value={newDraft.total_amount_eur}
+                onChange={v => setNewDraft(d => ({ ...d, total_amount_eur: v }))}
+                className="input-field" placeholder="20000.00" />
+            </div>
+            <div>
+              <label className="form-label">Shënime</label>
+              <input type="text" value={newDraft.notes}
+                onChange={e => setNewDraft(d => ({ ...d, notes: e.target.value }))}
+                className="input-field" placeholder="opsional" />
+            </div>
+          </div>
+          <div className="mt-2 flex justify-end">
+            <button onClick={createContract} disabled={busy} className="btn-primary text-xs disabled:opacity-50">
+              💾 Ruaj Kontratën
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-6 text-xs text-slate-400">Duke ngarkuar...</div>
+      ) : contracts.length === 0 ? (
+        <div className="text-center py-6 text-xs text-slate-400 dark:text-slate-500">Nuk ka kontrata të krijuara.</div>
+      ) : (
+        <div className="space-y-2">
+          {contracts.map(c => {
+            const total = parseFloat(c.total_amount_eur) || 0
+            const used  = parseFloat(c.used_eur) || 0
+            const remaining = Math.max(0, total - used)
+            const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
+            const isClosed = c.status === 'closed'
+            const isExpanded = expandedId === c.id
+            return (
+              <div key={c.id} className={`rounded-xl border ${isClosed ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
+                <div className="p-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-bold ${isClosed ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>{c.name}</span>
+                        {isClosed && <span className="badge bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 text-[10px]">✓ Mbyllur</span>}
+                        {!isClosed && pct >= 100 && <span className="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[10px]">Buxheti u plotësua</span>}
+                      </div>
+                      {c.notes && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{c.notes}</p>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setExpandedId(isExpanded ? null : c.id)} className="btn-secondary text-[11px] px-2 py-1">
+                        {isExpanded ? '▲ Mbylle' : '▼ Zërat'}
+                      </button>
+                      <button onClick={() => toggleStatus(c)} className="btn-secondary text-[11px] px-2 py-1">
+                        {isClosed ? '↻ Rihap' : '✓ Mbylle'}
+                      </button>
+                      <button onClick={() => deleteContract(c)} className="btn-secondary text-[11px] px-2 py-1 text-red-600">
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <div className="flex items-center justify-between text-[11px] font-semibold mb-1">
+                      <span className="text-slate-600 dark:text-slate-300">
+                        Përdorur: <span className="text-blue-700 dark:text-blue-300">€{fmtEur(used)}</span>
+                        {' / '}Buxheti: <span className="text-slate-800 dark:text-slate-100">€{fmtEur(total)}</span>
+                      </span>
+                      <span className={`${remaining > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600'}`}>
+                        Mbetet: €{fmtEur(remaining)} ({(100 - pct).toFixed(0)}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                      <div className={`h-2 ${pct >= 100 ? 'bg-emerald-500' : pct >= 80 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="border-t border-slate-200 dark:border-slate-700 p-3 bg-slate-50/50 dark:bg-slate-800/30">
+                    {!isClosed && (
+                      <div className="mb-3 p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">+ Shto zë:</span>
+                          <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
+                            <button
+                              onClick={() => setEntryDraft(d => ({ ...d, type: 'cash' }))}
+                              className={`text-[11px] px-2 py-1 ${entryDraft.type === 'cash' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
+                            >💵 Cash EUR</button>
+                            <button
+                              onClick={() => setEntryDraft(d => ({ ...d, type: 'product' }))}
+                              className={`text-[11px] px-2 py-1 ${entryDraft.type === 'product' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
+                            >📦 Produkt</button>
+                          </div>
+                        </div>
+                        {entryDraft.type === 'cash' ? (
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                            <div>
+                              <label className="form-label text-[10px]">Shuma (EUR)</label>
+                              <MoneyInput value={entryDraft.amount_eur}
+                                onChange={v => setEntryDraft(d => ({ ...d, amount_eur: v }))}
+                                className="input-field-sm" placeholder="0.00" />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="form-label text-[10px]">Përshkrimi</label>
+                              <input type="text" value={entryDraft.description}
+                                onChange={e => setEntryDraft(d => ({ ...d, description: e.target.value }))}
+                                className="input-field-sm" placeholder="opsional" />
+                            </div>
+                            <div className="md:col-span-3 flex justify-end">
+                              <button onClick={() => addEntry(c.id)} disabled={busy} className="btn-primary text-xs disabled:opacity-50">+ Shto</button>
+                            </div>
+                          </div>
+                        ) : (() => {
+                          const p = entryDraft.product
+                          const qty = parseInt(entryDraft.product_qty) || 1
+                          const unit = parseFloat(entryDraft.unit_price) || 0
+                          const vat = parseFloat(entryDraft.vat_rate) || 0
+                          const finalTotal = +(unit * qty * (1 + vat / 100)).toFixed(2)
+                          return (
+                            <>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-2">
+                                <div className="md:col-span-2">
+                                  <label className="form-label text-[10px]">Produkti (barkod ose emër)</label>
+                                  <MarketingProductPicker
+                                    product={p}
+                                    onPick={pp => setEntryDraft(d => ({
+                                      ...d,
+                                      product: pp,
+                                      ...snapshotFromProduct(pp),
+                                    }))}
+                                    className="input-field-sm"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="form-label text-[10px]">Përshkrimi</label>
+                                  <input type="text" value={entryDraft.description}
+                                    onChange={e => setEntryDraft(d => ({ ...d, description: e.target.value }))}
+                                    className="input-field-sm" placeholder="opsional" />
+                                </div>
+                              </div>
+                              {p && (
+                                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 mb-2">
+                                  <table className="w-full text-xs">
+                                    <thead className="text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50">
+                                      <tr>
+                                        <th className="px-2 py-1 text-left w-28">Barkodi</th>
+                                        <th className="px-2 py-1 text-right w-16">Stok</th>
+                                        <th className="px-2 py-1 text-right w-16">Sasia</th>
+                                        <th className="px-2 py-1 text-right w-20">Gram</th>
+                                        <th className="px-2 py-1 text-right w-24">Cmim Blerje €</th>
+                                        <th className="px-2 py-1 text-right w-24">Cmim Shitje €</th>
+                                        <th className="px-2 py-1 text-right w-16">TVSH %</th>
+                                        <th className="px-2 py-1 text-right w-24">Totali €</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      <tr>
+                                        <td className="px-2 py-1 font-mono text-[10px] text-slate-600 dark:text-slate-300">{p.barcode || '—'}</td>
+                                        <td className={`px-2 py-1 text-right tabular-nums font-semibold ${qty > (p.stock || 0) ? 'text-rose-600' : 'text-slate-600 dark:text-slate-300'}`}>{p.stock || 0}</td>
+                                        <td className="px-1 py-1">
+                                          <input type="number" min="1" step="1" value={entryDraft.product_qty}
+                                            onChange={e => setEntryDraft(d => ({ ...d, product_qty: e.target.value }))}
+                                            className="input-field-sm text-right tabular-nums" />
+                                        </td>
+                                        <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                          {p.gram ? Number(p.gram).toFixed(3) : '—'}
+                                        </td>
+                                        <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                          {Number(p.cost_price) > 0 ? Number(p.cost_price).toFixed(2) : '—'}
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <MoneyInput
+                                            value={entryDraft.unit_price}
+                                            onChange={v => setEntryDraft(d => ({ ...d, unit_price: String(v) }))}
+                                            className="input-field-sm text-right tabular-nums font-semibold text-emerald-800 dark:text-emerald-200"
+                                            placeholder="0.00"
+                                          />
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <input type="number" step="0.01" min="0" max="100"
+                                            value={entryDraft.vat_rate}
+                                            onChange={e => setEntryDraft(d => ({ ...d, vat_rate: e.target.value }))}
+                                            className="input-field-sm text-right tabular-nums"
+                                            placeholder="0" />
+                                        </td>
+                                        <td className="px-2 py-1 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">
+                                          €{finalTotal.toFixed(2)}
+                                        </td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              <div className="flex justify-end">
+                                <button onClick={() => addEntry(c.id)} disabled={busy} className="btn-primary text-xs disabled:opacity-50">+ Shto</button>
+                              </div>
+                            </>
+                          )
+                        })()}
+                      </div>
+                    )}
+
+                    {!detail || detail.id !== c.id ? (
+                      <div className="text-center py-3 text-[11px] text-slate-400">Duke ngarkuar zërat...</div>
+                    ) : detail.entries.length === 0 ? (
+                      <div className="text-center py-3 text-[11px] text-slate-400 dark:text-slate-500">Ende s'ka zëra.</div>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <thead className="text-slate-500 dark:text-slate-400">
+                          <tr className="border-b border-slate-200 dark:border-slate-700">
+                            <th className="text-left py-1 px-1 font-semibold">Data</th>
+                            <th className="text-left py-1 px-1 font-semibold">Tipi</th>
+                            <th className="text-left py-1 px-1 font-semibold">Përshkrimi</th>
+                            <th className="text-right py-1 px-1 font-semibold">Shuma (EUR)</th>
+                            <th className="w-10"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.entries.map(e => (
+                            <tr key={e.id} className="border-b border-slate-100 dark:border-slate-800">
+                              <td className="py-1 px-1 tabular-nums text-slate-600 dark:text-slate-300">{fmtDate(e.date)}</td>
+                              <td className="py-1 px-1">
+                                {e.type === 'product'
+                                  ? <span className="badge bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 text-[10px]">📦 Produkt</span>
+                                  : <span className="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px]">💵 Cash EUR</span>}
+                              </td>
+                              <td className="py-1 px-1 text-slate-700 dark:text-slate-200">
+                                {e.type === 'product' ? (
+                                  <div>
+                                    <div className="font-semibold">{e.product_name || '(produkt i fshirë)'} × {e.product_qty}</div>
+                                    {e.description && <div className="text-[10px] text-slate-500 dark:text-slate-400">{e.description}</div>}
+                                  </div>
+                                ) : (
+                                  e.description || <span className="text-slate-400 italic">—</span>
+                                )}
+                              </td>
+                              <td className="py-1 px-1 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">€{fmtEur(e.amount_eur)}</td>
+                              <td className="py-1 px-1 text-center">
+                                <button onClick={() => deleteEntry(e.id, c.id)} className="text-red-500 hover:text-red-700 text-sm">🗑</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-slate-300 dark:border-slate-600 font-bold">
+                            <td colSpan={3} className="py-2 px-1 text-right text-slate-600 dark:text-slate-300 uppercase text-[10px]">Përdorur:</td>
+                            <td className="py-2 px-1 text-right tabular-nums text-blue-700 dark:text-blue-300">€{fmtEur(detail.used_eur)}</td>
+                            <td></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Marketing({ date }) {
   const [categories, setCategories] = useState([])
   const [rows, setRows] = useState([])
@@ -529,6 +955,8 @@ export default function Marketing({ date }) {
           </div>
         </div>
       </div>
+
+      <ContractsSection date={date} />
 
       {/* New entry row */}
       <div className="card">

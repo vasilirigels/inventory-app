@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
+import { getUser } from '../lib/auth.js'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -22,6 +23,8 @@ function fmtDateTime(s) {
 const emptyAmounts = () => ({ LEK: '', EUR: '', USD: '', GBP: '', CHF: '' })
 
 export default function TerheqjaKasaforta({ date }) {
+  const isAdmin = getUser()?.role === 'admin'
+  const [entryDate, setEntryDate] = useState(date)
   const [amounts, setAmounts] = useState(emptyAmounts())
   const [person, setPerson] = useState('')
   const [note, setNote] = useState('')
@@ -30,6 +33,8 @@ export default function TerheqjaKasaforta({ date }) {
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
+
+  useEffect(() => { setEntryDate(date) }, [date])
 
   const loadHistory = async () => {
     setLoading(true)
@@ -60,9 +65,14 @@ export default function TerheqjaKasaforta({ date }) {
       setTimeout(() => setMsg(''), 3000)
       return
     }
+    if (!entryDate) {
+      setMsg('⚠ Vendos datën e tërheqjes')
+      setTimeout(() => setMsg(''), 3000)
+      return
+    }
     setSaving(true)
     try {
-      const payload = { date, person: person.trim(), note: note.trim() }
+      const payload = { date: entryDate, person: person.trim(), note: note.trim() }
       for (const c of CURS) payload[`amount_${c.toLowerCase()}`] = parsed[c]
       const res = await fetch('/api/safe-withdrawals', {
         method: 'POST',
@@ -98,6 +108,22 @@ export default function TerheqjaKasaforta({ date }) {
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="form-label">
+                Data e Tërheqjes
+                {!isAdmin && <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500 normal-case">(vetëm admini mund ta ndryshojë)</span>}
+                {isAdmin && <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400 normal-case">(admin — mund të zgjedhësh datë të mëparshme)</span>}
+              </label>
+              <input
+                type="date"
+                value={entryDate}
+                onChange={e => setEntryDate(e.target.value)}
+                readOnly={!isAdmin}
+                className={`input-field ${!isAdmin ? 'bg-slate-50 dark:bg-slate-900 cursor-not-allowed' : ''}`}
+              />
+            </div>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {CURS.map(c => (
               <div key={c}>
@@ -144,9 +170,6 @@ export default function TerheqjaKasaforta({ date }) {
                 {msg}
               </span>
             )}
-            <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
-              Data: <strong className="text-slate-700 dark:text-slate-200">{date}</strong>
-            </span>
           </div>
         </form>
       </div>

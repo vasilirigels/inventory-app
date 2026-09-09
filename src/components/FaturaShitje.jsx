@@ -50,6 +50,8 @@ function emptyItem() {
     // Përndryshe (produkte jo-flori) mbeten 0 dhe unit_price ndryshohet vetëm
     // proporcionalisht kur ndryshohet sell_rate.
     sell_rate: 0, has_gram: 0, multiplier: 0,
+    // Dhuratë — kur 1, rreshti zbret stokun por nuk hyn në totalin e faturës.
+    is_gift: 0,
   }
 }
 
@@ -1571,6 +1573,37 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
 
   const addItem = () => setItems(prev => [...prev, emptyItem()])
 
+  // Dhuratë — hap pickerin që liston produkte me is_gift=1 & stok>0, dhe
+  // shto një rresht të ri me unit_price=0, disc=0, vat=0, is_gift=1.
+  const [showGiftPicker, setShowGiftPicker] = useState(false)
+  const [giftOptions, setGiftOptions] = useState([])
+  const [giftLoading, setGiftLoading] = useState(false)
+  const openGiftPicker = async () => {
+    setShowGiftPicker(true)
+    setGiftLoading(true)
+    try {
+      const rows = await fetch('/api/products/search?gifts_only=1').then(r => r.json())
+      setGiftOptions(Array.isArray(rows) ? rows : [])
+    } catch { setGiftOptions([]) }
+    finally { setGiftLoading(false) }
+  }
+  const addGift = (p) => {
+    setItems(prev => [...prev, {
+      ...emptyItem(),
+      product_id: p.id,
+      serial_no: p.serial_no || '',
+      barcode: p.barcode || '',
+      name: p.name,
+      gram: parseFloat(p.gram) || 0,
+      qty: 1,
+      unit_price_no_vat: 0,
+      discount_percent: 0,
+      vat_rate: 0,
+      is_gift: 1,
+    }])
+    setShowGiftPicker(false)
+  }
+
   // Products are stored with prices in EUR. When the invoice uses a different
   // currency, convert via the LEK pivot using the rates fetched for this date.
   const eurToInvoiceCurrency = (eur) => {
@@ -2058,9 +2091,12 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                 const lt = lineTotals[idx]
                 const base = n(it.qty) * n(it.unit_price_no_vat)
                 const discEur = discountEurFor(it)
+                const isGiftRow = !!it.is_gift
                 return (
-                  <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
+                  <tr key={idx} className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isGiftRow ? 'bg-rose-50/40 dark:bg-rose-900/10' : ''}`}>
+                    <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">
+                      {isGiftRow ? <span title="Dhuratë">🎁</span> : idx + 1}
+                    </td>
                     <td className="px-1 py-1">
                       <BarcodeSearchInput
                         value={it.barcode}
@@ -2070,6 +2106,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     </td>
                     <td className="px-1 py-1">
                       <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
+                      {isGiftRow && <div className="text-[10px] font-semibold text-rose-600 dark:text-rose-300 mt-0.5">🎁 Dhuratë (nuk hyn në total)</div>}
                     </td>
                     <td className="px-1 py-1">
                       <input
@@ -2111,7 +2148,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                           // ndaj konvertojme: pct = eur / (base × (1 + vat/100)) × 100.
                           const vatFactor = 1 + (parseFloat(it.vat_rate) || 0) / 100
                           const pct = Math.max(0, Math.min(100, (eur / (base * vatFactor)) * 100))
-                          setItem(idx, { discount_percent: +pct.toFixed(4) })
+                          setItem(idx, { discount_percent: +pct.toFixed(2) })
                         }}
                         className="input-field-sm text-right"
                         placeholder="0.00"
@@ -2131,7 +2168,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         className="input-field-sm text-right"
                       />
                     </td>
-                    <td className="px-2 py-1 text-right tabular-nums font-semibold text-slate-900 dark:text-white">
+                    <td className="px-1 py-1 text-right tabular-nums font-semibold text-slate-900 dark:text-white">
                       {!!it.on_promotion && (
                         <div className="flex justify-end mb-0.5">
                           <span className="badge bg-rose-100 text-rose-700 text-[9px] font-bold whitespace-nowrap">
@@ -2139,7 +2176,23 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                           </span>
                         </div>
                       )}
-                      {fmt(lt.total_with_vat)}
+                      {isAdmin && !isGiftRow ? (
+                        <MoneyInput
+                          value={lt.total_with_vat}
+                          onChange={finalVal => {
+                            const q      = n(it.qty)
+                            const discF  = 1 - (n(it.discount_percent) / 100)
+                            const vatF   = 1 + (n(it.vat_rate) / 100)
+                            const denom  = q * discF * vatF
+                            if (!(denom > 0)) return
+                            setItem(idx, { unit_price_no_vat: +(finalVal / denom).toFixed(4) })
+                          }}
+                          className="input-field-sm text-right font-semibold"
+                          placeholder="0.00"
+                        />
+                      ) : (
+                        fmt(lt.total_with_vat)
+                      )}
                     </td>
                     <td className="px-1 py-1 text-center">
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
@@ -2157,10 +2210,54 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             </tfoot>
           </table>
         </div>
-        <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 flex-wrap">
           <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
+          <button onClick={openGiftPicker} className="btn-secondary text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-300 dark:border-rose-800">
+            🎁 Shto Dhuratë
+          </button>
         </div>
       </div>
+
+      {showGiftPicker && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+             onClick={() => setShowGiftPicker(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full p-5 border border-slate-200 dark:border-slate-700"
+               onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">🎁 Zgjidh një Dhuratë</h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Produkte të markuara si dhurata te Blerje Artikuj të Tjerë. Shtimi zbret stokun; shuma nuk hyn në totalin e faturës.</p>
+              </div>
+              <button onClick={() => setShowGiftPicker(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            {giftLoading ? (
+              <div className="text-center py-6 text-xs text-slate-400">Duke ngarkuar...</div>
+            ) : giftOptions.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-400 dark:text-slate-500">
+                Nuk ka produkte dhurata në stok. Kaloji te Blerje Artikuj të Tjerë dhe shëno "🎁 Kjo faturë përmban dhurata".
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                {giftOptions.map(p => (
+                  <button key={p.id} onClick={() => addGift(p)}
+                    className="w-full text-left px-3 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-rose-50 dark:hover:bg-rose-900/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate">{p.barcode || p.sku || '—'}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">Stok</div>
+                        <div className="text-sm font-bold text-emerald-700 dark:text-emerald-300">{p.stock}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

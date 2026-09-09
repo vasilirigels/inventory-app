@@ -182,7 +182,7 @@ function emptyItem() {
     // mbushet automatikisht nga /api/gold-spot-price kur hapet editori.
     has_gram: 0, has_currency: 'HAS', has_rate: 0,
     // Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulën:
-    // has_gram = (kodi/1000 + kursi/1000) × gram. Shumëzuesi për çmim shitjeje.
+    // has_gram = (kodi/1000) × gram. Shumëzuesi për çmim shitjeje.
     kodi: 0, multiplier: 0,
     // Kursi i shitjes për këtë rresht — përdoret në formulën flori për të
     // llogaritur `sell_price` të pavarur nga kursi i blerjes (`has_rate`).
@@ -219,32 +219,39 @@ function detectMapping(headers) {
     return -1
   }
 
-  // Renditja e prioritetit: e specifikja para përgjithësisë.
+  // Renditja e prioritetit: e specifikja para përgjithësisë. Fushat flori
+  // (kodi, has_gram, has_rate) detektohen PARA cost_price/sku sepse "Cmim Blerje
+  // Has" / "Kursi Blerje" / "Kodi" përndryshe do të kapeshin nga pattern-et
+  // gjenerike 'blerje', 'kosto', 'kodi' të fushave të tjera.
   const barcode    = findFirst(['barkod', 'barcode'])
+  const name       = findFirst(['pershkrim', 'emri', 'name', 'produkt', 'article', 'description', 'artikull'])
+  const stock      = findFirst(['sasia', 'sasi', 'stoku', 'stock', 'qty', 'quantity', 'gjendje', 'cope'])
+  const gram       = findFirst(['gram', 'peshe', 'weight', 'pesha'])
+  const kodi       = findFirst(['kodi_flori', 'kodi'])
+  const has_gram   = findFirst(['cmim_blerje_has', 'blerje_has', 'has_gram'])
+  const has_rate   = findFirst(['kursi_blerje', 'kursi', 'has_rate'])
   const sku        = findFirst([
     'sku', 'numer_serial', 'nr_serial', 'numer_seri', 'nr_seri', 'nr._seri',
-    'seri', 'kodi_art', 'kodi', 'code', 'ref_no', 'ref',
+    'seri', 'kodi_art', 'code', 'ref_no', 'ref',
   ])
   const cost_price = findFirst([
-    'cmimi_pa_tvsh', 'cmimi_bler', 'cm_bler',
+    'cmimi_pa_tvsh', 'cmimi_bler', 'cm_bler', 'cmim_bler',
     'pa_tvsh', 'blerje', 'kosto', 'cost', 'cmimi_k',
   ])
   const sell_price = findFirst([
     'cmimi_shitj', 'cm_shitj', 'shitje_pa', 'shit_pa_tvsh',
     'sell_price', 'sell', 'price', 'cmimi_sh',
   ])
-  const stock      = findFirst(['sasia', 'sasi', 'stoku', 'stock', 'qty', 'quantity', 'gjendje', 'cope'])
   const min_stock  = findFirst(['stok_min', 'min_stock', 'minim', 'alarm'])
   const category   = findFirst(['kategori', 'category', 'tip', 'lloj'])
   const brand      = findFirst(['brendi', 'brand', 'prodhu'])
-  const name       = findFirst(['pershkrim', 'emri', 'name', 'produkt', 'article', 'description', 'artikull'])
-  const gram       = findFirst(['gram', 'peshe', 'weight', 'pesha'])
 
-  return { name, category, brand, sku, barcode, cost_price, sell_price, stock, min_stock, gram }
+  return { name, category, brand, sku, barcode, cost_price, sell_price, stock, min_stock, gram, kodi, has_gram, has_rate }
 }
 
 function rowToProduct(row, m) {
   const get = (idx, def = '') => idx >= 0 ? (row[idx] ?? def) : def
+  const num = (idx) => parseFloat(String(get(idx, 0)).replace(',', '.')) || 0
   return {
     name:       String(get(m.name, '')).trim(),
     category:   String(get(m.category, 'Tjeter')).trim() || 'Tjeter',
@@ -255,7 +262,10 @@ function rowToProduct(row, m) {
     sell_price: parseFloat(get(m.sell_price, 0)) || 0,
     stock:      parseInt(get(m.stock, 0)) || 0,
     min_stock:  parseInt(get(m.min_stock, 5)) || 5,
-    gram:       parseFloat(String(get(m.gram, 0)).replace(',', '.')) || 0,
+    gram:       num(m.gram),
+    kodi:       parseInt(get(m.kodi, 0)) || 0,
+    has_gram:   num(m.has_gram),
+    has_rate:   num(m.has_rate),
   }
 }
 
@@ -440,7 +450,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
   const [loading, setLoading] = useState(true)
   const [fromDate, setFromDate] = useState(date)
   const [toDate, setToDate]     = useState(date)
-  const [eurByDate, setEurByDate] = useState({})
+  const [usdByDate, setUsdByDate] = useState({})
 
   useEffect(() => { setFromDate(date); setToDate(date) }, [date])
 
@@ -457,17 +467,17 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
       .catch(() => { setList([]); setLoading(false) })
   }, [fromDate, toDate, refreshKey, materialFilter])
 
-  // Convert per-invoice LEK subtotals into EUR: need EUR rate for each invoice's date.
+  // Convert per-invoice LEK subtotals into USD: need USD rate for each invoice's date.
   useEffect(() => {
     const dates = Array.from(new Set(list.map(inv => inv.date).filter(Boolean)))
-    const missing = dates.filter(d => eurByDate[d] == null)
+    const missing = dates.filter(d => usdByDate[d] == null)
     if (missing.length === 0) return
     let cancelled = false
     Promise.all(missing.map(d =>
-      fetch(`/api/exchange-rates/${d}`).then(r => r.json()).then(res => [d, n(res?.rates?.EUR) || 0]).catch(() => [d, 0])
+      fetch(`/api/exchange-rates/${d}`).then(r => r.json()).then(res => [d, n(res?.rates?.USD) || 0]).catch(() => [d, 0])
     )).then(pairs => {
       if (cancelled) return
-      setEurByDate(prev => {
+      setUsdByDate(prev => {
         const next = { ...prev }
         for (const [d, r] of pairs) next[d] = r
         return next
@@ -483,9 +493,9 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
   // must NOT shift the daily totals on the purchase invoice list.
   const totals = list.reduce((acc, inv) => {
     const rate = n(inv.exchange_rate) || 1
-    const eurRate = n(eurByDate[inv.date]) || 0
-    // value_EUR = value_original * (invoice→LEK rate) / (EUR→LEK rate)
-    const toEur = eurRate > 0 ? (rate / eurRate) : 0
+    const usdRate = n(usdByDate[inv.date]) || 0
+    // value_USD = value_original * (invoice→LEK rate) / (USD→LEK rate)
+    const toUsd = usdRate > 0 ? (rate / usdRate) : 0
     const initPaid = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
     const initDue  = Math.max(0, n(inv.total_with_vat) - initPaid)
     const gross = n(inv.subtotal_no_vat) + n(inv.total_discount)
@@ -497,22 +507,29 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
     acc.tot += n(inv.total_with_vat)
     acc.paid += initPaid
     acc.due  += initDue
-    acc.grossEur += gross * toEur
-    acc.discEur  += n(inv.total_discount) * toEur
-    acc.subEur   += n(inv.subtotal_no_vat) * toEur
-    acc.vatEur   += n(inv.total_vat) * toEur
-    acc.totEur   += n(inv.total_with_vat) * toEur
-    acc.paidEur  += initPaid * toEur
-    acc.dueEur   += initDue * toEur
+    acc.grossUsd += gross * toUsd
+    acc.discUsd  += n(inv.total_discount) * toUsd
+    acc.subUsd   += n(inv.subtotal_no_vat) * toUsd
+    acc.vatUsd   += n(inv.total_vat) * toUsd
+    acc.totUsd   += n(inv.total_with_vat) * toUsd
+    acc.paidUsd  += initPaid * toUsd
+    acc.dueUsd   += initDue * toUsd
     acc.gram     += n(inv.total_gram)
+    acc.buy      += n(inv.total_buy_price)
+    acc.sell     += n(inv.total_sell_price)
     return acc
   }, {
     count: 0, gross: 0, sub: 0, disc: 0, vat: 0, tot: 0, paid: 0, due: 0,
-    grossEur: 0, discEur: 0, subEur: 0, vatEur: 0, totEur: 0, paidEur: 0, dueEur: 0,
-    gram: 0,
+    grossUsd: 0, discUsd: 0, subUsd: 0, vatUsd: 0, totUsd: 0, paidUsd: 0, dueUsd: 0,
+    gram: 0, buy: 0, sell: 0,
   })
 
   const showGram = !!materialFilter
+  // Fitim/Marzh mesatar shfaqet vetëm për Blerje Flori/Diamant. Llogaritje e
+  // ponderuar: (ΣShitje − ΣBlerje) / ΣBlerje për Fitim, / ΣShitje për Marzh.
+  const showProfit = materialFilter === 'flori' || materialFilter === 'diamant'
+  const avgFitim = showProfit && totals.buy > 0.005 ? ((totals.sell - totals.buy) / totals.buy) * 100 : 0
+  const avgMarzh = showProfit && totals.sell > 0.005 ? ((totals.sell - totals.buy) / totals.sell) * 100 : 0
 
   return (
     <div className="space-y-4">
@@ -701,26 +718,43 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
             <tfoot className="bg-emerald-50 dark:bg-emerald-900/30 border-t-2 border-emerald-300">
               <tr>
                 <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
-                  💵 TOTAL CASH (EUR) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
+                  💵 TOTAL CASH (USD) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
                 </td>
                 {showGram && (
                   <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 text-base">
                     {totals.gram > 0.0005 ? `${totals.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                   </td>
                 )}
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossEur)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossUsd)}</td>
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-orange-600">
-                  {totals.discEur > 0.005 ? `-${fmt(totals.discEur)}` : '—'}
+                  {totals.discUsd > 0.005 ? `-${fmt(totals.discUsd)}` : '—'}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.subEur)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.vatEur)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(totals.totEur)}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(totals.paidEur)}</td>
-                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueEur > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
-                  {totals.dueEur > 0.005 ? fmt(totals.dueEur) : '✓'}
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.subUsd)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.vatUsd)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-blue-700 dark:text-blue-300 text-base">{fmt(totals.totUsd)}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300 text-base">{fmt(totals.paidUsd)}</td>
+                <td className={`px-4 py-3 text-right tabular-nums font-extrabold text-base ${totals.dueUsd > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                  {totals.dueUsd > 0.005 ? fmt(totals.dueUsd) : '✓'}
                 </td>
                 <td></td>
               </tr>
+              {showProfit && (
+                <tr className="border-t border-emerald-200 dark:border-emerald-800">
+                  <td colSpan={showGram ? 15 : 14} className="px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+                      <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                        📈 Mesatare — Fitim / Marzh <span className="text-[10px] font-normal text-emerald-600">(mbi Σ Cmim Blerje vs Σ Cmim Shitje)</span>
+                      </span>
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 tabular-nums text-sm">
+                        <span className="text-slate-500 dark:text-slate-400">Σ Blerje: <span className="font-bold text-slate-800 dark:text-slate-100">{fmt(totals.buy)}</span></span>
+                        <span className="text-slate-500 dark:text-slate-400">Σ Shitje: <span className="font-bold text-emerald-700 dark:text-emerald-300">{fmt(totals.sell)}</span></span>
+                        <span className="text-slate-500 dark:text-slate-400">Fitim %: <span className={`font-extrabold text-base ${avgFitim > 0 ? 'text-emerald-700 dark:text-emerald-300' : avgFitim < 0 ? 'text-rose-600' : 'text-slate-500'}`}>{totals.buy > 0.005 ? `${avgFitim.toFixed(1)}%` : '—'}</span></span>
+                        <span className="text-slate-500 dark:text-slate-400">Marzh %: <span className={`font-extrabold text-base ${avgMarzh > 0 ? 'text-emerald-700 dark:text-emerald-300' : avgMarzh < 0 ? 'text-rose-600' : 'text-slate-500'}`}>{totals.sell > 0.005 ? `${avgMarzh.toFixed(1)}%` : '—'}</span></span>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tfoot>
           </table>
           </div>
@@ -832,10 +866,13 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel, forcedCa
     { key: 'brand',      label: 'Brendi' },
     { key: 'sku',        label: 'Kodi SKU' },
     { key: 'barcode',    label: 'Barkodi' },
-    { key: 'cost_price', label: 'Cmim Blerje (€)' },
-    { key: 'sell_price', label: 'Çm. Shitje (€)' },
     { key: 'stock',      label: 'Sasi / Sasia' },
     { key: 'gram',       label: 'Gram' },
+    { key: 'kodi',       label: 'Kodi (585/750...)' },
+    { key: 'has_gram',   label: 'Cmim Blerje Has' },
+    { key: 'has_rate',   label: 'Kursi Blerje' },
+    { key: 'cost_price', label: 'Cmim Blerje (€)' },
+    { key: 'sell_price', label: 'Çm. Shitje (€)' },
     { key: 'min_stock',  label: 'Stok Minimal' },
   ]
   const COL_FIELDS = allowedFields
@@ -993,13 +1030,19 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const [invoiceNo, setInvoiceNo] = useState('')
   const [supplierName, setSupplierName] = useState('')
   const [supplierNipt, setSupplierNipt] = useState('')
-  const [currency, setCurrency] = useState('EUR')
+  // Blerjet bëhen gjithmonë në USD — default për fatura të reja. Fatura
+  // ekzistuese ngarkohen me monedhën e vet të ruajtur.
+  const [currency, setCurrency] = useState('USD')
   const [exchangeRate, setExchangeRate] = useState(1)
   const [rateSource, setRateSource]   = useState('')
   // Payment splits — pasqyrim i sistemit të FaturaShitje. Çdo split ka
   // method (cash|bank), monedhë, shumë dhe kurs drejt LEK.
   const [paymentSplits, setPaymentSplits] = useState([])
   const [notes, setNotes]       = useState('')
+  // Flag "Dhuratë" — kur aktivizohet për Blerje Artikuj të Tjerë, të gjithë
+  // produktet e faturës markohen te products.is_gift = 1 që të shfaqen si
+  // mundësi te "+ Shto Dhuratë" në Fatura Shitje.
+  const [isGift, setIsGift]     = useState(false)
   const [category, setCategory] = useState(forcedCategory || '')
   const [items, setItems]       = useState([emptyItem()])
   const [allRates, setAllRates] = useState({ LEK: 1 })
@@ -1059,36 +1102,27 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRate, items.length])
 
-  // Blerje Flori: formula — nëse kodi > 0, llogarit auto:
-  //   has_gram    = (kodi/1000 + kursi_blerje/1000) × gram
-  //   cost_price  = has_gram × kursi_blerje              (has_rate — per rresht)
-  //   sell_price  = has_gram × multiplier × kursi_shitje × (1 + tvsh/100)
+  // Blerje Flori — llogarit auto vetëm çmimin e shitjes:
+  //   sell_price = has_gram × multiplier × kursi_shitje × (1 + tvsh/100)
   //                 (sell_rate — per rresht; fallback te has_rate)
-  // Nëse kodi = 0 (fatura të vjetra) nuk mbishkruajmë asgjë — të dhënat mbeten.
+  // has_gram, kodi, gram, has_rate merren nga importi/user-i pa formulë.
   useEffect(() => {
     if (forcedCategory !== 'flori') return
     setItems(prev => {
       let changed = false
       const next = prev.map(it => {
-        const g   = n(it.gram)
-        const k   = n(it.kodi)
-        const hr  = n(it.has_rate)
+        const hg  = n(it.has_gram)
         const mul = n(it.multiplier)
+        const hr  = n(it.has_rate)
+        const sr  = n(it.sell_rate)
         const vat = n(it.vat_rate) || 0
-        if (k <= 0 || g <= 0 || hr <= 0) return it
-        const sellR    = n(it.sell_rate) > 0 ? n(it.sell_rate) : hr
-        // has_gram rrumbullakoset gjithmonë në 2 shifra (p.sh. 1.3962 → 1.40)
-        // që të përputhet me shfaqjen; cost/sell përdorin këtë vlerë të rrumbullakosur.
-        const newHas   = +(((k / 1000) + (hr / 1000)) * g).toFixed(2)
-        const newCost  = +(newHas * hr).toFixed(2)
-        const newSell  = mul > 0 ? +(newHas * mul * sellR * (1 + vat / 100)).toFixed(2) : n(it.sell_price)
-        if (
-          Math.abs(newHas  - n(it.has_gram))   < 0.005 &&
-          Math.abs(newCost - n(it.cost_price)) < 0.005 &&
-          Math.abs(newSell - n(it.sell_price)) < 0.005
-        ) return it
+        if (hg <= 0 || mul <= 0) return it
+        const sellR   = sr > 0 ? sr : hr
+        if (sellR <= 0) return it
+        const newSell = +(hg * mul * sellR * (1 + vat / 100)).toFixed(2)
+        if (Math.abs(newSell - n(it.sell_price)) < 0.005) return it
         changed = true
-        return { ...it, has_gram: newHas, cost_price: newCost, sell_price: newSell }
+        return { ...it, sell_price: newSell }
       })
       return changed ? next : prev
     })
@@ -1134,6 +1168,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             }
           }
           setNotes(inv.notes || '')
+          setIsGift(!!inv.is_gift)
           const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
           const mats = invItems.map(it => it.material).filter(Boolean)
           setCategory(forcedCategory || (mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : ''))
@@ -1419,6 +1454,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       name:                  p.name,
       qty:                   p.stock > 0 ? p.stock : 1,
       gram:                  p.gram || 0,
+      kodi:                  p.kodi || 0,
+      has_gram:              p.has_gram || 0,
+      has_rate:              p.has_rate || 0,
+      has_rate_currency:     'EUR',
+      cost_price:            eurToInvoiceCurrency(p.cost_price || 0),
       purchase_price_no_vat: eurToInvoiceCurrency(p.cost_price || 0),
       discount_percent:      0,
       vat_rate:              0,
@@ -1485,6 +1525,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         // për backward compat me çdo konsumator të vjetër që lexon nga payload-i.
         amount_paid: 0,
         notes,
+        is_gift: isGift ? 1 : 0,
         items: valid,
       }
       const url = invoiceId ? `/api/purchase-invoices/${invoiceId}` : '/api/purchase-invoices'
@@ -1698,6 +1739,17 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             className="input-field" placeholder="opsional" />
         </div>
+        {!forcedCategory && (
+          <div className="col-span-2">
+            <label className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${isGift ? 'bg-rose-50 border-rose-300 text-rose-700 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-300' : 'bg-white border-slate-200 text-slate-600 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-300'}`}>
+              <input type="checkbox" checked={isGift}
+                onChange={e => setIsGift(e.target.checked)}
+                className="w-4 h-4 accent-rose-600" />
+              <span className="text-sm font-semibold">🎁 Kjo faturë përmban <span className="underline">dhurata</span></span>
+              <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">(produktet do të markohen si dhurata në inventar)</span>
+            </label>
+          </div>
+        )}
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -1715,7 +1767,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 )}
                 {forcedCategory !== 'diamant' && (
                   <>
-                    <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Blerje Ne HAS</th>
+                    <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Cmim Blerje Has</th>
                     <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title={forcedCategory === 'flori' ? 'Kursi i Blerjes — EUR / gram HAS; vendoset manualisht nga user-i' : 'Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit'}>Kursi Blerje</th>
                   </>
                 )}
@@ -1727,13 +1779,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   </>
                 )}
                 {forcedCategory === 'flori' && (
-                  <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="HAS ne Shitje = Blerje Ne HAS × Shumëzues">HAS ne Shitje</th>
+                  <>
+                    <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
+                    <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Cmim Shitje Has = Cmim Blerje Has × Shumëzues">Cmim Shitje Has</th>
+                  </>
                 )}
                 {forcedCategory !== 'diamant' && (
                   <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
-                {(forcedCategory === 'flori' || forcedCategory === 'diamant') && (
+                {forcedCategory === 'diamant' && (
                   <th className="px-2 py-2 text-right font-semibold w-16 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Shumëzues për çdo rresht — mbushet auto nga 'Shumëzues Shitjeje' në krye, mund të ndryshohet per rresht">Shumëzues</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-24 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">Cmim Shitje €</th>
@@ -1805,10 +1860,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
                           <input type="number" step="0.001" min="0" value={it.has_gram || ''}
                             onChange={e => setItem(idx, { has_gram: e.target.value })}
-                            disabled={forcedCategory === 'flori' && n(it.kodi) > 0}
-                            className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 ${forcedCategory === 'flori' && n(it.kodi) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-                            placeholder="0.00"
-                            title={forcedCategory === 'flori' && n(it.kodi) > 0 ? 'Auto: (Kodi/1000 + Kursi/1000) × Gram' : undefined} />
+                            className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                            placeholder="0.00" />
                         </td>
                         <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
                           <div className="flex items-center gap-1">
@@ -1828,9 +1881,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                     <td className="px-1 py-1">
                       <MoneyInput value={it.cost_price}
                         onChange={v => setItem(idx, { cost_price: v })}
-                        disabled={forcedCategory === 'flori'}
-                        className={`input-field-sm text-right ${forcedCategory === 'flori' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed font-semibold' : ''}`}
-                        {...(forcedCategory === 'flori' ? { title: 'Auto: has_gram × Kursi' } : {})}
+                        className="input-field-sm text-right"
                       />
                     </td>
                     {forcedCategory === 'diamant' && (() => {
@@ -1870,15 +1921,24 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       )
                     })()}
                     {forcedCategory === 'flori' && (() => {
-                      // HAS ne Shitje = Blerje Ne HAS × Shumëzues
+                      // Cmim Shitje Has = Cmim Blerje Has × Shumëzues
                       const hg  = n(it.has_gram)
                       const mul = n(it.multiplier)
                       const hasSell = hg > 0 && mul > 0 ? +(hg * mul).toFixed(2) : 0
                       return (
-                        <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10 text-right font-semibold text-emerald-800 dark:text-emerald-200"
-                            title="Auto: Blerje Ne HAS × Shumëzues">
-                          {hasSell > 0 ? hasSell.toFixed(2) : '—'}
-                        </td>
+                        <>
+                          <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
+                            <input type="number" step="0.01" min="0" value={it.multiplier || ''}
+                              onChange={e => setItem(idx, { multiplier: e.target.value })}
+                              className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                              placeholder="1.8"
+                              title="Shumëzues per rresht — override i vlerës globale" />
+                          </td>
+                          <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10 text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                              title="Auto: Cmim Blerje Has × Shumëzues">
+                            {hasSell > 0 ? hasSell.toFixed(2) : '—'}
+                          </td>
+                        </>
                       )
                     })()}
                     {forcedCategory !== 'diamant' && (
@@ -1901,7 +1961,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         onChange={e => setItem(idx, { vat_rate: e.target.value })}
                         className="input-field-sm text-right" />
                     </td>
-                    {(forcedCategory === 'flori' || forcedCategory === 'diamant') && (
+                    {forcedCategory === 'diamant' && (
                       <td className="px-1 py-1 bg-emerald-50/40 dark:bg-emerald-900/10">
                         <input type="number" step="0.01" min="0" value={it.multiplier || ''}
                           onChange={e => setItem(idx, { multiplier: e.target.value })}
@@ -1980,7 +2040,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             </tbody>
             <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
               <tr className="font-bold text-xs">
-                <td colSpan={forcedCategory === 'flori' ? 16 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
+                <td colSpan={forcedCategory === 'flori' ? 17 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>

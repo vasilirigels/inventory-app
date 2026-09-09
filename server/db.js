@@ -737,6 +737,46 @@ const MIGRATIONS = [
   // rreshti i produktit te Inventar shfaq valutën me të cilën u ble/shitur.
   "ALTER TABLE products ADD COLUMN has_rate_currency TEXT DEFAULT 'EUR'",
   "ALTER TABLE products ADD COLUMN sell_rate_currency TEXT DEFAULT 'EUR'",
+
+  // Koeficenti i punës (EUR/gram) për Blerje Flori — përdoret në formulën:
+  // has_gram = (kodi/1000 + koeficent_pune) × gram. Ruhet për rresht dhe
+  // për produkt (default nga blerja e fundit).
+  "ALTER TABLE purchase_items ADD COLUMN koeficent_pune REAL DEFAULT 0",
+  "ALTER TABLE products ADD COLUMN koeficent_pune REAL DEFAULT 0",
+
+  // Marketing — Kontratat: një "kontratë" me buxhet EUR mban brenda vetes
+  // zëra (product ose cash EUR) që zbriten nga buxheti derisa arrihet totali.
+  // Për zëra cash EUR llogariten si shpenzim në Arkën Ditore.
+  `CREATE TABLE IF NOT EXISTS marketing_contracts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    total_amount_eur REAL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    status TEXT DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME
+  )`,
+  // Dhurata — faturë blerje mund të markohet si "dhurata" (Blerje Artikuj të
+  // Tjerë). Të gjithë produktet e krijuara/ushqyera nga ajo faturë markohen
+  // si dhurata te products.is_gift = 1. Në Faturë Shitje, admin mund të shtojë
+  // "Dhuratë" — një produkt nga inventari me is_gift=1 që zbritet nga stoku
+  // pa u shtuar në totalin e faturës (unit_price=0, is_gift=1 te invoice_items).
+  "ALTER TABLE purchase_invoices ADD COLUMN is_gift INTEGER DEFAULT 0",
+  "ALTER TABLE products ADD COLUMN is_gift INTEGER DEFAULT 0",
+  "ALTER TABLE invoice_items ADD COLUMN is_gift INTEGER DEFAULT 0",
+
+  `CREATE TABLE IF NOT EXISTS marketing_contract_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    type TEXT NOT NULL,
+    amount_eur REAL DEFAULT 0,
+    product_id INTEGER,
+    product_qty INTEGER DEFAULT 0,
+    description TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (contract_id) REFERENCES marketing_contracts(id) ON DELETE CASCADE
+  )`,
 ];
 
 async function initDB() {
