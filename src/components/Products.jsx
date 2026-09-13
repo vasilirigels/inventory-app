@@ -1661,6 +1661,10 @@ export default function Products() {
   const [toDate, setToDate]         = useState('')
   const [bulkApplying, setBulkApplying] = useState(false)
   const [bulkMultiplier, setBulkMultiplier] = useState('')
+  // Filter i statusit të stokut — kliko rrëshqitësin te stock strip
+  //   'all' = normalja (fshihen pa-stoku), 'out' = vetëm pa stok,
+  //   'low' = vetëm stok i ulët, 'ok' = vetëm OK.
+  const [stockFilter, setStockFilter] = useState('all')
   // Rreshtat e rinj për shtim inline — si te Fatura Blerje "+ Shto Artikull"
   const [newRows, setNewRows] = useState([])
   const newRowKey = useRef(0)
@@ -1734,10 +1738,14 @@ export default function Products() {
   })()
 
   const filtered = products.filter(p => {
-    // Produkte pa stok fshihen nga lista e inventarit derisa të bëhet një
-    // blerje e re që i shton stokun. Numëratori i shpejtë "pa stok" në
-    // përmbledhëse mbetet aktiv sepse bazohet te `products` (jo `filtered`).
-    if ((parseInt(p.stock) || 0) <= 0) return false
+    // Filtri i stokut — default 'all' fsheh pa-stoku. User-i mund të klikojë
+    // "pa stok" / "stok i ulët" / "OK" te stock strip për të parë vetëm ata.
+    const stockN = parseInt(p.stock) || 0
+    const minN   = parseInt(p.min_stock) || 0
+    if (stockFilter === 'out')      { if (stockN !== 0) return false }
+    else if (stockFilter === 'low') { if (!(stockN > 0 && stockN <= minN)) return false }
+    else if (stockFilter === 'ok')  { if (!(stockN > minN)) return false }
+    else                            { if (stockN <= 0) return false }
     const q = search.toLowerCase()
     const matchSearch = !q ||
       p.name.toLowerCase().includes(q) ||
@@ -2056,14 +2064,36 @@ export default function Products() {
         </div>
       </div>
 
-      {/* ── Stock strip ── */}
+      {/* ── Stock strip (klikohet për të filtruar) ── */}
       {products.length > 0 && (
         <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
-          <span>{filtered.length} produkte{search || filterCat !== 'Të gjitha' ? ' (filtruar)' : ''}</span>
+          <span>{filtered.length} produkte{search || filterCat !== 'Të gjitha' || stockFilter !== 'all' ? ' (filtruar)' : ''}</span>
           <span className="w-px h-3 bg-slate-200 dark:bg-slate-700" />
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-emerald-500 rounded-full" />{stockOk} OK</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-amber-400 rounded-full" />{stockLow} stok i ulët</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-red-500 rounded-full" />{stockOut} pa stok</span>
+          <button
+            type="button"
+            onClick={() => setStockFilter(stockFilter === 'ok' ? 'all' : 'ok')}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-colors ${stockFilter === 'ok' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-semibold' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+            title="Kliko për të filtruar vetëm produktet me stok OK"
+          ><span className="w-2 h-2 bg-emerald-500 rounded-full" />{stockOk} OK</button>
+          <button
+            type="button"
+            onClick={() => setStockFilter(stockFilter === 'low' ? 'all' : 'low')}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-colors ${stockFilter === 'low' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-semibold' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+            title="Kliko për të filtruar vetëm produktet me stok të ulët"
+          ><span className="w-2 h-2 bg-amber-400 rounded-full" />{stockLow} stok i ulët</button>
+          <button
+            type="button"
+            onClick={() => setStockFilter(stockFilter === 'out' ? 'all' : 'out')}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-colors ${stockFilter === 'out' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-semibold' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+            title="Kliko për të parë produktet pa stok"
+          ><span className="w-2 h-2 bg-red-500 rounded-full" />{stockOut} pa stok</button>
+          {stockFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => setStockFilter('all')}
+              className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
+            >✕ pastro filtrin</button>
+          )}
         </div>
       )}
 

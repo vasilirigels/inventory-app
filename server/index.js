@@ -1575,7 +1575,22 @@ app.post('/api/products/import', async (req, res) => {
         await run('UPDATE products SET active = 1 WHERE id = ?', [existing.id]);
         ids.push(existing.id);
         matched++;
-        duplicates.push({ name: String(d.name).trim(), matchedBy });
+        // Gjej faturën e fundit të blerjes që përmban këtë produkt — që user-i
+        // të dijë "ky produkt është përdorur tashmë te B2025-XXXXX".
+        const inv = await queryOne(
+          `SELECT pi.invoice_no, pi.date
+             FROM purchase_items pit
+             JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+            WHERE pit.product_id = ?
+            ORDER BY pi.date DESC, pi.id DESC LIMIT 1`,
+          [existing.id],
+        );
+        duplicates.push({
+          name: String(d.name).trim(),
+          matchedBy,
+          existingInvoiceNo: inv?.invoice_no || '',
+          existingInvoiceDate: inv?.date || '',
+        });
         continue;
       }
       await run(

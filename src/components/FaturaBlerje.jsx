@@ -814,8 +814,12 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel, forcedCa
       if (matched > 0) {
         const dups = Array.isArray(data.duplicates) ? data.duplicates : []
         const list = dups.length > 0
-          ? '\n\nDublikatat:\n' + dups.slice(0, 20).map((d, i) => `  ${i + 1}. ${d.name} — ${d.matchedBy}`).join('\n')
-              + (dups.length > 20 ? `\n  … dhe ${dups.length - 20} të tjera` : '')
+          ? '\n\nDublikatat:\n' + dups.slice(0, 20).map((d, i) => {
+              const where = d.existingInvoiceNo
+                ? `në faturën ${d.existingInvoiceNo}${d.existingInvoiceDate ? ` (${d.existingInvoiceDate})` : ''}`
+                : 'në DB'
+              return `  ${i + 1}. ${d.name} — ${d.matchedBy} — ekziston ${where}`
+            }).join('\n') + (dups.length > 20 ? `\n  … dhe ${dups.length - 20} të tjera` : '')
           : ''
         alert(
           `✓ ${data.imported || 0} produkte të reja u krijuan.\n` +
@@ -1476,6 +1480,18 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       .filter(it => (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.purchase_price_no_vat) > 0)
       .map(it => category ? { ...it, material: category } : it)
     if (valid.length === 0) { alert('Shtoni të paktën një artikull.'); return }
+    // Paralajmërim për rreshta me përshkrim por sasi 0 — user-i shpesh harron
+    // të vendosë sasinë dhe stoku nuk shtohet (produkti krijohet me stock=0).
+    const zeroQty = valid.filter(it => it.name && it.name.trim() && n(it.qty) <= 0)
+    if (zeroQty.length > 0) {
+      const list = zeroQty.slice(0, 15).map((it, i) => `  ${i + 1}. ${it.name}${it.barcode ? ` [${it.barcode}]` : ''}`).join('\n')
+      const more = zeroQty.length > 15 ? `\n  … dhe ${zeroQty.length - 15} të tjera` : ''
+      const proceed = await showConfirm(
+        `⚠️ ${zeroQty.length} rresht${zeroQty.length === 1 ? ' ka' : 'a kanë'} sasi = 0.\n\n${list}${more}\n\nStoku i tyre s'do të shtohet në produkte. Vazhdo prapëseprapë?`,
+        { title: 'Sasi e paplotësuar', confirmLabel: 'Vazhdo pa sasi', danger: true }
+      )
+      if (!proceed) return
+    }
     setSaving(true)
     try {
       const splitsPayload = paymentSplits
