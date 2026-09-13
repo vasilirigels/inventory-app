@@ -652,59 +652,24 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
                   )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt((n(inv.subtotal_no_vat) + n(inv.total_discount)) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className={`px-4 py-3 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                     {n(inv.total_discount) > 0.005 ? `-${fmt(inv.total_discount)}` : '—'}
-                    {isForeign && n(inv.total_discount) > 0.005 && (
-                      <div className="text-[10px] font-normal text-orange-500/80 italic">
-                        = -{fmt(n(inv.total_discount) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.subtotal_no_vat)}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(inv.subtotal_no_vat) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.total_vat)}
-                    {isForeign && n(inv.total_vat) > 0.005 && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(inv.total_vat) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                     {fmt(inv.total_with_vat)}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(inv.total_with_vat) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(initPaid)}
-                    {isForeign && initPaid > 0.005 && (
-                      <div className="text-[10px] font-normal text-emerald-600/70 italic">
-                        = {fmt(initPaid * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className={`px-4 py-3 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
                     {due > 0.005 ? fmt(due) : '✓ Paguar'}
-                    {isForeign && due > 0.005 && (
-                      <div className="text-[10px] font-normal italic text-red-500/80">
-                        = {fmt(due * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
@@ -1754,12 +1719,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
 
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs min-w-[1400px]">
+          <table className="w-full text-xs min-w-[1800px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">Nr.</th>
-                <th className="px-2 py-2 text-left font-semibold w-80">Barkodi</th>
-                <th className="px-2 py-2 text-left font-semibold w-56">Pershkrimi</th>
+                <th className="px-2 py-2 text-left font-semibold w-56">Barkodi</th>
+                <th className="px-2 py-2 text-left font-semibold w-80">Pershkrimi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
                 {forcedCategory === 'flori' && (

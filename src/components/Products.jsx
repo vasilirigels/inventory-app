@@ -887,12 +887,6 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
           placeholder="0.000" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-        <input type="text" value={rowData.has_currency}
-          onChange={e => set('has_currency', e.target.value)}
-          className="input-field-sm text-center text-xs font-mono font-semibold text-amber-700 dark:text-amber-300"
-          placeholder="HAS" />
-      </td>
-      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <div className="flex items-center gap-1">
           <MoneyInput value={rowData.has_rate}
             onChange={v => set('has_rate', String(v))}
@@ -1196,12 +1190,6 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           onChange={e => set('has_gram', e.target.value)}
           className="input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300"
           placeholder="0.000" />
-      </td>
-      <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-        <input type="text" value={form.has_currency}
-          onChange={e => set('has_currency', e.target.value)}
-          className="input-field-sm text-center text-xs font-mono font-semibold text-amber-700 dark:text-amber-300"
-          placeholder="HAS" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <div className="flex items-center gap-1">
@@ -2182,7 +2170,6 @@ export default function Products() {
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Kodi i floririt (585, 750, ...)">Kodi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Cmim Blerje Has</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Mon</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 min-w-[160px]" title="USD / gram HAS në kohën e blerjes">Kursi Blerje</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Shumëzuesi për çmim shitjeje">Shumëzues</th>

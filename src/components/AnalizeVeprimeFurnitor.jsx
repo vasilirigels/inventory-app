@@ -399,19 +399,9 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                       {fmt(inv.total_with_vat)}
-                      {isForeign && (
-                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                          = {fmt(n(inv.total_with_vat) * rate)} LEK
-                        </div>
-                      )}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                       {ev.initialPaid > 0.005 ? fmt(ev.initialPaid) : '—'}
-                      {isForeign && ev.initialPaid > 0.005 && (
-                        <div className="text-[10px] font-normal text-emerald-600/70 italic">
-                          = {fmt(ev.initialPaid * rate)} LEK
-                        </div>
-                      )}
                     </td>
                     <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                       {fmt(ev.balance)}
@@ -452,11 +442,6 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                   <td className="px-4 py-2"></td>
                   <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(p.amount)}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-emerald-600/70 italic">
-                        = {fmt(n(p.amount) * payRate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                     {fmt(ev.balance)}

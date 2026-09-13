@@ -250,9 +250,6 @@ function HasList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                     <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(p.price_per_gram)}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                       {fmt(p.total_amount)}
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(p.total_amount) * rate)} LEK
-                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1.5">
@@ -273,9 +270,6 @@ function HasList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                 <td></td>
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-800 dark:text-emerald-200">
                   {fmt(totals.amount)}
-                  <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                    = {fmt(totals.amountLek)} LEK
-                  </div>
                 </td>
                 <td></td>
               </tr>
@@ -495,21 +489,10 @@ function HasEditor({ date, purchaseId, onClose, onSaved }) {
           )}
           {spotError && <p className="text-[10px] text-red-600 mt-0.5">{spotError}</p>}
         </div>
-        <div className="col-span-2 md:col-span-4 grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali për Pagesë (EUR)</label>
-            <div className="input-field bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 border-emerald-200 tabular-nums font-bold text-base">
-              {fmt(totalEur)}
-            </div>
-          </div>
-          <div>
-            <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">
-              Ekuivalent në LEK
-              <span className="ml-1 text-slate-400 dark:text-slate-500 normal-case">(1 EUR = {n(exchangeRate).toLocaleString('sq-AL')} LEK · {rateSource || '—'})</span>
-            </label>
-            <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 tabular-nums font-bold text-base">
-              {fmt(totalLek)}
-            </div>
+        <div className="col-span-2 md:col-span-4">
+          <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali për Pagesë (EUR)</label>
+          <div className="input-field bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 border-emerald-200 tabular-nums font-bold text-base">
+            {fmt(totalEur)}
           </div>
         </div>
 
