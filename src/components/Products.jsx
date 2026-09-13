@@ -851,6 +851,7 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
       <td className="px-2 py-1 font-mono text-xs text-blue-600 dark:text-blue-300 whitespace-nowrap font-bold">
         i ri
       </td>
+      <td className="px-2 py-1 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap" title="Data caktohet automatikisht kur ruhet">—</td>
       <td className="px-1 py-1 min-w-[160px]">
         <input type="text" value={rowData.barcode}
           onChange={e => set('barcode', e.target.value)}
@@ -1156,6 +1157,21 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           <span className="ml-1 text-[10px] text-amber-500" title="Ndryshim i paruajtur">●</span>
         )}
       </td>
+      {(() => {
+        // last_purchase_date vjen si TEXT "YYYY-MM-DD" nga fatura e fundit e
+        // blerjes; nuk ka orë. Nëse produkti s'ka fatura, shfaq "—".
+        const raw = p.last_purchase_date
+        if (!raw) return <td className="px-2 py-1 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap" title="S'ka faturë blerjeje për këtë produkt">—</td>
+        const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/)
+        if (!m) return <td className="px-2 py-1 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">—</td>
+        const [, y, mo, da] = m
+        const short = `${da}.${mo}.${y.slice(-2)}`
+        return (
+          <td className="px-2 py-1 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap tabular-nums" title={`Data e faturës së fundit të blerjes: ${y}-${mo}-${da}`}>
+            {short}
+          </td>
+        )
+      })()}
       <td className="px-1 py-1 min-w-[160px]">
         <input type="text" value={form.barcode}
           onChange={e => set('barcode', e.target.value)}
@@ -2189,10 +2205,11 @@ export default function Products() {
       {(filtered.length > 0 || newRows.length > 0) && view === 'list' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1700px]">
+          <table className="w-full text-sm min-w-[1780px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase whitespace-nowrap" title="Data e faturës së fundit të blerjes për këtë produkt">Data Blerje</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase min-w-[160px]">Barkodi</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase min-w-[300px]">Pershkrimi</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-16" title="Kategoria">Kat.</th>

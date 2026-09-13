@@ -1480,17 +1480,20 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       .filter(it => (it.name && it.name.trim()) || n(it.qty) > 0 || n(it.purchase_price_no_vat) > 0)
       .map(it => category ? { ...it, material: category } : it)
     if (valid.length === 0) { alert('Shtoni të paktën një artikull.'); return }
-    // Paralajmërim për rreshta me përshkrim por sasi 0 — user-i shpesh harron
-    // të vendosë sasinë dhe stoku nuk shtohet (produkti krijohet me stock=0).
+    // Bllokim absolut për rreshta me përshkrim por sasi 0 — përndryshe produkti
+    // krijohet me stock=0 dhe kalon në inventar bosh. User-i duhet të mbushë
+    // sasinë ose të fshijë rreshtin para ruajtjes.
     const zeroQty = valid.filter(it => it.name && it.name.trim() && n(it.qty) <= 0)
     if (zeroQty.length > 0) {
       const list = zeroQty.slice(0, 15).map((it, i) => `  ${i + 1}. ${it.name}${it.barcode ? ` [${it.barcode}]` : ''}`).join('\n')
       const more = zeroQty.length > 15 ? `\n  … dhe ${zeroQty.length - 15} të tjera` : ''
-      const proceed = await showConfirm(
-        `⚠️ ${zeroQty.length} rresht${zeroQty.length === 1 ? ' ka' : 'a kanë'} sasi = 0.\n\n${list}${more}\n\nStoku i tyre s'do të shtohet në produkte. Vazhdo prapëseprapë?`,
-        { title: 'Sasi e paplotësuar', confirmLabel: 'Vazhdo pa sasi', danger: true }
+      const noun = zeroQty.length === 1 ? 'një produkt' : `${zeroQty.length} produkte`
+      const verb = zeroQty.length === 1 ? 'do të mbetet' : 'do të mbeten'
+      await showConfirm(
+        `⛔ Keni ${noun} me stok 0!\n\n${zeroQty.length === 1 ? 'Ky produkt' : 'Këto produkte'} ${verb} pa stok në inventar sepse ${zeroQty.length === 1 ? 'sasia është' : 'sasitë janë'} = 0:\n\n${list}${more}\n\nMbush sasinë (ose fshi rreshtin) para se të ruash faturën.`,
+        { title: 'Sasi e paplotësuar — nuk mund të ruhet', confirmLabel: 'Kuptohet', danger: true, hideCancel: true }
       )
-      if (!proceed) return
+      return
     }
     setSaving(true)
     try {

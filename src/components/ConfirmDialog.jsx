@@ -52,6 +52,9 @@ export default function ConfirmDialog() {
     confirmLabel = 'Po, vazhdo',
     cancelLabel = 'Anulo',
     danger = false,
+    // hideCancel = true e kthen dialogun në një alert bllokues me një buton
+    // të vetëm — përdoret kur veprimi që po pritej NUK mund të vazhdojë.
+    hideCancel = false,
   } = options
 
   return (
@@ -76,11 +79,13 @@ export default function ConfirmDialog() {
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 mt-5">
-          <button
-            type="button"
-            onClick={() => decide(false)}
-            className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-sm font-medium transition-colors"
-          >{cancelLabel}</button>
+          {!hideCancel && (
+            <button
+              type="button"
+              onClick={() => decide(false)}
+              className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-sm font-medium transition-colors"
+            >{cancelLabel}</button>
+          )}
           <button
             ref={confirmBtnRef}
             type="button"
