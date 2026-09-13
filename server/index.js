@@ -1554,6 +1554,10 @@ app.post('/api/products/import', async (req, res) => {
     const ids = [];
     let imported = 0;
     let matched = 0;
+    // Regjistër i dublikatave — çfarë (barkodi, SKU, ose serial) përplaset me
+    // një rresht të mëparshëm. Frontend-i i shfaq që user-i të gjejë rreshtin
+    // problematik në Excel dhe ta rregullojë.
+    const duplicates = [];
     for (const d of products) {
       if (!d.name || !String(d.name).trim()) { ids.push(null); continue; }
       const barcode   = String(d.barcode || '').trim();
@@ -1563,13 +1567,15 @@ app.post('/api/products/import', async (req, res) => {
       // repeat imports create duplicate rows. Stock/cost nuk mbishkruhen këtu;
       // për invoice-based updates ekziston flow-i i faturës që i menaxhon.
       let existing = null;
-      if (barcode)              existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
-      if (!existing && serial_no) existing = await queryOne('SELECT id FROM products WHERE serial_no = ? LIMIT 1', [serial_no]);
-      if (!existing && sku)     existing = await queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]);
+      let matchedBy = '';
+      if (barcode)              { existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]); if (existing) matchedBy = `barkodi "${barcode}"`; }
+      if (!existing && serial_no) { existing = await queryOne('SELECT id FROM products WHERE serial_no = ? LIMIT 1', [serial_no]); if (existing) matchedBy = `serial "${serial_no}"`; }
+      if (!existing && sku)     { existing = await queryOne('SELECT id FROM products WHERE sku = ? LIMIT 1', [sku]); if (existing) matchedBy = `SKU "${sku}"`; }
       if (existing) {
         await run('UPDATE products SET active = 1 WHERE id = ?', [existing.id]);
         ids.push(existing.id);
         matched++;
+        duplicates.push({ name: String(d.name).trim(), matchedBy });
         continue;
       }
       await run(
@@ -1599,7 +1605,7 @@ app.post('/api/products/import', async (req, res) => {
       ids.push(row?.id || null);
       imported++;
     }
-    res.json({ success: true, imported, matched, ids });
+    res.json({ success: true, imported, matched, ids, duplicates });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

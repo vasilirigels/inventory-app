@@ -635,7 +635,7 @@ function ImportModal({ onClose, onDone }) {
     { key: 'gram',                 label: 'Gramatura'        },
     { key: 'purchase_price_no_vat',label: 'Cmimi PA (€)'     },
     { key: 'vat_rate',             label: 'TVSH %'           },
-    { key: 'cost_price',           label: 'Cmim Kosto (€)'   },
+    { key: 'cost_price',           label: 'Cmim Kosto ($)'   },
     { key: 'sell_price',           label: 'Cmim Shitje (€)'  },
     { key: 'min_stock',            label: 'Stok Minimal'     },
   ]
@@ -1457,7 +1457,7 @@ function ProductModal({ product, onClose, onSave }) {
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Çmimi bazë nga furnitori (pa TVSH).</p>
               </div>
               <div>
-                <label className="form-label">Çmimi Kosto (€)</label>
+                <label className="form-label">Çmimi Kosto ($)</label>
                 <MoneyInput value={form.cost_price} onChange={v => set('cost_price', String(v))}
                   className="input-field" placeholder="0.00" />
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Kosto totale (me TVSH + tarifat).</p>
@@ -2171,7 +2171,7 @@ export default function Products() {
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Kodi i floririt (585, 750, ...)">Kodi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Cmim Blerje Has</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 min-w-[160px]" title="USD / gram HAS në kohën e blerjes">Kursi Blerje</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto $</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Shumëzuesi për çmim shitjeje">Shumëzues</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Cmim Shitje Has = Cmim Blerje Has × Shumëzues">Cmim Shitje Has</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 min-w-[160px]" title="EUR / gram HAS për çmim shitjeje">Kursi Shitje</th>

@@ -812,7 +812,16 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel, forcedCa
       if (!res.ok) throw new Error(data.error || 'Gabim importi')
       const matched = data.matched || 0
       if (matched > 0) {
-        alert(`✓ ${data.imported || 0} produkte të reja u krijuan.\n♻️ ${matched} ekzistonin tashmë (sipas barkodit / SKU-së) — u përdorën të njëjtët.`)
+        const dups = Array.isArray(data.duplicates) ? data.duplicates : []
+        const list = dups.length > 0
+          ? '\n\nDublikatat:\n' + dups.slice(0, 20).map((d, i) => `  ${i + 1}. ${d.name} — ${d.matchedBy}`).join('\n')
+              + (dups.length > 20 ? `\n  … dhe ${dups.length - 20} të tjera` : '')
+          : ''
+        alert(
+          `✓ ${data.imported || 0} produkte të reja u krijuan.\n` +
+          `⚠️ ${matched} rresht${matched === 1 ? '' : 'a'} me barkod/SKU të dublikuar — u përdor produkti ekzistues.\n` +
+          `Kontrollo Excel-in për të hequr dublikatat.${list}`
+        )
       }
       onImported(products, Array.isArray(data.ids) ? data.ids : [])
       onClose()
