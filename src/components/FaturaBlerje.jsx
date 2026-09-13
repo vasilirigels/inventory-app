@@ -190,7 +190,7 @@ function emptyItem() {
     sell_rate: 0,
     // Etiketa valute për kursin e blerjes/shitjes — marker (EUR/USD) që user-i
     // të dijë në ç'valutë ka futur numrin. Formula përdor vlerën si-është.
-    has_rate_currency: 'EUR', sell_rate_currency: 'EUR',
+    has_rate_currency: 'USD', sell_rate_currency: 'EUR',
   }
 }
 
@@ -1457,7 +1457,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       kodi:                  p.kodi || 0,
       has_gram:              p.has_gram || 0,
       has_rate:              p.has_rate || 0,
-      has_rate_currency:     'EUR',
+      has_rate_currency:     'USD',
       cost_price:            eurToInvoiceCurrency(p.cost_price || 0),
       purchase_price_no_vat: eurToInvoiceCurrency(p.cost_price || 0),
       discount_percent:      0,
@@ -1758,7 +1758,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr className="text-slate-500 dark:text-slate-400">
                 <th className="px-2 py-2 text-left font-semibold w-8">Nr.</th>
-                <th className="px-2 py-2 text-left font-semibold w-40">Barkodi</th>
+                <th className="px-2 py-2 text-left font-semibold w-80">Barkodi</th>
                 <th className="px-2 py-2 text-left font-semibold w-56">Pershkrimi</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">Sasi</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Gram</th>
@@ -1768,7 +1768,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 {forcedCategory !== 'diamant' && (
                   <>
                     <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS)">Cmim Blerje Has</th>
-                    <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title={forcedCategory === 'flori' ? 'Kursi i Blerjes — EUR / gram HAS; vendoset manualisht nga user-i' : 'Kursi i Blerjes — EUR / gram HAS; mbushet automatikisht nga çmimi aktual i florit'}>Kursi Blerje</th>
+                    <th className="px-2 py-2 text-right font-semibold w-28 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title={forcedCategory === 'flori' ? 'Kursi i Blerjes — USD / gram HAS; vendoset manualisht nga user-i' : 'Kursi i Blerjes — USD / gram HAS; mbushet automatikisht nga çmimi aktual i florit'}>Kursi Blerje</th>
                   </>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-24">Cmim Blerje</th>
@@ -1869,11 +1869,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                               onChange={v => setItem(idx, { has_rate: v })}
                               className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
                               placeholder={forcedCategory !== 'flori' && hasRateLoading ? '…' : '0.00'} />
-                            <CurrencyToggle value={it.has_rate_currency}
-                              onChange={v => setItem(idx, {
-                                has_rate_currency: v,
-                                has_rate: convertRateCurrency(it.has_rate, it.has_rate_currency, v, allRates),
-                              })} />
+                            <span
+                              title="Valuta: USD (fikse për Kursi Blerje)"
+                              className="px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-amber-800 dark:text-amber-200 leading-none shrink-0"
+                            >$</span>
                           </div>
                         </td>
                       </>
@@ -2090,8 +2089,15 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   if (!(await showConfirm(`Vendos Çm. Shitje = Çm. Blerje × ${m} për ${eligible} rreshta?`, {
                     title: 'Apliko shumëzuesin', confirmLabel: 'Apliko',
                   }))) return
+                  // Setojmë edhe `multiplier` që:
+                  //  (1) kolona "Shumëzues" të shfaqet e mbushur për çdo rresht
+                  //  (2) formula e Cmim Shitje HAS (has_gram × multiplier × sell_rate)
+                  //      te Flori/Diamant të aktivizohet auto nga useEffect-i.
+                  // `sell_price` vendoset për fallback (kategori pa formulë të vet);
+                  // për flori/diamant useEffect-i pas kësaj e rillogarit nga formula.
                   setItems(prev => prev.map(it => ({
                     ...it,
+                    multiplier: m,
                     sell_price: +(n(it.purchase_price_no_vat) * m).toFixed(2),
                   })))
                 }}

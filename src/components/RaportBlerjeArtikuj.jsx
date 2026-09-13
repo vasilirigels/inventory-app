@@ -143,9 +143,9 @@ function DocsModal({ row, from, to, onClose, onNavigate }) {
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitor / Magazinë</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Blerje (LEK)</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH (LEK)</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Me TVSH (LEK)</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Blerje ($)</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH ($)</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Me TVSH ($)</th>
                   <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
                 </tr>
               </thead>
@@ -162,9 +162,9 @@ function DocsModal({ row, from, to, onClose, onNavigate }) {
                     <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">{d.doc_no}</td>
                     <td className="px-3 py-2 text-slate-800 dark:text-slate-100">{d.party_name || <span className="italic text-slate-400 dark:text-slate-500">— —</span>}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold">{fmtQty(d.qty)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(d.unit_price_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{fmt(d.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(d.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(d.unit_price_usd)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{fmt(d.value_no_vat_usd)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(d.value_with_vat_usd)}</td>
                     <td className="px-3 py-2 text-center">
                       <button
                         onClick={e => { e.stopPropagation(); openDoc(d) }}
@@ -239,22 +239,22 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
       Artikulli: r.name || '',
       Kategoria: r.category || '',
       'Sasia': r.qty,
-      'Çm. Blerje (LEK)': r.unit_price_lek,
-      'Zbritje (LEK)': r.discount_lek,
-      'Vlera pa TVSH (LEK)': r.value_no_vat_lek,
-      'TVSH (LEK)': r.vat_lek,
-      'Vlera me TVSH (LEK)': r.value_with_vat_lek,
+      'Çm. Blerje ($)': r.unit_price_usd,
+      'Zbritje ($)': r.discount_usd,
+      'Vlera pa TVSH ($)': r.value_no_vat_usd,
+      'TVSH ($)': r.vat_usd,
+      'Vlera me TVSH ($)': r.value_with_vat_usd,
       'Nr. Dokumentash': r.docs_count,
     }))
     if (totals) {
       out.push({
         Barkodi: '', SKU: '', Artikulli: 'TOTALI', Kategoria: '',
         'Sasia': totals.qty,
-        'Çm. Blerje (LEK)': '',
-        'Zbritje (LEK)': totals.discount_lek,
-        'Vlera pa TVSH (LEK)': totals.value_no_vat_lek,
-        'TVSH (LEK)': totals.vat_lek,
-        'Vlera me TVSH (LEK)': totals.value_with_vat_lek,
+        'Çm. Blerje ($)': '',
+        'Zbritje ($)': totals.discount_usd,
+        'Vlera pa TVSH ($)': totals.value_no_vat_usd,
+        'TVSH ($)': totals.vat_usd,
+        'Vlera me TVSH ($)': totals.value_with_vat_usd,
         'Nr. Dokumentash': '',
       })
     }
@@ -271,7 +271,7 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
         <div>
           <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Raport Blerje — Artikuj</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Burimet: Fatura Blerje + Magazina Hyrje · Të gjitha vlerat janë në LEK (Magazina Hyrje është pa TVSH)
+            Burimet: Fatura Blerje + Magazina Hyrje · Të gjitha vlerat janë në USD ($) (Magazina Hyrje është pa TVSH)
           </p>
         </div>
         <button onClick={exportXlsx} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
@@ -346,13 +346,13 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                       {fmtQty(r.qty)} <span className="text-[10px] text-slate-400 dark:text-slate-500">{r.unit}</span>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.unit_price_lek)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${r.discount_lek > 0.005 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
-                      {r.discount_lek > 0.005 ? `-${fmt(r.discount_lek)}` : '—'}
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.unit_price_usd)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${r.discount_usd > 0.005 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
+                      {r.discount_usd > 0.005 ? `-${fmt(r.discount_usd)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt(r.vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(r.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.value_no_vat_usd)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt(r.vat_usd)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(r.value_with_vat_usd)}</td>
                     <td className="px-3 py-2 text-center">
                       <button
                         type="button"
@@ -368,15 +368,15 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
               {totals && (
                 <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
                   <tr className="font-bold text-xs">
-                    <td colSpan={3} className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 uppercase tracking-wide">TOTALI (LEK):</td>
+                    <td colSpan={3} className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 uppercase tracking-wide">TOTALI ($):</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(totals.qty)}</td>
                     <td></td>
                     <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
-                      {totals.discount_lek > 0.005 ? `-${fmt(totals.discount_lek)}` : '—'}
+                      {totals.discount_usd > 0.005 ? `-${fmt(totals.discount_usd)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmt(totals.value_no_vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(totals.vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200 text-sm">{fmt(totals.value_with_vat_lek)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmt(totals.value_no_vat_usd)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(totals.vat_usd)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200 text-sm">{fmt(totals.value_with_vat_usd)}</td>
                     <td></td>
                   </tr>
                 </tfoot>

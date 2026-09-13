@@ -266,15 +266,15 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div className="card py-3 text-center">
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali</p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali ({inv.currency})</p>
               <p className="text-xl font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmt(inv.total_with_vat)}</p>
             </div>
             <div className="card py-3 text-center bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200">
-              <p className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase font-semibold">Paguar deri tani</p>
+              <p className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase font-semibold">Paguar deri tani ({inv.currency})</p>
               <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(inv.amount_paid)}</p>
             </div>
             <div className={`card py-3 text-center ${isPaid ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200' : 'bg-red-50 dark:bg-red-900/30 border-red-200'}`}>
-              <p className={`text-[10px] uppercase font-semibold ${isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>Borxh i mbetur</p>
+              <p className={`text-[10px] uppercase font-semibold ${isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>Borxh i mbetur ({inv.currency})</p>
               <p className={`text-xl font-bold tabular-nums ${isPaid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>
                 {isPaid ? '✓ Mbyllur' : fmt(due)}
               </p>
@@ -657,19 +657,9 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                         <td className="px-4 py-2 text-center">{pmBadge}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
                           {fmt(inv.total_with_vat)}
-                          {isForeign && (
-                            <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                              = {fmt(n(inv.total_with_vat) * rate)} LEK
-                            </div>
-                          )}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <div className="tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{fmt(inv.amount_paid)}</div>
-                          {isForeign && n(inv.amount_paid) > 0.005 && (
-                            <div className="text-[10px] font-normal text-emerald-600/70 italic">
-                              = {fmt(n(inv.amount_paid) * rate)} LEK
-                            </div>
-                          )}
                           {n(inv.amount_paid) > 0 && (
                             <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                               {inv.last_payment_date || inv.date}
@@ -679,11 +669,6 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums font-bold text-red-600">
                           {fmt(inv._due)}
-                          {isForeign && n(inv._due) > 0.005 && (
-                            <div className="text-[10px] font-normal text-red-500/80 italic">
-                              = {fmt(n(inv._due) * rate)} LEK
-                            </div>
-                          )}
                         </td>
                         <td className="px-4 py-2 text-center">
                           <button

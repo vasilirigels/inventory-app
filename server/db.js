@@ -869,9 +869,16 @@ function isUniqueViolation(err) {
 // getNo() computes the next candidate (from a COUNT+increment or similar);
 // doInsert(no) performs the INSERT that may collide. On UNIQUE failure we ask
 // getNo() for a fresh number and try again, up to `maxRetries`.
-async function retryOnUniqueNo(getNo, doInsert, maxRetries = 5) {
+//
+// `initialNo` lets the caller propose a first number (e.g. the auto number the
+// client pre-fetched from `/next-no`). If that collides — a real race we've
+// hit when a slow save on one PC lets another PC take the same number — we
+// silently fall back to getNo() for a fresh candidate instead of failing the
+// user's save. Users never customise invoice numbers in the UI, so it's always
+// safer to auto-recover than to surface SQLITE_CONSTRAINT.
+async function retryOnUniqueNo(getNo, doInsert, maxRetries = 5, initialNo = null) {
   let lastErr;
-  let no = await getNo();
+  let no = initialNo || await getNo();
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       await doInsert(no);
@@ -888,6 +895,16 @@ async function retryOnUniqueNo(getNo, doInsert, maxRetries = 5) {
   throw lastErr;
 }
 
+// Batch write helper: executes multiple statements in a single Turso HTTP call
+// as a transaction. Massively reduces round-trips for handlers that write many
+// related rows (e.g. a purchase invoice with 20+ items). Statements can be
+// plain SQL strings or `{ sql, args }` objects.
+async function batchWrite(statements) {
+  if (!statements || statements.length === 0) return [];
+  const norm = statements.map(s => typeof s === 'string' ? { sql: s } : s);
+  return await client.batch(norm, 'write');
+}
+
 // Turso has its own backup mechanism; the on-demand /api/backup export used to
 // dump the local sqlite file. Now we dump table rows as JSON instead.
 async function exportDB() {
@@ -902,6 +919,6 @@ async function exportDB() {
 }
 
 export {
-  initDB, getDB, queryAll, queryOne, run, exportDB,
+  initDB, getDB, queryAll, queryOne, run, batchWrite, exportDB,
   isUniqueViolation, retryOnUniqueNo,
 };

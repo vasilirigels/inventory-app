@@ -12,7 +12,7 @@ import jwt from 'jsonwebtoken';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import {
-  initDB, queryAll, queryOne, run, exportDB,
+  initDB, queryAll, queryOne, run, batchWrite, exportDB,
   isUniqueViolation, retryOnUniqueNo,
 } from './db.js';
 
@@ -2039,12 +2039,16 @@ app.post('/api/invoices', async (req, res) => {
         isOnline, d.channel || '', d.shipping_address || '', orderStatus, d.tracking_no || '',
       ]
     );
-    // If two PCs race, the UNIQUE index on invoice_no makes one INSERT fail;
-    // retryOnUniqueNo asks for a fresh number and tries again. User-provided
-    // numbers are inserted as-is so a collision surfaces to the caller.
-    const invoice_no = userProvidedNo
-      ? (await doInsertInvoice(userProvidedNo), userProvidedNo)
-      : await retryOnUniqueNo(() => nextInvoiceNo(date), doInsertInvoice);
+    // Nëse dy PC-ja bëjnë race, UNIQUE indeksi mbi invoice_no bën që një INSERT
+    // të dështojë. retryOnUniqueNo provon numrin që klienti dërgoi si fillestar
+    // (auto nga /next-no) dhe, në rast përplasje, kalon te një numër i freskët
+    // — që user-i të mos shohë kurrë SQLITE_CONSTRAINT.
+    const invoice_no = await retryOnUniqueNo(
+      () => nextInvoiceNo(date),
+      doInsertInvoice,
+      5,
+      userProvidedNo || null,
+    );
     const invoice = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const invoiceId = invoice?.id;
     for (const it of items) {
@@ -2650,6 +2654,24 @@ app.get('/api/client-debts/summary', async (req, res) => {
 // ============================================================
 // SUPPLIERS (FURNITOR)
 // ============================================================
+// Regjistron furnitorin te tabela master nëse mungon. Përdoret nga flow-t e
+// blerjes (fatura/hurda/HAS) që një furnitor i shkruar dorazi një herë të
+// bëhet i disponueshëm te autocomplete-i nga blerja tjetër e tutje. Match-i
+// bëhet me prioritet mbi NIPT (kur ka), përndryshe me emrin.
+async function upsertSupplierIfMissing(nipt, name) {
+  const nip = (nipt || '').trim();
+  const nam = (name || '').trim();
+  if (!nip && !nam) return;
+  const existing = nip
+    ? await queryOne('SELECT id FROM suppliers WHERE nipt = ? LIMIT 1', [nip])
+    : await queryOne('SELECT id FROM suppliers WHERE nipt = "" AND name = ? COLLATE NOCASE LIMIT 1', [nam]);
+  if (existing) return;
+  await run(
+    `INSERT INTO suppliers (nipt, name, phone, address, notes) VALUES (?, ?, '', '', '')`,
+    [nip, nam],
+  );
+}
+
 app.get('/api/suppliers', async (req, res) => {
   try {
     res.json(await queryAll('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE ASC', []));
@@ -2786,14 +2808,25 @@ async function nextPurchaseNo(date) {
 
 async function adjustPurchaseStock(items, sign) {
   // sign=+1 when applying purchase (stock up); sign=-1 when reverting
+  const stmts = buildAdjustPurchaseStockStmts(items, sign);
+  if (stmts.length) await batchWrite(stmts);
+}
+
+// Version pa run() — kthen statement-et që të bundlohen nga caller-i.
+function buildAdjustPurchaseStockStmts(items, sign) {
+  const out = [];
   for (const it of items) {
     if (it.product_id && it.qty) {
       const delta = sign * (parseInt(it.qty) || 0);
       if (delta !== 0) {
-        await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+        out.push({
+          sql: 'UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?',
+          args: [delta, it.product_id],
+        });
       }
     }
   }
+  return out;
 }
 
 // Kur user-i shton në faturë blerje një rresht të ri pa e lidhur me një produkt
@@ -2802,57 +2835,78 @@ async function adjustPurchaseStock(items, sign) {
 // azhurnimi i stokut e i çmimeve në flow-un e blerjes të funksionojë.
 // Mutate: seton it.product_id për çdo rresht që nuk e ka pasur.
 async function ensurePurchaseProducts(items) {
-  for (const it of items) {
-    if (it.product_id) continue;
+  // Faza 1: paralelo të gjitha lookup-et (barkod/serial) — ekzekutohen si një
+  // grup Promise.all dhe kanë vetëm një network round-trip për të gjithë items.
+  const needsInsert = [];
+  await Promise.all(items.map(async (it) => {
+    if (it.product_id) return;
     const name = String(it.name || '').trim();
-    if (!name) continue;
+    if (!name) return;
     const barcode   = String(it.barcode || '').trim();
     const serial_no = String(it.serial_no || '').trim();
     let existing = null;
     if (barcode)              existing = await queryOne('SELECT id FROM products WHERE barcode = ? LIMIT 1', [barcode]);
     if (!existing && serial_no) existing = await queryOne('SELECT id FROM products WHERE serial_no = ? LIMIT 1', [serial_no]);
-    if (existing) { it.product_id = existing.id; continue; }
-    // Krijo produkt të ri me stock=0 — adjustPurchaseStock e shton sasinë e faturës më pas.
-    await run(
-      `INSERT INTO products (name, sku, barcode, category, brand, description,
-         cost_price, sell_price, stock, min_stock,
-         serial_no, purchase_price_no_vat, vat_rate, unit, gram,
-         has_gram, has_currency, has_rate)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        name, '', barcode,
-        it.category || 'Tjeter', '', '',
-        parseFloat(it.cost_price) || parseFloat(it.purchase_price_no_vat) || 0,
-        parseFloat(it.sell_price) || 0,
-        0, 5,
-        serial_no,
-        parseFloat(it.purchase_price_no_vat) || 0,
-        it.vat_rate != null && it.vat_rate !== '' ? parseFloat(it.vat_rate) : 20,
-        it.unit || 'copë',
-        parseFloat(it.gram) || 0,
-        parseFloat(it.has_gram) || 0,
-        it.has_currency || 'HAS',
-        parseFloat(it.has_rate) || 0,
-      ]
-    );
-    const row = await queryOne('SELECT last_insert_rowid() AS id');
-    if (row?.id) it.product_id = row.id;
-  }
+    if (existing) { it.product_id = existing.id; return; }
+    needsInsert.push(it);
+  }));
+
+  if (needsInsert.length === 0) return;
+
+  // Faza 2: bundle të gjithë INSERT-et me RETURNING id në një thirrje batch.
+  // libSQL kthen `rows` për çdo statement, pra marrim id-në pa një SELECT
+  // shtesë last_insert_rowid.
+  const results = await batchWrite(needsInsert.map(it => ({
+    sql: `INSERT INTO products (name, sku, barcode, category, brand, description,
+            cost_price, sell_price, stock, min_stock,
+            serial_no, purchase_price_no_vat, vat_rate, unit, gram,
+            has_gram, has_currency, has_rate)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          RETURNING id`,
+    args: [
+      String(it.name || '').trim(), '', String(it.barcode || '').trim(),
+      it.category || 'Tjeter', '', '',
+      parseFloat(it.cost_price) || parseFloat(it.purchase_price_no_vat) || 0,
+      parseFloat(it.sell_price) || 0,
+      0, 5,
+      String(it.serial_no || '').trim(),
+      parseFloat(it.purchase_price_no_vat) || 0,
+      it.vat_rate != null && it.vat_rate !== '' ? parseFloat(it.vat_rate) : 20,
+      it.unit || 'copë',
+      parseFloat(it.gram) || 0,
+      parseFloat(it.has_gram) || 0,
+      it.has_currency || 'HAS',
+      parseFloat(it.has_rate) || 0,
+    ],
+  })));
+
+  needsInsert.forEach((it, idx) => {
+    const row = results[idx]?.rows?.[0];
+    const id = row?.id ?? row?.[0];
+    if (id != null) it.product_id = Number(id);
+  });
 }
 
 async function applyProductPrices(items) {
+  const stmts = await buildApplyProductPricesStmts(items);
+  if (stmts.length) await batchWrite(stmts);
+}
+
+// Version pa run() — kthen statement-et që të bundlohen nga caller-i.
+async function buildApplyProductPricesStmts(items) {
   // Update each product's cost_price + sell_price from the purchase line
   // Ndërto një mape slug → label nga tabela material_categories që slug-jet
   // e reja (jo vetëm flori/diamant/ora) të ruajnë label-in e duhur te
-  // products.category. Kërkimi bëhet një herë për të gjithë items.
+  // products.category. Kërkimi bëhet një herë për të gjithë items në paralel.
   const materialSlugs = [...new Set(items.map(it => it.material).filter(Boolean))];
   const materialMap = {};
   if (materialSlugs.length > 0) {
-    for (const slug of materialSlugs) {
-      const row = await queryOne('SELECT label FROM material_categories WHERE slug = ?', [slug]);
-      if (row) materialMap[slug] = row.label;
-    }
+    const rows = await Promise.all(materialSlugs.map(slug =>
+      queryOne('SELECT label FROM material_categories WHERE slug = ?', [slug])
+    ));
+    materialSlugs.forEach((slug, i) => { if (rows[i]) materialMap[slug] = rows[i].label; });
   }
+  const out = [];
   for (const it of items) {
     if (!it.product_id) continue;
     const updates = [];
@@ -2941,8 +2995,9 @@ async function applyProductPrices(items) {
     }
     if (updates.length === 0) continue;
     params.push(it.product_id);
-    await run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, params);
+    out.push({ sql: `UPDATE products SET ${updates.join(', ')} WHERE id = ?`, args: params });
   }
+  return out;
 }
 
 app.get('/api/purchase-invoices/next-no', async (req, res) => {
@@ -3121,26 +3176,39 @@ app.post('/api/purchase-invoices', async (req, res) => {
         d.is_gift ? 1 : 0,
       ]
     );
-    const invoice_no = userProvidedNo
-      ? (await doInsertPurchase(userProvidedNo), userProvidedNo)
-      : await retryOnUniqueNo(() => nextPurchaseNo(d.date), doInsertPurchase);
+    // Retry-i tani provon userProvidedNo si numër fillestar; nëse ai numër
+    // përplaset me UNIQUE (racë midis dy PC-ve ose një save i mëparshëm që
+    // "fetch failed" por serveri e ruajti), auto-provon një numër të freskët
+    // në vend që t'i japë user-it SQLITE_CONSTRAINT.
+    const invoice_no = await retryOnUniqueNo(
+      () => nextPurchaseNo(d.date),
+      doInsertPurchase,
+      5,
+      userProvidedNo || null,
+    );
     const created = await queryOne('SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?', [d.date, invoice_no]);
     const newId = created?.id;
-    for (const s of splitsI) {
-      await run(
-        `INSERT INTO purchase_invoice_payment_splits (purchase_id, method, currency, amount, exchange_rate)
-         VALUES (?, ?, ?, ?, ?)`,
-        [newId, s.method, s.currency, s.amount, s.exchange_rate]
-      );
-    }
+
+    // Ensure products exists (paralel lookup + batched INSERT me RETURNING).
     await ensurePurchaseProducts(items);
+
+    // Bundle të gjithë INSERT/UPDATE-t e mbetur në një thirrje batch → nga
+    // ~90 round-trips Turso për një blerje me 21 artikuj → 1 batch call.
+    const batch = [];
+    for (const s of splitsI) {
+      batch.push({
+        sql: `INSERT INTO purchase_invoice_payment_splits (purchase_id, method, currency, amount, exchange_rate)
+              VALUES (?, ?, ?, ?, ?)`,
+        args: [newId, s.method, s.currency, s.amount, s.exchange_rate],
+      });
+    }
     for (const it of items) {
-      await run(
-        `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
-          purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-          has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+      batch.push({
+        sql: `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
+                purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
+                has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
           it.qty, it.purchase_price_no_vat, parseFloat(it.cost_price) || 0, it.discount_percent,
@@ -3150,19 +3218,37 @@ app.post('/api/purchase-invoices', async (req, res) => {
           parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
           it.has_rate_currency === 'USD' ? 'USD' : 'EUR', it.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
           parseFloat(it.koeficent_pune) || 0,
-        ]
-      );
+        ],
+      });
     }
-    await adjustPurchaseStock(items, +1);
-    await applyProductPrices(items);
-    // Nëse fatura është shënuar si dhuratë, marko të gjithë produktet e saj
-    // si is_gift = 1 që të filtrohen te picker-i i Dhuratës në Fatura Shitje.
+    batch.push(...buildAdjustPurchaseStockStmts(items, +1));
+    batch.push(...(await buildApplyProductPricesStmts(items)));
+    // Nëse fatura është shënuar si dhuratë, marko produktet.
     if (d.is_gift) {
-      const productIds = items.map(it => it.product_id).filter(Boolean);
-      for (const pid of productIds) {
-        await run('UPDATE products SET is_gift = 1 WHERE id = ?', [pid]);
+      for (const pid of items.map(it => it.product_id).filter(Boolean)) {
+        batch.push({ sql: 'UPDATE products SET is_gift = 1 WHERE id = ?', args: [pid] });
       }
     }
+    // Auto-regjistro furnitorin te tabela `suppliers` nëse mungon — që picker-i
+    // të japë autocomplete nga blerja tjetër e tutje.
+    if (d.supplier_nipt || d.supplier_name) {
+      batch.push({
+        sql: `INSERT INTO suppliers (nipt, name, phone, address, notes)
+              SELECT ?, ?, '', '', ''
+              WHERE NOT EXISTS (
+                SELECT 1 FROM suppliers
+                WHERE (? != '' AND nipt = ?)
+                   OR (? = '' AND ? != '' AND name = ?)
+              )`,
+        args: [
+          d.supplier_nipt || '', d.supplier_name || '',
+          d.supplier_nipt || '', d.supplier_nipt || '',
+          d.supplier_nipt || '', d.supplier_name || '', d.supplier_name || '',
+        ],
+      });
+    }
+    if (batch.length) await batchWrite(batch);
+
     res.json({ success: true, id: newId, invoice_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3230,25 +3316,28 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         id,
       ]
     );
-    // Rifresko splits (delete + insert i thjeshtë, siç bën edhe FaturaShitje).
-    await run('DELETE FROM purchase_invoice_payment_splits WHERE purchase_id = ?', [id]);
-    for (const s of splitsU) {
-      await run(
-        `INSERT INTO purchase_invoice_payment_splits (purchase_id, method, currency, amount, exchange_rate)
-         VALUES (?, ?, ?, ?, ?)`,
-        [id, s.method, s.currency, s.amount, s.exchange_rate]
-      );
-    }
-    await adjustPurchaseStock(oldItems, -1);
-    await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    // Ensure products exists (paralel lookup + batched INSERT me RETURNING).
     await ensurePurchaseProducts(items);
+
+    // Bundle të gjitha operacionet e mbetura në një thirrje batch te Turso.
+    const batch = [];
+    batch.push({ sql: 'DELETE FROM purchase_invoice_payment_splits WHERE purchase_id = ?', args: [id] });
+    for (const s of splitsU) {
+      batch.push({
+        sql: `INSERT INTO purchase_invoice_payment_splits (purchase_id, method, currency, amount, exchange_rate)
+              VALUES (?, ?, ?, ?, ?)`,
+        args: [id, s.method, s.currency, s.amount, s.exchange_rate],
+      });
+    }
+    batch.push(...buildAdjustPurchaseStockStmts(oldItems, -1));
+    batch.push({ sql: 'DELETE FROM purchase_items WHERE purchase_id = ?', args: [id] });
     for (const it of items) {
-      await run(
-        `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
-          purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-          has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+      batch.push({
+        sql: `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
+                purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
+                has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
           it.qty, it.purchase_price_no_vat, parseFloat(it.cost_price) || 0, it.discount_percent,
@@ -3258,20 +3347,37 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
           parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
           it.has_rate_currency === 'USD' ? 'USD' : 'EUR', it.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
           parseFloat(it.koeficent_pune) || 0,
-        ]
-      );
+        ],
+      });
     }
-    await adjustPurchaseStock(items, +1);
-    await applyProductPrices(items);
+    batch.push(...buildAdjustPurchaseStockStmts(items, +1));
+    batch.push(...(await buildApplyProductPricesStmts(items)));
     // Sync is_gift te produktet (nga fatura). Nëse fatura është dhuratë,
-    // marko produktet e saj; nëse jo më dhuratë, hiq flag-un (vetëm për
-    // produkte që nuk janë pjesë e ndonjë faturë tjetër dhuratë).
+    // marko produktet e saj.
     if (d.is_gift) {
-      const productIds = items.map(it => it.product_id).filter(Boolean);
-      for (const pid of productIds) {
-        await run('UPDATE products SET is_gift = 1 WHERE id = ?', [pid]);
+      for (const pid of items.map(it => it.product_id).filter(Boolean)) {
+        batch.push({ sql: 'UPDATE products SET is_gift = 1 WHERE id = ?', args: [pid] });
       }
     }
+    // Auto-regjistro furnitorin te tabela `suppliers` nëse mungon.
+    if (d.supplier_nipt || d.supplier_name) {
+      batch.push({
+        sql: `INSERT INTO suppliers (nipt, name, phone, address, notes)
+              SELECT ?, ?, '', '', ''
+              WHERE NOT EXISTS (
+                SELECT 1 FROM suppliers
+                WHERE (? != '' AND nipt = ?)
+                   OR (? = '' AND ? != '' AND name = ?)
+              )`,
+        args: [
+          d.supplier_nipt || '', d.supplier_name || '',
+          d.supplier_nipt || '', d.supplier_nipt || '',
+          d.supplier_nipt || '', d.supplier_name || '', d.supplier_name || '',
+        ],
+      });
+    }
+    if (batch.length) await batchWrite(batch);
+
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3411,10 +3517,14 @@ app.post('/api/hurda-purchases', async (req, res) => {
         total_amount, d.notes || '',
       ]
     );
-    const purchase_no = userProvidedNo
-      ? (await doInsertHurda(userProvidedNo), userProvidedNo)
-      : await retryOnUniqueNo(() => nextHurdaNo(d.date), doInsertHurda);
+    const purchase_no = await retryOnUniqueNo(
+      () => nextHurdaNo(d.date),
+      doInsertHurda,
+      5,
+      userProvidedNo || null,
+    );
     const created = await queryOne('SELECT id FROM hurda_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
+    if (d.supplier_nipt || d.supplier_name) await upsertSupplierIfMissing(d.supplier_nipt, d.supplier_name);
     res.json({ success: true, id: created?.id, purchase_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3524,10 +3634,14 @@ app.post('/api/has-purchases', async (req, res) => {
         total_amount, d.notes || '',
       ]
     );
-    const purchase_no = userProvidedNo
-      ? (await doInsertHas(userProvidedNo), userProvidedNo)
-      : await retryOnUniqueNo(() => nextHasNo(d.date), doInsertHas);
+    const purchase_no = await retryOnUniqueNo(
+      () => nextHasNo(d.date),
+      doInsertHas,
+      5,
+      userProvidedNo || null,
+    );
     const created = await queryOne('SELECT id FROM has_purchases WHERE date = ? AND purchase_no = ?', [d.date, purchase_no]);
+    if (d.supplier_nipt || d.supplier_name) await upsertSupplierIfMissing(d.supplier_nipt, d.supplier_name);
     res.json({ success: true, id: created?.id, purchase_no });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3642,9 +3756,12 @@ function makeFleteEndpoints(kind, sign) {
         `INSERT INTO ${table} (date, ref_no, notes) VALUES (?, ?, ?)`,
         [d.date, no, d.notes || ''],
       );
-      const ref_no = userProvidedNo
-        ? (await doInsertHead(userProvidedNo), userProvidedNo)
-        : await retryOnUniqueNo(() => nextRefNo(d.date), doInsertHead);
+      const ref_no = await retryOnUniqueNo(
+        () => nextRefNo(d.date),
+        doInsertHead,
+        5,
+        userProvidedNo || null,
+      );
       const created = await queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
       const newId = created?.id;
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
@@ -3803,9 +3920,12 @@ function makeMagazinaEndpoints(kind, sign) {
          VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?)`,
         [d.date, d.warehouse_code || '', no, currency, exchange_rate, d.notes || ''],
       );
-      const ref_no = userProvidedNo
-        ? (await doInsertMagHead(userProvidedNo), userProvidedNo)
-        : await retryOnUniqueNo(() => nextRefNo(d.date), doInsertMagHead);
+      const ref_no = await retryOnUniqueNo(
+        () => nextRefNo(d.date),
+        doInsertMagHead,
+        5,
+        userProvidedNo || null,
+      );
       const created = await queryOne(`SELECT id FROM ${table} WHERE date = ? AND ref_no = ?`, [d.date, ref_no]);
       const newId = created?.id;
       const items = (d.items || []).filter(it => (it.name && it.name.trim()) || parseFloat(it.qty) > 0);
@@ -3922,14 +4042,17 @@ app.delete('/api/purchase-payments/:id', async (req, res) => {
 app.get('/api/supplier-debts', async (req, res) => {
   try {
     const { q, nipt, name, from, to } = req.query;
+    // Çdo faturë me amount_due > 0 është detyrim, pavarësisht payment_method-it.
+    // Filtri i vjetër (payment_method IN ('bank','debt')) fshinte faturat kur user-i
+    // hapte faturën dhe bënte një pagesë të pjesshme cash — splits-i bënte
+    // pmU='cash' dhe fatura zhdukej edhe pse amount_due > 0 ende.
     let sql = `
       SELECT pi.*,
         (SELECT date   FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
         (SELECT amount FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
         (SELECT COUNT(*) FROM purchase_payments WHERE purchase_id = pi.id) AS payment_count
       FROM purchase_invoices pi
-      WHERE pi.payment_method IN ('bank', 'debt')
-        AND COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0`;
+      WHERE COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0`;
     const params = [];
     if (nipt) {
       sql += ' AND pi.supplier_nipt = ?';
@@ -3952,7 +4075,10 @@ app.get('/api/supplier-debts/summary', async (req, res) => {
   try {
     const onlyDebt = req.query.onlyDebt === '1' || req.query.onlyDebt === 'true';
     const { from, to } = req.query;
-    const conds = ["payment_method IN ('bank','debt')"];
+    // Përfshi çdo faturë — filtrimi bëhet me amount_due > 0 (te HAVING më poshtë
+    // kur onlyDebt=1). Kështu edhe faturat me pagesa të pjesshme cash që kanë
+    // ende borxh të pambuluar shfaqen te përmbledhësja e furnitorit.
+    const conds = ['1=1'];
     const params = [];
     if (from) { conds.push('date >= ?'); params.push(from); }
     if (to)   { conds.push('date <= ?'); params.push(to); }
@@ -5540,6 +5666,11 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       purchaseWhere += ` AND COALESCE(p.category, '') = ?`;
       purchaseParams.push(cat);
     }
+    // Konvertim në USD: blerjet bëhen kryesisht në USD, kështu që raporti
+    // agregon në USD. Për faturat me monedhë tjetër (EUR/LEK) përdorim kursin
+    // USD/LEK të asaj date (nga exchange_rates) për të konvertuar përsëri në USD.
+    // Formula: value_original * pi.exchange_rate (→ LEK) / usd_rate (→ USD).
+    // Për faturat në USD, shumëzuesi bëhet 1 që të mos konvertohet dy herë.
     const purchases = await queryAll(
       `SELECT
          COALESCE(pit.product_id, 0) AS product_id,
@@ -5549,15 +5680,26 @@ app.get('/api/reports/purchase-items', async (req, res) => {
          COALESCE(p.category, '') AS category,
          COALESCE(p.unit, 'copë') AS unit,
          SUM(pit.qty) AS qty,
-         SUM(pit.qty * pit.purchase_price_no_vat * COALESCE(pi.exchange_rate, 1)) AS gross_lek,
-         SUM(pit.qty * pit.purchase_price_no_vat * (pit.discount_percent / 100.0) * COALESCE(pi.exchange_rate, 1)) AS discount_lek,
-         SUM(pit.subtotal_no_vat * COALESCE(pi.exchange_rate, 1)) AS value_no_vat_lek,
-         SUM(pit.vat_amount      * COALESCE(pi.exchange_rate, 1)) AS vat_lek,
-         SUM(pit.total_with_vat  * COALESCE(pi.exchange_rate, 1)) AS value_with_vat_lek,
+         SUM(pit.qty * pit.purchase_price_no_vat *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS gross_usd,
+         SUM(pit.qty * pit.purchase_price_no_vat * (pit.discount_percent / 100.0) *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS discount_usd,
+         SUM(pit.subtotal_no_vat *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_no_vat_usd,
+         SUM(pit.vat_amount *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS vat_usd,
+         SUM(pit.total_with_vat *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_with_vat_usd,
          COUNT(DISTINCT pi.id) AS docs_count
        FROM purchase_items pit
        JOIN purchase_invoices pi ON pi.id = pit.purchase_id
        LEFT JOIN products p      ON p.id = pit.product_id
+       LEFT JOIN exchange_rates usd_rate ON usd_rate.date = pi.date AND usd_rate.currency = 'USD'
        WHERE ${purchaseWhere}
        GROUP BY COALESCE(pit.product_id, 0),
                 COALESCE(NULLIF(pit.barcode, ''), p.barcode, ''),
@@ -5585,13 +5727,20 @@ app.get('/api/reports/purchase-items', async (req, res) => {
          COALESCE(p.category, '') AS category,
          COALESCE(p.unit, 'copë') AS unit,
          SUM(mi.qty) AS qty,
-         SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS gross_lek,
-         SUM(mi.qty * mi.unit_price * (mi.discount_percent / 100.0) * COALESCE(m.exchange_rate, 1)) AS discount_lek,
-         SUM(mi.subtotal * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek,
+         SUM(mi.qty * mi.unit_price *
+             CASE WHEN m.currency = 'USD' THEN 1
+                  ELSE COALESCE(m.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS gross_usd,
+         SUM(mi.qty * mi.unit_price * (mi.discount_percent / 100.0) *
+             CASE WHEN m.currency = 'USD' THEN 1
+                  ELSE COALESCE(m.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS discount_usd,
+         SUM(mi.subtotal *
+             CASE WHEN m.currency = 'USD' THEN 1
+                  ELSE COALESCE(m.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_no_vat_usd,
          COUNT(DISTINCT m.id) AS docs_count
        FROM magazina_hyrje_items mi
        JOIN magazina_hyrje m ON m.id = mi.magazina_id
        LEFT JOIN products p  ON p.id = mi.product_id
+       LEFT JOIN exchange_rates usd_rate ON usd_rate.date = m.date AND usd_rate.currency = 'USD'
        WHERE ${magWhere}
        GROUP BY COALESCE(mi.product_id, 0),
                 COALESCE(NULLIF(mi.barcode, ''), p.barcode, ''),
@@ -5604,8 +5753,8 @@ app.get('/api/reports/purchase-items', async (req, res) => {
     const empty = (r) => ({
       product_id: r.product_id, barcode: r.barcode, name: r.name,
       sku: r.sku || '', category: r.category || '', unit: r.unit || 'copë',
-      qty: 0, gross_lek: 0, discount_lek: 0,
-      value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0,
+      qty: 0, gross_usd: 0, discount_usd: 0,
+      value_no_vat_usd: 0, vat_usd: 0, value_with_vat_usd: 0,
       docs_count: 0,
     });
 
@@ -5614,24 +5763,24 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       const k = keyOf(r);
       const e = map.get(k) || empty(r);
       e.qty                += +(r.qty || 0);
-      e.gross_lek          += +(r.gross_lek || 0);
-      e.discount_lek       += +(r.discount_lek || 0);
-      e.value_no_vat_lek   += +(r.value_no_vat_lek || 0);
-      e.vat_lek            += +(r.vat_lek || 0);
-      e.value_with_vat_lek += +(r.value_with_vat_lek || 0);
+      e.gross_usd          += +(r.gross_usd || 0);
+      e.discount_usd       += +(r.discount_usd || 0);
+      e.value_no_vat_usd   += +(r.value_no_vat_usd || 0);
+      e.vat_usd            += +(r.vat_usd || 0);
+      e.value_with_vat_usd += +(r.value_with_vat_usd || 0);
       e.docs_count         += +(r.docs_count || 0);
       map.set(k, e);
     }
     for (const r of mags) {
       const k = keyOf(r);
       const e = map.get(k) || empty(r);
-      const valNoVat = +(r.value_no_vat_lek || 0);
+      const valNoVat = +(r.value_no_vat_usd || 0);
       e.qty                += +(r.qty || 0);
-      e.gross_lek          += +(r.gross_lek || 0);
-      e.discount_lek       += +(r.discount_lek || 0);
-      e.value_no_vat_lek   += valNoVat;
+      e.gross_usd          += +(r.gross_usd || 0);
+      e.discount_usd       += +(r.discount_usd || 0);
+      e.value_no_vat_usd   += valNoVat;
       // Magazina Hyrje është pa TVSH → vat = 0, total = subtotal
-      e.value_with_vat_lek += valNoVat;
+      e.value_with_vat_usd += valNoVat;
       e.docs_count         += +(r.docs_count || 0);
       map.set(k, e);
     }
@@ -5642,22 +5791,22 @@ app.get('/api/reports/purchase-items', async (req, res) => {
         product_id: r.product_id, barcode: r.barcode, name: r.name,
         sku: r.sku, category: r.category, unit: r.unit,
         qty,
-        unit_price_lek:    qty !== 0 ? +(r.gross_lek / qty).toFixed(2) : 0,
-        discount_lek:      +r.discount_lek.toFixed(2),
-        value_no_vat_lek:  +r.value_no_vat_lek.toFixed(2),
-        vat_lek:           +r.vat_lek.toFixed(2),
-        value_with_vat_lek:+r.value_with_vat_lek.toFixed(2),
+        unit_price_usd:    qty !== 0 ? +(r.gross_usd / qty).toFixed(2) : 0,
+        discount_usd:      +r.discount_usd.toFixed(2),
+        value_no_vat_usd:  +r.value_no_vat_usd.toFixed(2),
+        vat_usd:           +r.vat_usd.toFixed(2),
+        value_with_vat_usd:+r.value_with_vat_usd.toFixed(2),
         docs_count:        r.docs_count,
       };
     }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     const totals = rows.reduce((a, r) => ({
       qty:                a.qty                + r.qty,
-      discount_lek:       a.discount_lek       + r.discount_lek,
-      value_no_vat_lek:   a.value_no_vat_lek   + r.value_no_vat_lek,
-      vat_lek:            a.vat_lek            + r.vat_lek,
-      value_with_vat_lek: a.value_with_vat_lek + r.value_with_vat_lek,
-    }), { qty: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
+      discount_usd:       a.discount_usd       + r.discount_usd,
+      value_no_vat_usd:   a.value_no_vat_usd   + r.value_no_vat_usd,
+      vat_usd:            a.vat_usd            + r.vat_usd,
+      value_with_vat_usd: a.value_with_vat_usd + r.value_with_vat_usd,
+    }), { qty: 0, discount_usd: 0, value_no_vat_usd: 0, vat_usd: 0, value_with_vat_usd: 0 });
 
     // Lista e kategorive për të mbushur filtër-in në frontend
     // (nga produktet aktive që kanë të paktën një kategori të vendosur).
@@ -5744,14 +5893,18 @@ app.get('/api/reports/purchase-items/docs', async (req, res) => {
          pi.currency      AS currency,
          COALESCE(pi.exchange_rate, 1) AS exchange_rate,
          SUM(pit.qty)              AS qty,
-         SUM(pit.qty * pit.purchase_price_no_vat * COALESCE(pi.exchange_rate, 1)) AS gross_lek,
-         SUM(pit.subtotal_no_vat)  AS value_no_vat,
-         SUM(pit.vat_amount)       AS vat,
-         SUM(pit.total_with_vat)   AS value_with_vat,
-         SUM(pit.subtotal_no_vat * COALESCE(pi.exchange_rate, 1)) AS value_no_vat_lek,
-         SUM(pit.total_with_vat  * COALESCE(pi.exchange_rate, 1)) AS value_with_vat_lek
+         SUM(pit.qty * pit.purchase_price_no_vat *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS gross_usd,
+         SUM(pit.subtotal_no_vat *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_no_vat_usd,
+         SUM(pit.total_with_vat *
+             CASE WHEN pi.currency = 'USD' THEN 1
+                  ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_with_vat_usd
        FROM purchase_items pit
        JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+       LEFT JOIN exchange_rates usd_rate ON usd_rate.date = pi.date AND usd_rate.currency = 'USD'
        WHERE pi.date BETWEEN ? AND ?
          AND ${pMatch}
        GROUP BY pi.id`,
@@ -5772,14 +5925,18 @@ app.get('/api/reports/purchase-items/docs', async (req, res) => {
          m.currency      AS currency,
          COALESCE(m.exchange_rate, 1) AS exchange_rate,
          SUM(mi.qty)             AS qty,
-         SUM(mi.qty * mi.unit_price * COALESCE(m.exchange_rate, 1)) AS gross_lek,
-         SUM(mi.subtotal)        AS value_no_vat,
-         0                       AS vat,
-         SUM(mi.subtotal)        AS value_with_vat,
-         SUM(mi.subtotal * COALESCE(m.exchange_rate, 1)) AS value_no_vat_lek,
-         SUM(mi.subtotal * COALESCE(m.exchange_rate, 1)) AS value_with_vat_lek
+         SUM(mi.qty * mi.unit_price *
+             CASE WHEN m.currency = 'USD' THEN 1
+                  ELSE COALESCE(m.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS gross_usd,
+         SUM(mi.subtotal *
+             CASE WHEN m.currency = 'USD' THEN 1
+                  ELSE COALESCE(m.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_no_vat_usd,
+         SUM(mi.subtotal *
+             CASE WHEN m.currency = 'USD' THEN 1
+                  ELSE COALESCE(m.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS value_with_vat_usd
        FROM magazina_hyrje_items mi
        JOIN magazina_hyrje m ON m.id = mi.magazina_id
+       LEFT JOIN exchange_rates usd_rate ON usd_rate.date = m.date AND usd_rate.currency = 'USD'
        WHERE m.date BETWEEN ? AND ?
          AND ${mMatch}
        GROUP BY m.id`,
@@ -5788,8 +5945,8 @@ app.get('/api/reports/purchase-items/docs', async (req, res) => {
 
     const out = [...purchases, ...mags].map(r => {
       const qty = +(r.qty || 0);
-      const gross = +(r.gross_lek || 0);
-      return { ...r, unit_price_lek: qty !== 0 ? +(gross / qty).toFixed(2) : 0 };
+      const gross = +(r.gross_usd || 0);
+      return { ...r, unit_price_usd: qty !== 0 ? +(gross / qty).toFixed(2) : 0 };
     }).sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? -1 : 1;
       return (a.doc_no || '').localeCompare(b.doc_no || '');

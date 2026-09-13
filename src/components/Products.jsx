@@ -102,7 +102,7 @@ const EMPTY = {
   // llogariten auto sipas formulës flori te Fatura Blerje:
   //   has_gram = (kodi/1000) × gram.
   kodi: '', multiplier: '', sell_rate: '',
-  has_rate_currency: 'EUR', sell_rate_currency: 'EUR',
+  has_rate_currency: 'USD', sell_rate_currency: 'EUR',
 }
 
 const VAT_OPTIONS = [0, 6, 10, 20]
@@ -851,10 +851,10 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
       <td className="px-2 py-1 font-mono text-xs text-blue-600 dark:text-blue-300 whitespace-nowrap font-bold">
         i ri
       </td>
-      <td className="px-1 py-1">
+      <td className="px-1 py-1 min-w-[160px]">
         <input type="text" value={rowData.barcode}
           onChange={e => set('barcode', e.target.value)}
-          className="input-field-sm font-mono text-xs" placeholder="—" />
+          className="input-field-sm font-mono text-xs w-full" placeholder="—" />
       </td>
       <td className="px-1 py-1 min-w-[300px]">
         <input type="text" value={rowData.name} autoFocus
@@ -898,8 +898,10 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
             onChange={v => set('has_rate', String(v))}
             className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
             placeholder="0.00" />
-          <CurrencyToggle value={rowData.has_rate_currency}
-            onChange={v => set('has_rate_currency', v)} />
+          <span
+            title="Valuta: USD (fikse për Kursi Blerje)"
+            className="px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-amber-800 dark:text-amber-200 leading-none shrink-0"
+          >$</span>
         </div>
       </td>
       <td className="px-1 py-1">
@@ -1025,7 +1027,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
     sell_price:            p.sell_price != null ? String(p.sell_price) : '',
     is_promotion:          !!p.is_promotion,
     promo_discount_pct:    p.promo_discount_pct != null && parseFloat(p.promo_discount_pct) > 0 ? String(p.promo_discount_pct) : '',
-    has_rate_currency:     p.has_rate_currency || 'EUR',
+    has_rate_currency:     'USD',
     sell_rate_currency:    p.sell_rate_currency || 'EUR',
   })
   const [form, setForm] = useState(initForm)
@@ -1113,7 +1115,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       sell_price:            parseFloat(currentForm.sell_price) || 0,
       is_promotion:          currentForm.is_promotion ? 1 : 0,
       promo_discount_pct:    currentForm.is_promotion ? Math.max(0, Math.min(100, parseFloat(currentForm.promo_discount_pct) || 0)) : 0,
-      has_rate_currency:     currentForm.has_rate_currency === 'USD' ? 'USD' : 'EUR',
+      has_rate_currency:     'USD',
       sell_rate_currency:    currentForm.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
     }
     try {
@@ -1160,10 +1162,10 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           <span className="ml-1 text-[10px] text-amber-500" title="Ndryshim i paruajtur">●</span>
         )}
       </td>
-      <td className="px-1 py-1">
+      <td className="px-1 py-1 min-w-[160px]">
         <input type="text" value={form.barcode}
           onChange={e => set('barcode', e.target.value)}
-          className="input-field-sm font-mono text-xs" placeholder="—" />
+          className="input-field-sm font-mono text-xs w-full" placeholder="—" />
       </td>
       <td className="px-1 py-1 min-w-[300px]">
         <input type="text" value={form.name}
@@ -1207,8 +1209,10 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
             onChange={v => set('has_rate', String(v))}
             className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
             placeholder="0.00" />
-          <CurrencyToggle value={form.has_rate_currency}
-            onChange={v => set('has_rate_currency', v)} />
+          <span
+            title="Valuta: USD (fikse për Kursi Blerje)"
+            className="px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-amber-800 dark:text-amber-200 leading-none shrink-0"
+          >$</span>
         </div>
       </td>
       <td className="px-1 py-1">
@@ -1535,7 +1539,7 @@ function ProductModal({ product, onClose, onSave }) {
                     className="input-field font-mono" placeholder="HAS" />
                 </div>
                 <div>
-                  <label className="form-label">Kursi Blerje (EUR/g)</label>
+                  <label className="form-label">Kursi Blerje ($/g)</label>
                   <MoneyInput value={form.has_rate}
                     onChange={v => set('has_rate', String(v))}
                     className="input-field tabular-nums font-semibold text-amber-800 dark:text-amber-200"
@@ -1807,6 +1811,9 @@ export default function Products() {
   }, [filtered])
   const isFiltered = !!(search || filterCat !== 'Të gjitha' || fromDate || toDate)
   const fmtEur = (v) => `€${(v || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  // Kosto ruhet në USD (blerja bëhet me dollar nga furnitori) — Vlera në Kosto
+  // shfaqet me simbolin $ që të mos ngatërrohet me monedhën e shitjes (EUR).
+  const fmtUsd = (v) => `$${(v || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const fmtNum = (v) => (v || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })
 
   const handleSave = async data => {
@@ -1851,10 +1858,12 @@ export default function Products() {
     if (cost <= 0) { alert('Produkti nuk ka çmim kosto.'); return }
     const newSell = +(cost * m).toFixed(2)
     try {
+      // Ruajmë edhe `multiplier` që të shfaqet te kolona dhe të reflektohet
+      // te çmimi i shitjes në formulën HAS (has_gram × multiplier × sell_rate).
       await fetch(`/api/products/${p.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...p, sell_price: newSell }),
+        body: JSON.stringify({ ...p, multiplier: m, sell_price: newSell }),
       })
       load()
     } catch (e) { console.error(e) }
@@ -1883,7 +1892,7 @@ export default function Products() {
         return fetch(`/api/products/${p.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...p, sell_price: newSell }),
+          body: JSON.stringify({ ...p, multiplier: m, sell_price: newSell }),
         })
       }))
       await load()
@@ -2166,7 +2175,7 @@ export default function Products() {
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr.</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase min-w-[160px]">Barkodi</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase min-w-[300px]">Pershkrimi</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-16" title="Kategoria">Kat.</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasi</th>
@@ -2174,7 +2183,7 @@ export default function Products() {
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Kodi i floririt (585, 750, ...)">Kodi</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" title="Pesha e florit të pastër (gram HAS)">Cmim Blerje Has</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Mon</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 min-w-[160px]" title="EUR / gram HAS në kohën e blerjes">Kursi Blerje</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 min-w-[160px]" title="USD / gram HAS në kohën e blerjes">Kursi Blerje</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cmim Kosto €</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Shumëzuesi për çmim shitjeje">Shumëzues</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" title="Cmim Shitje Has = Cmim Blerje Has × Shumëzues">Cmim Shitje Has</th>
@@ -2253,7 +2262,7 @@ export default function Products() {
             </div>
             <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
               <p className="text-[10px] text-blue-700 dark:text-blue-300 uppercase font-semibold">Vlera në Kosto</p>
-              <p className="text-lg font-bold text-blue-800 dark:text-blue-200 tabular-nums">{fmtEur(summary.totalCostValue)}</p>
+              <p className="text-lg font-bold text-blue-800 dark:text-blue-200 tabular-nums">{fmtUsd(summary.totalCostValue)}</p>
             </div>
             <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
               <p className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase font-semibold">Vlera në Shitje</p>
@@ -2276,7 +2285,7 @@ export default function Products() {
                       <th className="px-3 py-2 text-right font-semibold">Produkte</th>
                       <th className="px-3 py-2 text-right font-semibold">Sasi</th>
                       <th className="px-3 py-2 text-right font-semibold">Gram</th>
-                      <th className="px-3 py-2 text-right font-semibold">Kosto €</th>
+                      <th className="px-3 py-2 text-right font-semibold">Kosto $</th>
                       <th className="px-3 py-2 text-right font-semibold">Shitje €</th>
                       <th className="px-3 py-2 text-right font-semibold">Fitim €</th>
                     </tr>
@@ -2296,7 +2305,7 @@ export default function Products() {
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{v.count}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtNum(v.stock)}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{v.gram > 0 ? fmtNum(v.gram) : '—'}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-300">{v.cost > 0 ? fmtEur(v.cost) : '—'}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-300">{v.cost > 0 ? fmtUsd(v.cost) : '—'}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{v.sell > 0 ? fmtEur(v.sell) : '—'}</td>
                             <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${profit >= 0 ? 'text-amber-700 dark:text-amber-300' : 'text-red-600 dark:text-red-400'}`}>{profit !== 0 ? fmtEur(profit) : '—'}</td>
                           </tr>
@@ -2309,7 +2318,7 @@ export default function Products() {
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{summary.count}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalStock)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalGram)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200">{fmtEur(summary.totalCostValue)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200">{fmtUsd(summary.totalCostValue)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-800 dark:text-emerald-200">{fmtEur(summary.totalSellValue)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${summary.profit >= 0 ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'}`}>{fmtEur(summary.profit)}</td>
                     </tr>
