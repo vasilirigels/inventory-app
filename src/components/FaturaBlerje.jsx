@@ -269,6 +269,19 @@ function rowToProduct(row, m) {
   }
 }
 
+// Përputhje case-insensitive për filtër kërkimi të rreshtave në një faturë
+// blerjeje me shumë artikuj — kontrollon fushat më të përdorura që user-i
+// mban mend (barkod, pershkrim, SKU, seri).
+function matchesItemSearch(it, q) {
+  if (!q) return true
+  const needle = String(q).toLowerCase().trim()
+  if (!needle) return true
+  const haystack = [
+    it.barcode, it.name, it.sku, it.serial_no, it.category,
+  ].map(x => String(x || '').toLowerCase()).join(' ')
+  return haystack.includes(needle)
+}
+
 function computeLine(it) {
   const qty   = n(it.qty)
   // "Cmimi PA" opsionale — fallback te "Cmim Kosto" (jo Cmim Shitje) sepse
@@ -1039,6 +1052,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const [isGift, setIsGift]     = useState(false)
   const [category, setCategory] = useState(forcedCategory || '')
   const [items, setItems]       = useState([emptyItem()])
+  // Filtër kërkimi mbi rreshtat e faturës — për fatura me shumë artikuj
+  // (p.sh. 300 rreshta) që user-i të gjejë atë që kërkon me barkod/pershkrim/SKU.
+  // Filtrimi bëhet vetëm në render; state-i i items mbetet i plotë kështu që
+  // save/edit ruajnë të gjitha rreshtat.
+  const [itemsSearch, setItemsSearch] = useState('')
   const [allRates, setAllRates] = useState({ LEK: 1 })
   const [showImport, setShowImport] = useState(false)
   const [bulkPromoPct, setBulkPromoPct] = useState('20')
@@ -1762,6 +1780,29 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       </div>
 
       <div className="card p-0 overflow-hidden">
+        <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center gap-2">
+          <span className="text-xs text-slate-500 dark:text-slate-400">🔍</span>
+          <input
+            type="text"
+            value={itemsSearch}
+            onChange={e => setItemsSearch(e.target.value)}
+            placeholder="Kërko në rreshta: barkod, pershkrim, SKU, seri..."
+            className="input-field-sm flex-1 max-w-md"
+          />
+          {itemsSearch && (
+            <button
+              type="button"
+              onClick={() => setItemsSearch('')}
+              className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-2 py-1"
+              title="Pastro filtrin"
+            >✕</button>
+          )}
+          {itemsSearch && (
+            <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+              {items.filter(it => matchesItemSearch(it, itemsSearch)).length} / {items.length}
+            </span>
+          )}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs min-w-[1800px]">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
@@ -1812,7 +1853,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
               </tr>
             </thead>
             <tbody>
-              {items.map((it, idx) => {
+              {items
+                .map((it, idx) => ({ it, idx }))
+                .filter(({ it }) => matchesItemSearch(it, itemsSearch))
+                .map(({ it, idx }) => {
                 return (
                   <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
                     <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
