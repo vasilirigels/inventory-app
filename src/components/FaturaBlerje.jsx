@@ -636,7 +636,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
                 const rate = n(inv.exchange_rate) || 1
                 const isForeign = (inv.currency || 'LEK') !== 'LEK'
                 return (
-                <tr key={inv.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <tr key={inv.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">
                     <button onClick={() => onOpen(inv.id)} className="text-blue-600 hover:underline">{inv.invoice_no}</button>
                   </td>
@@ -1814,7 +1814,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             <tbody>
               {items.map((it, idx) => {
                 return (
-                  <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <tr key={idx} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
                     <td className="px-2 py-1 text-center text-slate-400 dark:text-slate-500">{idx + 1}</td>
                     <td className="px-1 py-1">
                       <div className="flex items-center gap-0.5">
