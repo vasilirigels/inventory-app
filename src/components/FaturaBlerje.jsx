@@ -458,14 +458,14 @@ function ProductPickerCell({ value, onPick, onNameChange }) {
 }
 
 // ── List view: all purchase invoices for the day ────────────────────────────
-function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, materialFilter }) {
+function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, materialFilter,
+                       fromDate, setFromDate, toDate, setToDate }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
-  const [fromDate, setFromDate] = useState(date)
-  const [toDate, setToDate]     = useState(date)
   const [usdByDate, setUsdByDate] = useState({})
-
-  useEffect(() => { setFromDate(date); setToDate(date) }, [date])
+  // fromDate/toDate janë ngritur te parent-i (FaturaBlerje) që të mbahen kur
+  // user-i hap një faturë për editim dhe kthehet mbrapa — përndryshe state-i
+  // lokal humbet çdo herë që PurchaseList unmount-ohet.
 
   useEffect(() => {
     if (!fromDate || !toDate) return
@@ -2246,6 +2246,12 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title
   const [mode, setMode] = useState('list')
   const [editingId, setEditingId] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  // Range i kërkimit ngrihet këtu (jo brenda PurchaseList) që të mbahet kur
+  // user-i hap një faturë për ta modifikuar dhe kthehet mbrapa. Lazy init:
+  // fillon te `date` (zakonisht sot), dhe s'reset-ohet kur `date` ndryshon —
+  // vetëm butoni "Sot" ose ndërrimi i faqes e kthen te default-i.
+  const [fromDate, setFromDate] = useState(() => date)
+  const [toDate,   setToDate]   = useState(() => date)
 
   // External request to open a specific invoice (e.g. from AnalizeVeprime / Detyrime Furnitor)
   useEffect(() => {
@@ -2281,6 +2287,10 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title
       refreshKey={refreshKey}
       title={title}
       materialFilter={forcedCategory}
+      fromDate={fromDate}
+      setFromDate={setFromDate}
+      toDate={toDate}
+      setToDate={setToDate}
     />
   )
 }
