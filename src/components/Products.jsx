@@ -1161,13 +1161,13 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
         // last_purchase_date vjen si TEXT "YYYY-MM-DD" nga fatura e fundit e
         // blerjes; nuk ka orë. Nëse produkti s'ka fatura, shfaq "—".
         const raw = p.last_purchase_date
-        if (!raw) return <td className="px-2 py-1 text-sm font-semibold text-slate-400 dark:text-slate-500 whitespace-nowrap" title="S'ka faturë blerjeje për këtë produkt">—</td>
+        if (!raw) return <td className="px-2 py-1 text-base font-semibold text-slate-400 dark:text-slate-500 whitespace-nowrap" title="S'ka faturë blerjeje për këtë produkt">—</td>
         const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/)
-        if (!m) return <td className="px-2 py-1 text-sm font-semibold text-slate-400 dark:text-slate-500 whitespace-nowrap">—</td>
+        if (!m) return <td className="px-2 py-1 text-base font-semibold text-slate-400 dark:text-slate-500 whitespace-nowrap">—</td>
         const [, y, mo, da] = m
         const short = `${da}.${mo}.${y.slice(-2)}`
         return (
-          <td className="px-2 py-1 text-sm font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap tabular-nums" title={`Data e faturës së fundit të blerjes: ${y}-${mo}-${da}`}>
+          <td className="px-2 py-1 text-base font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap tabular-nums" title={`Data e faturës së fundit të blerjes: ${y}-${mo}-${da}`}>
             {short}
           </td>
         )
