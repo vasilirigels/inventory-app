@@ -786,7 +786,23 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel, forcedCa
     reader.readAsArrayBuffer(file)
   }
 
-  const products = dataRows.map(r => rowToProduct(r, mapping)).filter(p => p.name)
+  // Blerje Flori/Diamant shpesh nuk kanë kolonën "Pershkrim" — artikulli
+  // identifikohet nga gram/kodi/barkod. Nëse mungon emri por rreshti ka ndonjë
+  // të dhënë tjetër, gjenerohet një emër placeholder (barkod → SKU → "Kategoria
+  // #rresht") që produkti të importohet. User-i mund ta editojë më vonë.
+  const products = dataRows
+    .map((r, idx) => {
+      const p = rowToProduct(r, mapping)
+      const hasAny = p.name || p.barcode || p.sku
+        || p.gram > 0 || p.stock > 0 || p.cost_price > 0
+      if (!hasAny) return null
+      if (!p.name) {
+        p.name = p.barcode || p.sku
+          || `${overrideCategoryLabel || 'Artikull'} #${idx + 1}`
+      }
+      return p
+    })
+    .filter(Boolean)
 
   const handleImport = async () => {
     if (products.length === 0) return
