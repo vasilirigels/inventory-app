@@ -674,6 +674,10 @@ const MIGRATIONS = [
     FOREIGN KEY (purchase_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE
   )`,
   "CREATE INDEX IF NOT EXISTS idx_purchase_invoice_payment_splits_purchase ON purchase_invoice_payment_splits(purchase_id)",
+  // Indeks kritik për query-në /api/products që kërkon `last_purchase_date` —
+  // pa këtë indeks, agregimi mbi purchase_items skanonte tabelën për çdo
+  // produkt dhe binte në ~364K row reads për një thirrje të vetme (v1.0.91).
+  "CREATE INDEX IF NOT EXISTS idx_purchase_items_product_id ON purchase_items(product_id)",
 
   // Kategoritë e materialit për Fatura Blerje — më parë hardcoded (flori/
   // diamant/ora). Tani CRUD me tabelë të veçantë. Slug ruhet te

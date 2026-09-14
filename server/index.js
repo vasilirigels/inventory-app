@@ -1385,18 +1385,20 @@ app.get('/api/backup', async (req, res) => {
 // ============================================================
 app.get('/api/products', async (req, res) => {
   try {
-    // last_purchase_date = data e faturës më të fundit të blerjes që përmban këtë
-    // produkt. Përdoret në UI (kolona "Data") që user-i të shohë kur është blerë
-    // realisht, jo kur është importuar në sistem (created_at mund të jetë sot).
+    // last_purchase_date = data e faturës më të fundit të blerjes. Përdorim një
+    // derived table të agreguar (jo subquery të korreluar për çdo rresht) →
+    // purchase_items skanohet 1 herë në total, jo N herë për N produkte. Kjo
+    // ul row reads nga ~N*M në ~N+M për një thirrje.
     const rows = await queryAll(
-      `SELECT p.*,
-              (SELECT pi.date
-                 FROM purchase_items pit
-                 JOIN purchase_invoices pi ON pi.id = pit.purchase_id
-                WHERE pit.product_id = p.id
-                ORDER BY pi.date DESC, pi.id DESC
-                LIMIT 1) AS last_purchase_date
+      `SELECT p.*, lpd.last_purchase_date
          FROM products p
+         LEFT JOIN (
+           SELECT pit.product_id, MAX(pi.date) AS last_purchase_date
+             FROM purchase_items pit
+             JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+            WHERE pit.product_id IS NOT NULL
+            GROUP BY pit.product_id
+         ) lpd ON lpd.product_id = p.id
         WHERE p.active = 1
         ORDER BY p.category, p.name`,
       []
