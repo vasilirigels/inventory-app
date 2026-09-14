@@ -679,6 +679,32 @@ const MIGRATIONS = [
   // produkt dhe binte në ~364K row reads për një thirrje të vetme (v1.0.91).
   "CREATE INDEX IF NOT EXISTS idx_purchase_items_product_id ON purchase_items(product_id)",
 
+  // Indekse për endpoint-e hot që përndryshe bëjnë full table scan mbi tabela
+  // të mëdha (invoice_items ~50K rreshta, invoices, purchase_items etj.). Çdo
+  // indeks është idempotent (IF NOT EXISTS). Kosto një-herë në startup që i
+  // krijon; pas kësaj, JOIN dhe BETWEEN bëhen O(log N) në vend të O(N).
+  //
+  // JOIN parent → items (shumë subquery të korreluar te /api/invoices/by-range
+  // dhe /api/purchase-invoices/by-range i përdorin këto):
+  "CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice_id ON invoice_items(invoice_id)",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items(purchase_id)",
+
+  // BETWEEN date range (Dashboard, ArkaDitore, raporte). Pa këto, çdo range
+  // query skanonte tërë tabelën:
+  "CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(date)",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date ON purchase_invoices(date)",
+  "CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)",
+  "CREATE INDEX IF NOT EXISTS idx_customer_debts_date ON customer_debts(date)",
+  "CREATE INDEX IF NOT EXISTS idx_expense_entries_date ON expense_entries(date)",
+  "CREATE INDEX IF NOT EXISTS idx_hurda_purchases_date ON hurda_purchases(date)",
+  "CREATE INDEX IF NOT EXISTS idx_has_purchases_date ON has_purchases(date)",
+
+  // Payments — JOIN nga parent + date range:
+  "CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id)",
+  "CREATE INDEX IF NOT EXISTS idx_invoice_payments_date ON invoice_payments(date)",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_payments_purchase ON purchase_payments(purchase_id)",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_payments_date ON purchase_payments(date)",
+
   // Kategoritë e materialit për Fatura Blerje — më parë hardcoded (flori/
   // diamant/ora). Tani CRUD me tabelë të veçantë. Slug ruhet te
   // products.material dhe label te products.category kur zgjidhet një kategori
