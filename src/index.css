@@ -3,7 +3,14 @@
 @tailwind utilities;
 
 @layer base {
-  html { color-scheme: light; }
+  /* Root font-size 18px (browser default = 16px). Të gjitha klasat Tailwind
+     `text-xs`/`text-sm`/`text-base` që përdorin rem shkallëzohen proporcionalisht,
+     kështu që tabelat, formularët dhe dashboard-i rriten uniformisht pa
+     ndryshim të klasave individuale. */
+  html {
+    font-size: 18px;
+    color-scheme: light;
+  }
   html.dark { color-scheme: dark; }
   body {
     @apply bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100;
