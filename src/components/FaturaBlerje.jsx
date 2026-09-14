@@ -1267,8 +1267,30 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       return changed ? next : prev
     })
   }, [items, forcedCategory])
-  const removeItem = (idx) =>
+  const removeItem = async (idx) => {
+    // Kërko konfirmim vetëm nëse rreshti ka të dhëna — që klikim aksidental te
+    // ✕ mos të fshijë punën e user-it. Rreshtat totalisht bosh (template
+    // fillestar) fshihen menjëherë sepse s'ka çfarë të humbet.
+    const it = items[idx] || {}
+    const hasData = !!(
+      String(it.barcode || '').trim() ||
+      String(it.name || '').trim() ||
+      String(it.serial_no || '').trim() ||
+      (parseFloat(it.qty) || 0) > 0 ||
+      (parseFloat(it.gram) || 0) > 0 ||
+      (parseFloat(it.purchase_price_no_vat) || 0) > 0 ||
+      (parseFloat(it.cost_price) || 0) > 0 ||
+      (parseFloat(it.has_gram) || 0) > 0
+    )
+    if (hasData) {
+      const label = String(it.name || '').trim() || String(it.barcode || '').trim() || `rreshti #${idx + 1}`
+      const ok = await showConfirm(`Të fshihet rreshti "${label}" nga fatura?`, {
+        title: 'Fshi rreshtin', confirmLabel: 'Fshi', danger: true,
+      })
+      if (!ok) return
+    }
     setItems(prev => prev.length === 1 ? [emptyItem()] : prev.filter((_, i) => i !== idx))
+  }
 
   // Gjenero barkod për një rresht. Nëse rreshti është produkt ekzistues, e
   // ruajmë menjëherë në DB që skaneri të gjejë produktin edhe para se të
