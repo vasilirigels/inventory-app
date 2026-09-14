@@ -129,7 +129,11 @@ function showOsNotification(comment, extraCount) {
 // serverin e vet Express + WS lokal); prandaj shtojmë edhe një poll periodik
 // që të kapim komente të reja që vijnë nga user-a në PC të tjera (databaza
 // Turso është e përbashkët, por broadcast-i i WS jo).
-const POLL_MS = 5000
+//
+// Për të kursyer Turso reads: poll bën vetëm SELECT MAX(id) FROM comments
+// (1 rresht/thirrje), fetch të plotë të LIMIT 500 vetëm kur MAX(id) ndryshon.
+// Interval 30s (jo 5s si më parë) — 6× më rrallë, prandaj ~50-100× më pak reads.
+const POLL_MS = 30_000
 
 export function useUnreadCommentsCount() {
   const [count, setCount] = useState(0)
@@ -137,6 +141,10 @@ export function useUnreadCommentsCount() {
   // Në load-in e parë e mbushim me maksimumin aktual që të mos njoftojmë
   // për komente ekzistuese; pastaj çdo id > kjo → notification.
   const lastNotifiedId = useRef(null)
+  // Id-ja më e madhe që kemi parë deri tani. Përdoret nga poll i lehtë — kur
+  // MAX(id) nga serveri është <= knownMaxId, s'ka nevojë të bëjmë fetch të
+  // plotë. Kur është më i madh, thirret refresh().
+  const knownMaxId = useRef(0)
 
   const refresh = useCallback(async () => {
     try {
@@ -150,6 +158,7 @@ export function useUnreadCommentsCount() {
       setCount(unreadArr.length)
 
       const maxId = arr.reduce((m, c) => Math.max(m, c.id), 0)
+      knownMaxId.current = maxId
       const suppress = isOnKomentetPage() && document.visibilityState === 'visible'
 
       if (lastNotifiedId.current === null) {
@@ -178,6 +187,18 @@ export function useUnreadCommentsCount() {
     } catch (_) { /* offline / boot */ }
   }, [])
 
+  // Poll i lehtë — pyet vetëm MAX(id). Nëse ndryshon, thirr refresh() të plotë.
+  const pollLight = useCallback(async () => {
+    try {
+      const res = await fetch('/api/comments/latest-id')
+      if (!res.ok) return
+      const { id } = await res.json()
+      if ((id || 0) > knownMaxId.current) {
+        refresh()
+      }
+    } catch (_) { /* offline / boot */ }
+  }, [refresh])
+
   // Kërko lejen për njoftime një herë kur user-i ka bërë login.
   useEffect(() => { requestNotifyPermission() }, [])
 
@@ -188,17 +209,17 @@ export function useUnreadCommentsCount() {
     return () => { listeners.delete(refresh) }
   }, [refresh])
 
-  // Poll periodik — kap komentet nga PC të tjera që WS lokal nuk i sheh.
+  // Poll periodik i lehtë — kap komentet nga PC të tjera që WS lokal nuk i sheh.
   useEffect(() => {
-    const id = setInterval(refresh, POLL_MS)
+    const id = setInterval(pollLight, POLL_MS)
     // Rifresko menjëherë kur tabi kthehet aktiv (kursen kohën e pritjes).
-    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    const onVisible = () => { if (document.visibilityState === 'visible') pollLight() }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
       clearInterval(id)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [refresh])
+  }, [pollLight])
 
   return count
 }

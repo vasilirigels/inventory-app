@@ -769,6 +769,30 @@ const MIGRATIONS = [
   "ALTER TABLE products ADD COLUMN is_gift INTEGER DEFAULT 0",
   "ALTER TABLE invoice_items ADD COLUMN is_gift INTEGER DEFAULT 0",
 
+  // Data e blerjes së fundit e denormalizuar te products — përditësohet vetëm
+  // te POST/PUT/DELETE /api/purchase-invoices (dhe importi). Pa këtë kolonë,
+  // GET /api/products duhet të bënte JOIN mbi purchase_items+purchase_invoices
+  // për të nxjerrë MAX(pi.date) për çdo produkt, gjë që skalohej dobët sa
+  // rriteshin produktet dhe konsumonte Turso reads (shih memorje: turso_query_cost).
+  "ALTER TABLE products ADD COLUMN last_purchase_date TEXT DEFAULT ''",
+
+  // Bizhuteria janë copë unike — kur shitja e sjell stock-un në 0, produkti
+  // duhet të dalë nga inventari (`active=0`); kur një blerje ose kthim
+  // (credit note) e rrit stock-un > 0, produkti kthehet automatikisht në
+  // inventar. Ky trigger e mban rregullin në një vend të vetëm — çdo flow
+  // që përditëson `products.stock` (shitje, blerje, magazina, marketing,
+  // rregullim manual) e sinkronizon `active` pa ndryshuar SQL-in e call-site-eve.
+  `CREATE TRIGGER IF NOT EXISTS trg_products_active_on_stock
+     AFTER UPDATE OF stock ON products
+     FOR EACH ROW
+     WHEN NEW.stock != OLD.stock
+   BEGIN
+     UPDATE products
+        SET active = CASE WHEN NEW.stock > 0 THEN 1 ELSE 0 END
+      WHERE id = NEW.id
+        AND active != CASE WHEN NEW.stock > 0 THEN 1 ELSE 0 END;
+   END`,
+
   `CREATE TABLE IF NOT EXISTS marketing_contract_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contract_id INTEGER NOT NULL,
@@ -836,6 +860,30 @@ async function initDB() {
           exchange_rate = 1
       WHERE COALESCE(currency, '') = '' OR amount IS NULL OR amount = 0
     `),
+    // Backfill i products.last_purchase_date nga historiku ekzistues i blerjeve.
+    // Përdorim derived table GROUP BY (jo subquery të korreluar): purchase_items
+    // skanohet 1 herë, jo N herë për N produkte. Kushti `WHERE COALESCE=''` bën
+    // që të mos rifresh-ojmë asgjë në startup-et pasardhëse — pas mutation-eve
+    // kolona mbahet gjithnjë e mbushur.
+    client.execute(`
+      UPDATE products
+         SET last_purchase_date = (
+           SELECT agg.d FROM (
+             SELECT pit.product_id AS pid, MAX(pi.date) AS d
+               FROM purchase_items pit
+               JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+              WHERE pit.product_id IS NOT NULL
+              GROUP BY pit.product_id
+           ) agg
+           WHERE agg.pid = products.id
+         )
+       WHERE COALESCE(last_purchase_date, '') = ''
+    `),
+    // Backfill i active: produktet unike të shitura më parë kanë stock=0 por
+    // ende active=1 → dalin te Dashboard si "pa stok". Rregulla e re është që
+    // stock=0 ⇒ active=0. Trigger-i i mban përditësimet e reja në sinkron;
+    // kjo është vetëm rregullim një-herë për të dhënat ekzistuese.
+    client.execute(`UPDATE products SET active = 0 WHERE stock = 0 AND active = 1`),
   ]);
 
   initialized = true;

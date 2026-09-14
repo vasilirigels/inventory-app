@@ -125,6 +125,33 @@ function tableFromPath(p) {
   };
   return map[seg] || null;
 }
+// Cache in-memory për endpoint-e "të njëjtë për të gjithë klientët" që bëjnë
+// JOIN të shtrenjtë mbi historikun (p.sh. /api/inventory-summary). Invalidohet
+// automatikisht nga middleware-i broadcast më poshtë kur preket një tabelë që
+// prek rezultatin. Kur 3 PC-të hapin Dashboard-in njëkohësisht, vetëm 1 kalkulim
+// del te Turso; të tjerët marrin nga memoria.
+const responseCache = new Map(); // key: `${endpoint}:${queryString}` → { at, data, ttlMs }
+function cacheGet(key) {
+  const e = responseCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.at > e.ttlMs) { responseCache.delete(key); return null; }
+  return e.data;
+}
+function cacheSet(key, data, ttlMs = 60_000) {
+  responseCache.set(key, { at: Date.now(), data, ttlMs });
+}
+function cacheInvalidate(prefix) {
+  for (const k of responseCache.keys()) {
+    if (k.startsWith(prefix)) responseCache.delete(k);
+  }
+}
+// Tabela që ndikojnë te /api/inventory-summary (stok, blerje, shitje, magazina).
+const INVENTORY_SUMMARY_TABLES = new Set([
+  'products', 'purchase_invoices', 'invoices',
+  'magazina_hyrje', 'magazina_dalje',
+  'flete_hyrje', 'flete_dalje',
+]);
+
 app.use((req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   const origJson = res.json.bind(res);
@@ -132,7 +159,13 @@ app.use((req, res, next) => {
     const ret = origJson(data);
     if (res.statusCode < 300) {
       const table = tableFromPath(req.path);
-      if (table) broadcast({ type: 'change', table, action: req.method, at: Date.now() });
+      if (table) {
+        broadcast({ type: 'change', table, action: req.method, at: Date.now() });
+        // Invalido cache-in për endpoint-e që varen nga kjo tabelë.
+        if (INVENTORY_SUMMARY_TABLES.has(table)) {
+          cacheInvalidate('inventory-summary:');
+        }
+      }
     }
     return ret;
   };
@@ -458,6 +491,17 @@ app.get('/api/comments', async (req, res) => {
       [limit],
     );
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Endpoint i lehtë për poll — kthen vetëm MAX(id). Përdoret nga
+// useUnreadCommentsCount që të mos bëjë fetch të plotë të LIMIT 500 çdo poll:
+// klienti krahason latestId me atë të fundit të njohur; fetch të plotë vetëm
+// kur ndryshon. 1 rresht/poll në vend të ~200-500 rreshtave.
+app.get('/api/comments/latest-id', async (req, res) => {
+  try {
+    const row = await queryOne('SELECT COALESCE(MAX(id), 0) AS id FROM comments');
+    res.json({ id: row?.id || 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1385,23 +1429,15 @@ app.get('/api/backup', async (req, res) => {
 // ============================================================
 app.get('/api/products', async (req, res) => {
   try {
-    // last_purchase_date = data e faturës më të fundit të blerjes. Përdorim një
-    // derived table të agreguar (jo subquery të korreluar për çdo rresht) →
-    // purchase_items skanohet 1 herë në total, jo N herë për N produkte. Kjo
-    // ul row reads nga ~N*M në ~N+M për një thirrje.
+    // last_purchase_date është kolonë e denormalizuar te products, e mbajtur
+    // nga POST/PUT/DELETE /api/purchase-invoices (shih
+    // buildRefreshLastPurchaseDateStmts). Kjo hoq JOIN mbi purchase_items nga
+    // ky endpoint hot që thirret në çdo rifreskim → nga ~N+M reads në ~N
+    // reads për thirrje, pa ndryshim në UI.
     const rows = await queryAll(
-      `SELECT p.*, lpd.last_purchase_date
-         FROM products p
-         LEFT JOIN (
-           SELECT pit.product_id, MAX(pi.date) AS last_purchase_date
-             FROM purchase_items pit
-             JOIN purchase_invoices pi ON pi.id = pit.purchase_id
-            WHERE pit.product_id IS NOT NULL
-            GROUP BY pit.product_id
-         ) lpd ON lpd.product_id = p.id
-        WHERE p.active = 1
-        ORDER BY p.category, p.name`,
-      []
+      `SELECT * FROM products
+        WHERE active = 1
+        ORDER BY category, name`
     );
     res.json(rows);
   } catch (err) {
@@ -2864,6 +2900,29 @@ function buildAdjustPurchaseStockStmts(items, sign) {
   return out;
 }
 
+// Rifresko `products.last_purchase_date` për produktet e prekura nga një
+// mutation blerjeje (POST/PUT/DELETE). Përdorim një statement të vetëm me
+// subquery të korreluar që shfrytëzon `idx_purchase_items_product_id`, kështu
+// koston e kufizojmë te produktet e faturës (jo tërë tabela). Kur produkti
+// s'ka më asnjë blerje (rasti i DELETE-it), MAX() kthen NULL → COALESCE në ''.
+function buildRefreshLastPurchaseDateStmts(productIds) {
+  const ids = [...new Set(productIds.filter(x => x != null && x !== ''))];
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return [{
+    sql: `UPDATE products
+             SET last_purchase_date = COALESCE(
+               (SELECT MAX(pi.date)
+                  FROM purchase_items pit
+                  JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+                 WHERE pit.product_id = products.id),
+               ''
+             )
+           WHERE id IN (${placeholders})`,
+    args: ids,
+  }];
+}
+
 // Kur user-i shton në faturë blerje një rresht të ri pa e lidhur me një produkt
 // (pra pa përdorur importin nga Excel ose pickerin), krijojmë automatikisht një
 // produkt të ri që ai të shfaqet menjëherë te Produkte / Inventar dhe që
@@ -3258,6 +3317,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
     }
     batch.push(...buildAdjustPurchaseStockStmts(items, +1));
     batch.push(...(await buildApplyProductPricesStmts(items)));
+    batch.push(...buildRefreshLastPurchaseDateStmts(items.map(it => it.product_id)));
     // Nëse fatura është shënuar si dhuratë, marko produktet.
     if (d.is_gift) {
       for (const pid of items.map(it => it.product_id).filter(Boolean)) {
@@ -3387,6 +3447,12 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     }
     batch.push(...buildAdjustPurchaseStockStmts(items, +1));
     batch.push(...(await buildApplyProductPricesStmts(items)));
+    // Rifresko last_purchase_date për produktet e prekura nga fatura (para dhe
+    // pas edit-it) — data e faturës mund të ketë ndryshuar dhe/ose item-et.
+    batch.push(...buildRefreshLastPurchaseDateStmts([
+      ...oldItems.map(it => it.product_id),
+      ...items.map(it => it.product_id),
+    ]));
     // Sync is_gift te produktet (nga fatura). Nëse fatura është dhuratë,
     // marko produktet e saj.
     if (d.is_gift) {
@@ -3425,6 +3491,10 @@ app.delete('/api/purchase-invoices/:id', async (req, res) => {
     await run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
     await run('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
     await run('DELETE FROM purchase_invoices WHERE id = ?', [id]);
+    // Rifresko last_purchase_date te produktet e prekura: nëse ky ishte MAX-i,
+    // kalon te fatura tjetër më e vjetër; nëse s'ka më blerje → ''.
+    const stmts = buildRefreshLastPurchaseDateStmts(items.map(it => it.product_id));
+    if (stmts.length) await batchWrite(stmts);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4277,6 +4347,14 @@ app.delete('/api/clients/:id', async (req, res) => {
 app.get('/api/inventory-summary', async (req, res) => {
   try {
     const { from, to } = req.query;
+    // Cache 60s për këtë endpoint të shtrenjtë — bën 8 JOIN të plota mbi
+    // historikun e blerjeve/shitjeve për çdo thirrje. Dashboard-i i çdo klienti
+    // e thërret disa herë; me cache, 3 klientë me Dashboard hapur ndajnë 1
+    // kalkulim, jo 3. Invalidohet automatikisht kur preket products/invoices/
+    // purchase_invoices/magazina_* (shih middleware-in e broadcast).
+    const cacheKey = `inventory-summary:from=${from || ''}&to=${to || ''}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
     // Helpers to apply optional date range to a parent table aliased as `parent`.
     const dateCond = (parent) => (from && to)
       ? `AND ${parent}.date BETWEEN ? AND ?`
@@ -4514,7 +4592,9 @@ app.get('/api/inventory-summary', async (req, res) => {
       };
     }
 
-    res.json({ rows, totals, profitByCurrency });
+    const payload = { rows, totals, profitByCurrency };
+    cacheSet(cacheKey, payload, 60_000);
+    res.json(payload);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
