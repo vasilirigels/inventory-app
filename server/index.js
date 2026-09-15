@@ -278,6 +278,19 @@ async function kickoffDbInit() {
         dbReady = true;
         dbError = null;
         dbDiagnostic.stage = 'ready';
+        // Pastro produktet "jetim" të mbetura nga fshirje faturash para v1.2.0.
+        // I sigurt sepse fshin vetëm produktet pa asnjë referencë blerjeje/shitjeje.
+        try {
+          const res = await run(
+            `DELETE FROM products
+              WHERE NOT EXISTS (SELECT 1 FROM purchase_items pit WHERE pit.product_id = products.id)
+                AND NOT EXISTS (SELECT 1 FROM invoice_items  ii  WHERE ii.product_id  = products.id)`
+          );
+          const n = res?.rowsAffected ?? res?.rows_affected ?? 0;
+          if (n > 0) console.log(`[startup cleanup] u fshinë ${n} produkte jetim`);
+        } catch (e) {
+          console.warn('[startup cleanup] dështoi pastrimi i produkteve jetim:', e.message);
+        }
         return;
       } catch (err) {
         dbError = err;
