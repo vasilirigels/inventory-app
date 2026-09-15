@@ -278,7 +278,7 @@ function ContractsSection({ date }) {
   const [showNew, setShowNew] = useState(false)
   const [newDraft, setNewDraft] = useState({ name: '', total_amount_eur: '', notes: '' })
   const [entryDraft, setEntryDraft] = useState({
-    type: 'cash', amount_eur: '', description: '',
+    date, type: 'cash', amount_eur: '', description: '',
     product: null, product_qty: '1', unit_price: '', vat_rate: '',
   })
   const [busy, setBusy] = useState(false)
@@ -302,6 +302,10 @@ function ContractsSection({ date }) {
   useEffect(() => { loadContracts() }, [loadContracts])
   useEffect(() => { if (expandedId) loadDetail(expandedId) }, [expandedId, loadDetail])
 
+  useEffect(() => {
+    setEntryDraft(d => ({ ...d, date }))
+  }, [date])
+
   const createContract = async () => {
     const name = String(newDraft.name || '').trim()
     const total = parseFloat(newDraft.total_amount_eur) || 0
@@ -322,6 +326,7 @@ function ContractsSection({ date }) {
   }
 
   const addEntry = async (contractId) => {
+    if (!entryDraft.date) { alert('Vendos datën.'); return }
     if (entryDraft.type === 'product') {
       if (!entryDraft.product?.id) { alert('Zgjidh një produkt.'); return }
       const qty = parseInt(entryDraft.product_qty) || 1
@@ -334,9 +339,10 @@ function ContractsSection({ date }) {
     }
     setBusy(true)
     try {
+      const savedDate = entryDraft.date
       const body = entryDraft.type === 'product'
         ? {
-            date, type: 'product',
+            date: savedDate, type: 'product',
             product_id: entryDraft.product.id,
             product_qty: parseInt(entryDraft.product_qty) || 1,
             // amount_eur = unit_price × qty × (1 + vat/100). E llogaris në frontend
@@ -347,7 +353,7 @@ function ContractsSection({ date }) {
             description: entryDraft.description || '',
           }
         : {
-            date, type: 'cash',
+            date: savedDate, type: 'cash',
             amount_eur: parseFloat(entryDraft.amount_eur) || 0,
             description: entryDraft.description || '',
           }
@@ -357,8 +363,9 @@ function ContractsSection({ date }) {
         body: JSON.stringify(body),
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      // Ruaj datën e zgjedhur për shtimin pasues (mund të regjistrosh disa zëra për të njëjtën datë të kaluar).
       setEntryDraft({
-        type: entryDraft.type, amount_eur: '', description: '',
+        date: savedDate, type: entryDraft.type, amount_eur: '', description: '',
         product: null, product_qty: '1', unit_price: '', vat_rate: '',
       })
       await Promise.all([loadContracts(), loadDetail(contractId)])
@@ -510,7 +517,7 @@ function ContractsSection({ date }) {
                   <div className="border-t border-slate-200 dark:border-slate-700 p-3 bg-slate-50/50 dark:bg-slate-800/30">
                     {!isClosed && (
                       <div className="mb-3 p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-                        <div className="flex items-center gap-2 mb-2">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">+ Shto zë:</span>
                           <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
                             <button
@@ -521,6 +528,21 @@ function ContractsSection({ date }) {
                               onClick={() => setEntryDraft(d => ({ ...d, type: 'product' }))}
                               className={`text-[11px] px-2 py-1 ${entryDraft.type === 'product' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
                             >📦 Produkt</button>
+                          </div>
+                          <div className="flex items-center gap-1 ml-auto">
+                            <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data:</label>
+                            <input
+                              type="date"
+                              value={entryDraft.date || ''}
+                              onChange={e => setEntryDraft(d => ({ ...d, date: e.target.value }))}
+                              className="input-field-sm w-36"
+                              max={date}
+                            />
+                            {entryDraft.date && entryDraft.date !== date && (
+                              <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">
+                                jashtë {fmtDate(date)}
+                              </span>
+                            )}
                           </div>
                         </div>
                         {entryDraft.type === 'cash' ? (
