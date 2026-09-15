@@ -6811,13 +6811,13 @@ app.get('/api/marketing-contracts/:id', async (req, res) => {
 
 app.post('/api/marketing-contracts', async (req, res) => {
   try {
-    const { name, total_amount_eur, notes } = req.body || {};
+    const { name, total_amount_eur, notes, start_date } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'name required' });
     const total = parseFloat(total_amount_eur) || 0;
     if (total <= 0) return res.status(400).json({ error: 'total_amount_eur must be > 0' });
     await run(
-      `INSERT INTO marketing_contracts (name, total_amount_eur, notes, status) VALUES (?, ?, ?, 'open')`,
-      [String(name).trim(), total, notes || '']
+      `INSERT INTO marketing_contracts (name, total_amount_eur, notes, status, start_date) VALUES (?, ?, ?, 'open', ?)`,
+      [String(name).trim(), total, notes || '', start_date || '']
     );
     const row = await queryOne('SELECT * FROM marketing_contracts ORDER BY id DESC LIMIT 1');
     res.json(row);

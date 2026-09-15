@@ -778,6 +778,10 @@ const MIGRATIONS = [
   // purchase_items që kur hapet fatura sërish të shfaqet vlera e regjistruar.
   "ALTER TABLE purchase_items ADD COLUMN multiplier REAL DEFAULT 0",
 
+  // Data e fillimit të kontratës Marketing — që kontratat të mund të
+  // regjistrohen edhe me datë të kaluar (jo vetëm created_at që është auto).
+  "ALTER TABLE marketing_contracts ADD COLUMN start_date TEXT DEFAULT ''",
+
   // Marketing — Kontratat: një "kontratë" me buxhet EUR mban brenda vetes
   // zëra (product ose cash EUR) që zbriten nga buxheti derisa arrihet totali.
   // Për zëra cash EUR llogariten si shpenzim në Arkën Ditore.

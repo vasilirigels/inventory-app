@@ -276,7 +276,7 @@ function ContractsSection({ date }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
-  const [newDraft, setNewDraft] = useState({ name: '', total_amount_eur: '', notes: '' })
+  const [newDraft, setNewDraft] = useState({ name: '', total_amount_eur: '', notes: '', start_date: date })
   const [entryDraft, setEntryDraft] = useState({
     date, type: 'cash', amount_eur: '', description: '',
     product: null, product_qty: '1', unit_price: '', vat_rate: '',
@@ -316,10 +316,10 @@ function ContractsSection({ date }) {
       const res = await fetch('/api/marketing-contracts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, total_amount_eur: total, notes: newDraft.notes || '' }),
+        body: JSON.stringify({ name, total_amount_eur: total, notes: newDraft.notes || '', start_date: newDraft.start_date || date }),
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
-      setNewDraft({ name: '', total_amount_eur: '', notes: '' })
+      setNewDraft({ name: '', total_amount_eur: '', notes: '', start_date: date })
       setShowNew(false)
       await loadContracts()
     } finally { setBusy(false) }
@@ -432,7 +432,13 @@ function ContractsSection({ date }) {
 
       {showNew && (
         <div className="mb-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+            <div>
+              <label className="form-label">Data Fillimit</label>
+              <input type="date" value={newDraft.start_date || ''}
+                onChange={e => setNewDraft(d => ({ ...d, start_date: e.target.value }))}
+                className="input-field" max={date} />
+            </div>
             <div className="md:col-span-2">
               <label className="form-label">Emri</label>
               <input type="text" value={newDraft.name}
@@ -483,7 +489,10 @@ function ContractsSection({ date }) {
                         {isClosed && <span className="badge bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 text-[10px]">✓ Mbyllur</span>}
                         {!isClosed && pct >= 100 && <span className="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[10px]">Buxheti u plotësua</span>}
                       </div>
-                      {c.notes && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{c.notes}</p>}
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap gap-x-3">
+                        {c.start_date && <span>📅 {fmtDate(c.start_date)}</span>}
+                        {c.notes && <span>{c.notes}</span>}
+                      </div>
                     </div>
                     <div className="flex items-center gap-1">
                       <button onClick={() => setExpandedId(isExpanded ? null : c.id)} className="btn-secondary text-[11px] px-2 py-1">
