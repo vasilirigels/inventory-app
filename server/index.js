@@ -3313,8 +3313,8 @@ app.post('/api/purchase-invoices', async (req, res) => {
       batch.push({
         sql: `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
                 purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-                has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune, multiplier)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
@@ -3324,7 +3324,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
           parseFloat(it.has_gram) || 0, it.has_currency || 'HAS', parseFloat(it.has_rate) || 0,
           parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
           it.has_rate_currency === 'USD' ? 'USD' : 'EUR', it.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
-          parseFloat(it.koeficent_pune) || 0,
+          parseFloat(it.koeficent_pune) || 0, parseFloat(it.multiplier) || 0,
         ],
       });
     }
@@ -3443,8 +3443,8 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
       batch.push({
         sql: `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
                 purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
-                has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune, multiplier)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.category || '', it.unit || '', parseFloat(it.gram) || 0,
@@ -3454,7 +3454,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
           parseFloat(it.has_gram) || 0, it.has_currency || 'HAS', parseFloat(it.has_rate) || 0,
           parseFloat(it.sell_rate) || parseFloat(it.has_rate) || 0,
           it.has_rate_currency === 'USD' ? 'USD' : 'EUR', it.sell_rate_currency === 'USD' ? 'USD' : 'EUR',
-          parseFloat(it.koeficent_pune) || 0,
+          parseFloat(it.koeficent_pune) || 0, parseFloat(it.multiplier) || 0,
         ],
       });
     }

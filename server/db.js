@@ -774,6 +774,10 @@ const MIGRATIONS = [
   "ALTER TABLE purchase_items ADD COLUMN koeficent_pune REAL DEFAULT 0",
   "ALTER TABLE products ADD COLUMN koeficent_pune REAL DEFAULT 0",
 
+  // Shumëzuesi (multiplier) për Blerje Flori/Diamant — ruhet edhe te
+  // purchase_items që kur hapet fatura sërish të shfaqet vlera e regjistruar.
+  "ALTER TABLE purchase_items ADD COLUMN multiplier REAL DEFAULT 0",
+
   // Marketing — Kontratat: një "kontratë" me buxhet EUR mban brenda vetes
   // zëra (product ose cash EUR) që zbriten nga buxheti derisa arrihet totali.
   // Për zëra cash EUR llogariten si shpenzim në Arkën Ditore.
