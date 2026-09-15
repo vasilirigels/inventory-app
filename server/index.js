@@ -15,6 +15,7 @@ import {
   initDB, queryAll, queryOne, run, batchWrite, exportDB,
   isUniqueViolation, retryOnUniqueNo,
 } from './db.js';
+import { cache, cached } from './cache.js';
 
 // ── Auth: JWT + helper middleware ─────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET
@@ -671,6 +672,34 @@ app.use('/api', (req, res, next) => {
   if (req.method !== 'GET') {
     const allowed = SALES_WRITE_ALLOW.some(a => a.method === req.method && a.pattern.test(fullPath));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
+  }
+  next();
+});
+
+// ── Invalidim automatik i cache-it pas shkrimeve.
+// Cdo path që fillon me një çelës cache invalidon vetëm atë prefiks.
+// Prekjet indirekte (purchase-invoices krijojnë/përditësojnë produkte,
+// invoices ulin stokun) invalidojnë cache-in 'products'.
+const CACHE_INVALIDATION_RULES = [
+  { pathRe: /^\/api\/(products|purchase-invoices|invoices|magazina-|flete-|hurda-purchases|has-purchases)/, keys: ['products'] },
+  { pathRe: /^\/api\/expense-categories/, keys: ['expense-categories'] },
+  { pathRe: /^\/api\/suppliers/,          keys: ['suppliers'] },
+  { pathRe: /^\/api\/clients/,            keys: ['clients'] },
+];
+app.use('/api', (req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const fullPath = (req.baseUrl || '') + req.path;
+    const keysToInvalidate = new Set();
+    for (const rule of CACHE_INVALIDATION_RULES) {
+      if (rule.pathRe.test(fullPath)) rule.keys.forEach(k => keysToInvalidate.add(k));
+    }
+    if (keysToInvalidate.size > 0) {
+      res.on('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          for (const k of keysToInvalidate) cache.invalidate(k);
+        }
+      });
+    }
   }
   next();
 });
@@ -1442,16 +1471,14 @@ app.get('/api/backup', async (req, res) => {
 // ============================================================
 app.get('/api/products', async (req, res) => {
   try {
-    // last_purchase_date është kolonë e denormalizuar te products, e mbajtur
-    // nga POST/PUT/DELETE /api/purchase-invoices (shih
-    // buildRefreshLastPurchaseDateStmts). Kjo hoq JOIN mbi purchase_items nga
-    // ky endpoint hot që thirret në çdo rifreskim → nga ~N+M reads në ~N
-    // reads për thirrje, pa ndryshim në UI.
-    const rows = await queryAll(
+    // Memory cache 30s: endpoint më hot i sistemit, thirret nga picker-i i
+    // produkteve në çdo faturë + Products list + Inventory + shumë vende të
+    // tjera. Cache invalidohet nga çdo POST/PUT/DELETE që prek 'products'.
+    const rows = await cached('products:all', 30_000, () => queryAll(
       `SELECT * FROM products
         WHERE active = 1
         ORDER BY category, name`
-    );
+    ));
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1766,25 +1793,29 @@ async function fetchBSHRates() {
 app.get('/api/exchange-rates/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const cached = await queryAll('SELECT currency, rate, source FROM exchange_rates WHERE date = ?', [date]);
-    let rates = {};
-    let source = 'cache';
-    if (cached.length >= SUPPORTED_CURRENCIES.length) {
-      for (const r of cached) rates[r.currency] = r.rate;
-      source = cached[0].source || 'cache';
-    } else {
-      const fetched = await fetchBSHRates();
-      rates = fetched.rates;
-      source = fetched.source;
-      for (const [cur, rate] of Object.entries(rates)) {
-        await run(
-          'INSERT OR REPLACE INTO exchange_rates (date, currency, rate, source) VALUES (?, ?, ?, ?)',
-          [date, cur, rate, source]
-        );
+    // Memory cache 10min: kurset e datës nuk ndryshojnë brenda ditës.
+    const payload = await cached(`exchange-rates:${date}`, 600_000, async () => {
+      const dbRows = await queryAll('SELECT currency, rate, source FROM exchange_rates WHERE date = ?', [date]);
+      let rates = {};
+      let source = 'cache';
+      if (dbRows.length >= SUPPORTED_CURRENCIES.length) {
+        for (const r of dbRows) rates[r.currency] = r.rate;
+        source = dbRows[0].source || 'cache';
+      } else {
+        const fetched = await fetchBSHRates();
+        rates = fetched.rates;
+        source = fetched.source;
+        for (const [cur, rate] of Object.entries(rates)) {
+          await run(
+            'INSERT OR REPLACE INTO exchange_rates (date, currency, rate, source) VALUES (?, ?, ?, ?)',
+            [date, cur, rate, source]
+          );
+        }
       }
-    }
-    rates.LEK = 1;
-    res.json({ date, rates, source });
+      rates.LEK = 1;
+      return { date, rates, source };
+    });
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2758,7 +2789,10 @@ async function upsertSupplierIfMissing(nipt, name) {
 
 app.get('/api/suppliers', async (req, res) => {
   try {
-    res.json(await queryAll('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE ASC', []));
+    // Memory cache 60s — furnitorët ndryshojnë rrallë.
+    const rows = await cached('suppliers:all', 60_000, () =>
+      queryAll('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE ASC', []));
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -4302,7 +4336,9 @@ function clientFullName(c) {
 
 app.get('/api/clients', async (req, res) => {
   try {
-    const rows = await queryAll('SELECT * FROM clients ORDER BY last_name, first_name', []);
+    // Memory cache 60s — thirret në cdo Fatura Shitje.
+    const rows = await cached('clients:all', 60_000, () =>
+      queryAll('SELECT * FROM clients ORDER BY last_name, first_name', []));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -6150,8 +6186,13 @@ app.get('/api/products/categories', async (req, res) => {
 app.get('/api/expense-categories', async (req, res) => {
   try {
     const includeInactive = req.query.all === '1';
-    const where = includeInactive ? '' : 'WHERE COALESCE(active, 1) = 1';
-    res.json(await queryAll(`SELECT * FROM expense_categories ${where} ORDER BY name COLLATE NOCASE ASC`));
+    const key = `expense-categories:${includeInactive ? 'all' : 'active'}`;
+    // Memory cache 60s — thirret nga Fleta e Shpenzimeve në cdo load.
+    const rows = await cached(key, 60_000, () => {
+      const where = includeInactive ? '' : 'WHERE COALESCE(active, 1) = 1';
+      return queryAll(`SELECT * FROM expense_categories ${where} ORDER BY name COLLATE NOCASE ASC`);
+    });
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
