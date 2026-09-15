@@ -228,8 +228,9 @@ function fmt(v) {
   return x.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function emptyDraft() {
+function emptyDraft(defaultDate = '') {
   return {
+    date: defaultDate,
     category_id: '', description: '', currency: 'EUR', amount: '', exchange_rate: '1',
     // Për modalitetin PRODUKT: e njëjta logjikë si rreshti i Fatura Shitje.
     // - product_qty: sasia që hiqet nga stoku
@@ -696,7 +697,7 @@ export default function Marketing({ date }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [draft, setDraft] = useState(emptyDraft())
+  const [draft, setDraft] = useState(() => emptyDraft(date))
   const [filterCur, setFilterCur] = useState('all')
   const [rates, setRates] = useState({ LEK: 1 })
   const [rateSource, setRateSource] = useState('')
@@ -741,8 +742,13 @@ export default function Marketing({ date }) {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    setDraft(d => ({ ...d, date }))
+  }, [date])
+
   const addEntry = async () => {
     if (!draft.category_id) { alert('Zgjidh një zër marketingu.'); return }
+    if (!draft.date) { alert('Vendos datën.'); return }
     const cur = draft.currency || 'LEK'
     const isProduct = cur === 'PRODUKT'
     if (isProduct) {
@@ -763,9 +769,10 @@ export default function Marketing({ date }) {
         qty: draft.product_qty, unit_price: draft.unit_price,
         discount_percent: draft.discount_percent, vat_rate: draft.vat_rate,
       }) : null
+      const savedDate = draft.date
       const body = isProduct
         ? {
-            date,
+            date: savedDate,
             category_id: parseInt(draft.category_id) || null,
             description: draft.description,
             product_id: draft.product.id,
@@ -778,7 +785,7 @@ export default function Marketing({ date }) {
             exchange_rate: n(rates.EUR) || 1,
           }
         : {
-            date,
+            date: savedDate,
             category_id: parseInt(draft.category_id) || null,
             description: draft.description,
             currency: cur,
@@ -791,9 +798,17 @@ export default function Marketing({ date }) {
         body: JSON.stringify(body),
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
-      // Ruaj monedhën aktuale për shtimin pasues (produkt vs. cash).
-      setDraft({ ...emptyDraft(), currency: cur, exchange_rate: isProduct ? '1' : String(n(draft.exchange_rate) || 1) })
-      load()
+      // Ruaj monedhën aktuale + datën për shtimin pasues.
+      setDraft({ ...emptyDraft(savedDate), currency: cur, exchange_rate: isProduct ? '1' : String(n(draft.exchange_rate) || 1) })
+      if (savedDate !== date) {
+        setDateRange(r => {
+          const from = r.from && r.from < savedDate ? r.from : savedDate
+          const to = r.to && r.to > savedDate ? r.to : (savedDate > date ? savedDate : date)
+          return { from, to }
+        })
+      } else {
+        load()
+      }
     } finally { setSaving(false) }
   }
 
@@ -960,8 +975,25 @@ export default function Marketing({ date }) {
 
       {/* New entry row */}
       <div className="card">
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">+ Shto Shpenzim Marketingu</h3>
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 items-end">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">+ Shto Shpenzim Marketingu</h3>
+          {draft.date && draft.date !== date && (
+            <span className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 px-2 py-1 rounded">
+              Po regjistrohet për datën {fmtDate(draft.date)} (jashtë datës aktuale {fmtDate(date)})
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-2 items-end">
+          <div>
+            <label className="form-label">Data</label>
+            <input
+              type="date"
+              value={draft.date || ''}
+              onChange={e => setDraft(d => ({ ...d, date: e.target.value }))}
+              className="input-field"
+              max={date}
+            />
+          </div>
           <div className="md:col-span-2">
             <label className="form-label">Zëri</label>
             <MarketingCategoryPicker
@@ -1035,7 +1067,7 @@ export default function Marketing({ date }) {
             const base = (parseFloat(draft.unit_price) || 0) * qtyNum
             const discEur = base * ((parseFloat(draft.discount_percent) || 0) / 100)
             return (
-              <div className="md:col-span-6 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-3 bg-blue-50/40 dark:bg-blue-900/20 overflow-x-auto">
+              <div className="md:col-span-7 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-3 bg-blue-50/40 dark:bg-blue-900/20 overflow-x-auto">
                 <div className="text-xs font-semibold text-blue-800 dark:text-blue-200 mb-2 flex items-center gap-1">
                   🎁 Produkti nga inventari {p && <span className="ml-2 text-[10px] font-normal text-slate-500 dark:text-slate-400">Stok aktual: <span className={`font-semibold ${qtyNum > (p.stock || 0) ? 'text-rose-600' : ''}`}>{p.stock || 0}</span></span>}
                 </div>
@@ -1138,7 +1170,7 @@ export default function Marketing({ date }) {
               </div>
             )
           })()}
-          <div className="md:col-span-6 flex items-center justify-between">
+          <div className="md:col-span-7 flex items-center justify-between">
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {draft.currency === 'PRODUKT' ? (
                 <>Total EUR (Çmimi final): <span className="font-bold text-blue-700 dark:text-blue-300 tabular-nums">
