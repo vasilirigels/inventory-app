@@ -3493,8 +3493,20 @@ app.delete('/api/purchase-invoices/:id', async (req, res) => {
     await run('DELETE FROM purchase_invoices WHERE id = ?', [id]);
     // Rifresko last_purchase_date te produktet e prekura: nëse ky ishte MAX-i,
     // kalon te fatura tjetër më e vjetër; nëse s'ka më blerje → ''.
-    const stmts = buildRefreshLastPurchaseDateStmts(items.map(it => it.product_id));
-    if (stmts.length) await batchWrite(stmts);
+    const productIds = [...new Set(items.map(it => it.product_id).filter(x => x != null))];
+    if (productIds.length) {
+      const stmts = buildRefreshLastPurchaseDateStmts(productIds);
+      if (stmts.length) await batchWrite(stmts);
+      // Pastro produktet "jetim": produktet që s'kanë më asnjë blerje tjetër
+      // dhe s'janë shitur ndonjëherë — janë krijuar vetëm nga kjo faturë e fshirë.
+      for (const pid of productIds) {
+        const purchRef = await queryOne('SELECT COUNT(*) AS c FROM purchase_items WHERE product_id = ?', [pid]);
+        const salesRef = await queryOne('SELECT COUNT(*) AS c FROM invoice_items WHERE product_id = ?', [pid]);
+        if ((purchRef?.c || 0) === 0 && (salesRef?.c || 0) === 0) {
+          await run('DELETE FROM products WHERE id = ?', [pid]);
+        }
+      }
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

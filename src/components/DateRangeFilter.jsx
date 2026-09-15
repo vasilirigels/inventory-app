@@ -10,6 +10,7 @@
 //   hint            — tekst i vogël nën titullin, p.sh. "Ndikon: grafiku, faturat"
 //   minFrom         — kufizim minimal i "Nga" (YYYY-MM-DD); përdoret p.sh. për shitësit
 
+import { memo } from 'react'
 import { getUser } from '../lib/auth.js'
 
 // Data lokale (jo UTC) — që preseti "Sot" të mos anashkalojë ditën në Shqipëri (UTC+1/+2).
@@ -20,7 +21,7 @@ function toISOLocal(d) {
   return `${y}-${m}-${dd}`
 }
 
-export default function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, compact = false, hint, minFrom }) {
+function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, compact = false, hint, minFrom }) {
   // Shitësit s'kanë akses te periudha më e gjatë se 30 ditë.
   const isSales = getUser()?.role === 'sales'
   const longPresetsDisabled = isSales
@@ -92,3 +93,5 @@ export default function DateRangeFilter({ from, to, onChange, loading, emptyForA
     </div>
   )
 }
+
+export default memo(DateRangeFilter)

@@ -2159,22 +2159,39 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 onClick={async () => {
                   const m = parseFloat(String(bulkMultiplier).replace(',', '.'))
                   if (!m || m <= 0) { alert('Vendos një shumëzues > 0.'); return }
-                  const eligible = items.filter(it => n(it.purchase_price_no_vat) > 0).length
-                  if (eligible === 0) { alert('Asnjë rresht me Çm. Blerje > 0.'); return }
-                  if (!(await showConfirm(`Vendos Çm. Shitje = Çm. Blerje × ${m} për ${eligible} rreshta?`, {
+                  const isEligible = (it) => {
+                    if (forcedCategory === 'flori')   return n(it.has_gram) > 0
+                    if (forcedCategory === 'diamant') return n(it.cost_price) > 0
+                    return n(it.purchase_price_no_vat) > 0
+                  }
+                  const eligible = items.filter(isEligible).length
+                  if (eligible === 0) {
+                    const msg = forcedCategory === 'flori'
+                      ? 'Asnjë rresht me Has Gram > 0.'
+                      : forcedCategory === 'diamant'
+                        ? 'Asnjë rresht me Cmim Blerje > 0.'
+                        : 'Asnjë rresht me Çm. Blerje > 0.'
+                    alert(msg); return
+                  }
+                  if (!(await showConfirm(`Vendos Shumëzues = ${m} për ${eligible} rreshta?`, {
                     title: 'Apliko shumëzuesin', confirmLabel: 'Apliko',
                   }))) return
-                  // Setojmë edhe `multiplier` që:
-                  //  (1) kolona "Shumëzues" të shfaqet e mbushur për çdo rresht
+                  // Setojmë `multiplier` në të gjithë rreshtat eligible:
+                  //  (1) kolona "Shumëzues" shfaqet e mbushur për çdo rresht
                   //  (2) formula e Cmim Shitje HAS (has_gram × multiplier × sell_rate)
-                  //      te Flori/Diamant të aktivizohet auto nga useEffect-i.
-                  // `sell_price` vendoset për fallback (kategori pa formulë të vet);
-                  // për flori/diamant useEffect-i pas kësaj e rillogarit nga formula.
-                  setItems(prev => prev.map(it => ({
-                    ...it,
-                    multiplier: m,
-                    sell_price: +(n(it.purchase_price_no_vat) * m).toFixed(2),
-                  })))
+                  //      te Flori/Diamant aktivizohet auto nga useEffect-i.
+                  // Për kategori të tjera vendos edhe `sell_price` si fallback.
+                  setItems(prev => prev.map(it => {
+                    if (!isEligible(it)) return it
+                    if (forcedCategory === 'flori' || forcedCategory === 'diamant') {
+                      return { ...it, multiplier: m }
+                    }
+                    return {
+                      ...it,
+                      multiplier: m,
+                      sell_price: +(n(it.purchase_price_no_vat) * m).toFixed(2),
+                    }
+                  }))
                 }}
                 className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-2 py-1.5 rounded-lg"
                 title="Vendos Çm. Shitje = Çm. Blerje × shumëzues për të gjithë rreshtat"

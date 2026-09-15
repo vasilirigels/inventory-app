@@ -139,8 +139,8 @@ function fmt(v) {
   return x.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function emptyDraft() {
-  return { category_id: '', description: '', currency: 'EUR', amount: '', exchange_rate: '1' }
+function emptyDraft(defaultDate = '') {
+  return { date: defaultDate, category_id: '', description: '', currency: 'EUR', amount: '', exchange_rate: '1' }
 }
 
 export default function Shpenzime({ date, onNavigate }) {
@@ -148,7 +148,7 @@ export default function Shpenzime({ date, onNavigate }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [draft, setDraft] = useState(emptyDraft())
+  const [draft, setDraft] = useState(() => emptyDraft(date))
   const [filterCur, setFilterCur] = useState('all')
   const [rates, setRates] = useState({ LEK: 1 })
   const [rateSource, setRateSource] = useState('')
@@ -191,11 +191,19 @@ export default function Shpenzime({ date, onNavigate }) {
     }
   }, [date, rangeActive, dateRange.from, dateRange.to])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const t = setTimeout(() => { load() }, 400)
+    return () => clearTimeout(t)
+  }, [load])
+
+  useEffect(() => {
+    setDraft(d => ({ ...d, date }))
+  }, [date])
 
   const addEntry = async () => {
     if (!draft.category_id) { alert('Zgjidh një zër shpenzimi.'); return }
     if (!n(draft.amount)) { alert('Vendos vlerën.'); return }
+    if (!draft.date) { alert('Vendos datën.'); return }
     const cur = draft.currency || 'LEK'
     const rate = cur === 'LEK' ? 1 : n(draft.exchange_rate)
     if (cur !== 'LEK' && rate <= 0) { alert(`Vendos kursin për 1 ${cur} (në LEK).`); return }
@@ -205,7 +213,7 @@ export default function Shpenzime({ date, onNavigate }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          date,
+          date: draft.date,
           category_id: parseInt(draft.category_id) || null,
           description: draft.description,
           currency: cur,
@@ -214,8 +222,17 @@ export default function Shpenzime({ date, onNavigate }) {
         }),
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
-      setDraft({ ...emptyDraft(), currency: cur, exchange_rate: String(rate) })
-      load()
+      const savedDate = draft.date
+      setDraft({ ...emptyDraft(savedDate), currency: cur, exchange_rate: String(rate) })
+      if (savedDate !== date) {
+        setDateRange(r => {
+          const from = r.from && r.from < savedDate ? r.from : savedDate
+          const to = r.to && r.to > savedDate ? r.to : (savedDate > date ? savedDate : date)
+          return { from, to }
+        })
+      } else {
+        load()
+      }
     } finally { setSaving(false) }
   }
 
@@ -274,12 +291,21 @@ export default function Shpenzime({ date, onNavigate }) {
 
   const visibleRows = filterCur === 'all' ? rows : rows.filter(r => (r.currency || 'LEK') === filterCur)
 
+  const eurRate = n(rates.EUR) > 0 ? n(rates.EUR) : 0
+  const lekToEur = (lek) => (eurRate > 0 ? lek / eurRate : 0)
+  const rowTotalEur = (row) => {
+    const cur = row.currency || 'LEK'
+    if (cur === 'EUR') return n(row.amount)
+    return lekToEur(n(row.amount) * n(row.exchange_rate || 1))
+  }
+
   const totals = visibleRows.reduce((a, r) => {
     const cur = r.currency || 'LEK'
     a.by_currency[cur] = (a.by_currency[cur] || 0) + n(r.amount)
     a.total_lek += n(r.amount) * n(r.exchange_rate || 1)
+    a.total_eur += rowTotalEur(r)
     return a
-  }, { by_currency: {}, total_lek: 0 })
+  }, { by_currency: {}, total_lek: 0, total_eur: 0 })
 
   const totalsList = Object.entries(totals.by_currency).filter(([, v]) => Math.abs(v) > 0.005)
 
@@ -314,8 +340,25 @@ export default function Shpenzime({ date, onNavigate }) {
 
       {/* New entry row */}
       <div className="card">
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">+ Shto Shpenzim</h3>
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 items-end">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">+ Shto Shpenzim</h3>
+          {draft.date && draft.date !== date && (
+            <span className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 px-2 py-1 rounded">
+              Po regjistrohet për datën {fmtDate(draft.date)} (jashtë datës aktuale {fmtDate(date)})
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-2 items-end">
+          <div>
+            <label className="form-label">Data</label>
+            <input
+              type="date"
+              value={draft.date || ''}
+              onChange={e => setDraft(d => ({ ...d, date: e.target.value }))}
+              className="input-field"
+              max={date}
+            />
+          </div>
           <div className="md:col-span-2">
             <label className="form-label">Zëri</label>
             <ExpenseCategoryPicker
@@ -367,7 +410,7 @@ export default function Shpenzime({ date, onNavigate }) {
               className="input-field text-right tabular-nums"
             />
           </div>
-          <div className="md:col-span-6 flex items-center justify-end">
+          <div className="md:col-span-7 flex items-center justify-end">
             <button
               onClick={addEntry}
               disabled={saving || categories.length === 0}
@@ -384,28 +427,43 @@ export default function Shpenzime({ date, onNavigate }) {
         from={dateRange.from}
         to={dateRange.to}
         onChange={setDateRange}
-        loading={loading}
-        emptyForAll
         compact
         hint={rangeActive
           ? 'Shpenzimet për periudhën e zgjedhur'
-          : `Vetëm data ${date} · zgjidh periudhë për historik më të gjerë`}
+          : `Vetëm data ${date} · zgjidh periudhë ose kliko një preset për historik më të gjerë`}
       />
 
       {/* Existing entries */}
       <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between flex-wrap gap-2">
           <div>
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Shpenzimet e Regjistruara</h3>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+              Shpenzimet e Regjistruara
+              {rangeActive && (
+                <span className="ml-2 text-xs font-normal text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded">
+                  {fmtDate(dateRange.from || '2000-01-01')} → {fmtDate(dateRange.to || date)}
+                </span>
+              )}
+            </h3>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
               {rangeActive
                 ? 'Kliko ✏️ për të edituar. Data mbetet ajo origjinale e regjistrimit.'
                 : 'Kliko ✏️ për të edituar një zë. Ndryshimet ruhen kur klikon ✓.'}
             </p>
           </div>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {visibleRows.length} {visibleRows.length === 1 ? 'rresht' : 'rreshta'}
-          </span>
+          <div className="flex items-center gap-2">
+            {rangeActive && (
+              <button
+                type="button"
+                onClick={() => setDateRange({ from: '', to: '' })}
+                className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-2 py-1 rounded"
+                title="Hiq filtrin dhe kthehu te data aktuale"
+              >✕ Pastro filtrin</button>
+            )}
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {visibleRows.length} {visibleRows.length === 1 ? 'rresht' : 'rreshta'}
+            </span>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -419,7 +477,7 @@ export default function Shpenzime({ date, onNavigate }) {
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-24">Monedha</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-32">Vlera</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-28">Kursi (LEK)</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-32 bg-blue-50/60">Total LEK</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-32 bg-blue-50/60">Total EUR</th>
                 <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase w-12"></th>
               </tr>
             </thead>
@@ -429,7 +487,7 @@ export default function Shpenzime({ date, onNavigate }) {
                   <td colSpan={showDateCol ? 8 : 7} className="p-6 text-center text-slate-400 dark:text-slate-500 text-sm italic">
                     {rows.length === 0
                       ? (rangeActive
-                        ? 'Asnjë shpenzim në periudhën e zgjedhur.'
+                        ? `Asnjë shpenzim në periudhën ${fmtDate(dateRange.from || '2000-01-01')} → ${fmtDate(dateRange.to || date)}. Provo presetin "Ky vit" ose "Të gjitha" për historik më të gjerë.`
                         : 'Asnjë shpenzim për këtë datë. Shto rreshtin e parë më lart.')
                       : `Asnjë shpenzim në ${filterCur}. Ndrysho filtrin për të parë të tjerët.`}
                   </td>
@@ -440,6 +498,7 @@ export default function Shpenzime({ date, onNavigate }) {
                   const eCur = editDraft.currency || 'LEK'
                   const eIsLek = eCur === 'LEK'
                   const eTotalLek = n(editDraft.amount) * (eIsLek ? 1 : n(editDraft.exchange_rate))
+                  const eTotalEur = eCur === 'EUR' ? n(editDraft.amount) : lekToEur(eTotalLek)
                   return (
                     <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 bg-amber-50/40">
                       {showDateCol && (
@@ -510,7 +569,7 @@ export default function Shpenzime({ date, onNavigate }) {
                         />
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/40">
-                        {fmt(eTotalLek)}
+                        {fmt(eTotalEur)}
                       </td>
                       <td className="px-2 py-1 text-center whitespace-nowrap">
                         <button onClick={saveEdit} className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-xs font-medium mr-1" title="Ruaj">✓</button>
@@ -521,7 +580,7 @@ export default function Shpenzime({ date, onNavigate }) {
                 }
                 const cur = r.currency || 'LEK'
                 const isLek = cur === 'LEK'
-                const totalLek = n(r.amount) * n(r.exchange_rate || 1)
+                const totalEur = rowTotalEur(r)
                 return (
                   <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     {showDateCol && (
@@ -543,7 +602,7 @@ export default function Shpenzime({ date, onNavigate }) {
                       {isLek ? '1' : fmt(r.exchange_rate)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/40">
-                      {fmt(totalLek)}
+                      {fmt(totalEur)}
                     </td>
                     <td className="px-2 py-1 text-center whitespace-nowrap">
                       <button
@@ -570,7 +629,7 @@ export default function Shpenzime({ date, onNavigate }) {
                     : totalsList.map(([c, v]) => `${fmt(v)} ${c}`).join(' · ')}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-blue-900 text-sm bg-blue-100/60">
-                  {fmt(totals.total_lek)} LEK
+                  {fmt(totals.total_eur)} EUR
                 </td>
                 <td></td>
               </tr>
