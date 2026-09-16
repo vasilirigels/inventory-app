@@ -1490,6 +1490,19 @@ app.get('/api/products', async (req, res) => {
 // that PUTs with a stale value gets a 409 and can re-fetch.
 const NOW_TS_SQL = "strftime('%Y-%m-%d %H:%M:%f','now')";
 
+// Karat → kodi flori (fineness në pjesë për mijë). Përdoret në formulën:
+// has_gram = (kodi/1000) × gram (sasi ari e pastër në gramë).
+const KARAT_TO_KODI = { 8: 333, 9: 375, 10: 417, 12: 500, 14: 585, 18: 750, 21: 875, 22: 916, 24: 999 };
+
+// Fallback: kur importi nga Excel s'ka kolonën "Kodi" (ose ka vlerë joreale),
+// nxjerre nga emri i produktit që zakonisht përmban p.sh. "18K", "14K".
+function inferKodiFromName(name) {
+  if (!name) return 0;
+  const m = String(name).match(/\b(\d{1,2})\s*[Kk]\b/);
+  if (!m) return 0;
+  return KARAT_TO_KODI[parseInt(m[1], 10)] || 0;
+}
+
 app.post('/api/products', async (req, res) => {
   try {
     const d = req.body;
@@ -1700,7 +1713,7 @@ app.post('/api/products/import', async (req, res) => {
           d.vat_rate != null && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
           d.unit || 'copë',
           parseFloat(d.gram) || 0,
-          parseInt(d.kodi) || 0,
+          (parseInt(d.kodi) || 0) || inferKodiFromName(d.name),
           parseFloat(d.has_gram) || 0,
           parseFloat(d.has_rate) || 0,
           'HAS',
