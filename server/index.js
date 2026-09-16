@@ -1856,12 +1856,19 @@ function computeLineTotals(it) {
 
 async function nextInvoiceNo(date) {
   const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const prefix = `${year}-`;
+  // MAX i numrit ekzistues + 1 (jo COUNT) — që fshirja e një fature të mos
+  // rikthejë një numër që tashmë ekziston, duke shkaktuar UNIQUE constraint fail.
+  // Number(...) është i domosdoshëm: libSQL kthen aggregate-e si string/BigInt
+  // sipas driver-it → pa cast, "29" + 1 = "291" (bashkim stringu).
   const row = await queryOne(
-    "SELECT COUNT(*) AS c FROM invoices WHERE date LIKE ?",
-    [year + '%']
+    `SELECT MAX(CAST(SUBSTR(invoice_no, ${prefix.length + 1}) AS INTEGER)) AS max_no
+       FROM invoices
+      WHERE invoice_no LIKE ?`,
+    [`${prefix}%`],
   );
-  const next = (row?.c || 0) + 1;
-  return `${year}-${String(next).padStart(5, '0')}`;
+  const next = Number(row?.max_no || 0) + 1;
+  return `${prefix}${String(next).padStart(5, '0')}`;
 }
 
 app.get('/api/invoices/next-no', async (req, res) => {
@@ -2919,9 +2926,19 @@ function computePurchaseLineTotals(it) {
 
 async function nextPurchaseNo(date) {
   const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
-  const row = await queryOne("SELECT COUNT(*) AS c FROM purchase_invoices WHERE date LIKE ?", [year + '%']);
-  const next = (row?.c || 0) + 1;
-  return `B${year}-${String(next).padStart(5, '0')}`;
+  const prefix = `B${year}-`;
+  // MAX i numrit ekzistues + 1 (jo COUNT) — që fshirja e një fature të mos
+  // rikthejë një numër që tashmë ekziston, duke shkaktuar UNIQUE constraint fail.
+  // Number(...) është i domosdoshëm: libSQL kthen aggregate-e si string/BigInt
+  // sipas driver-it → pa cast, "29" + 1 = "291" (bashkim stringu).
+  const row = await queryOne(
+    `SELECT MAX(CAST(SUBSTR(invoice_no, ${prefix.length + 1}) AS INTEGER)) AS max_no
+       FROM purchase_invoices
+      WHERE invoice_no LIKE ?`,
+    [`${prefix}%`],
+  );
+  const next = Number(row?.max_no || 0) + 1;
+  return `${prefix}${String(next).padStart(5, '0')}`;
 }
 
 async function adjustPurchaseStock(items, sign) {
@@ -3201,6 +3218,19 @@ function purchaseSellTotalSubquery(material) {
   return { sql, params };
 }
 
+// Numri i artikujve për faturë (respekton material filter për konsistencë me
+// totalet e mësipërme). Përdoret te lista e Blerjeve për verifikim vizual.
+function purchaseItemCountSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND EXISTS (SELECT 1 FROM products xp5 WHERE xp5.id = xpit5.product_id AND COALESCE(xp5.material,'') = ?)`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xpit5.qty,0)), 0)
+     FROM purchase_items xpit5
+     WHERE xpit5.purchase_id = pi.id ${matClause}) AS item_count`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
 app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
@@ -3208,14 +3238,16 @@ app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
     const gram = purchaseGramSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
     const sell = purchaseSellTotalSubquery(req.query.material);
+    const cnt = purchaseItemCountSubquery(req.query.material);
     res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
          ${gram.sql},
          ${buy.sql},
-         ${sell.sql}
+         ${sell.sql},
+         ${cnt.sql}
        FROM purchase_invoices pi WHERE pi.date = ? ${mat.sql} ORDER BY pi.id ASC`,
-      [...gram.params, ...buy.params, ...sell.params, date, ...mat.params]
+      [...gram.params, ...buy.params, ...sell.params, ...cnt.params, date, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3228,14 +3260,16 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
     const gram = purchaseGramSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
     const sell = purchaseSellTotalSubquery(req.query.material);
+    const cnt = purchaseItemCountSubquery(req.query.material);
     res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
          ${gram.sql},
          ${buy.sql},
-         ${sell.sql}
+         ${sell.sql},
+         ${cnt.sql}
        FROM purchase_invoices pi WHERE pi.date BETWEEN ? AND ? ${mat.sql} ORDER BY pi.date ASC, pi.id ASC`,
-      [...gram.params, ...buy.params, ...sell.params, from, to, ...mat.params]
+      [...gram.params, ...buy.params, ...sell.params, ...cnt.params, from, to, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
