@@ -3218,17 +3218,17 @@ function purchaseSellTotalSubquery(material) {
   return { sql, params };
 }
 
-// Numri i artikujve për faturë (respekton material filter për konsistencë me
-// totalet e mësipërme). Përdoret te lista e Blerjeve për verifikim vizual.
-function purchaseItemCountSubquery(material) {
-  const matClause = (material && String(material).trim())
-    ? `AND EXISTS (SELECT 1 FROM products xp5 WHERE xp5.id = xpit5.product_id AND COALESCE(xp5.material,'') = ?)`
-    : '';
-  const sql = `(SELECT COALESCE(SUM(COALESCE(xpit5.qty,0)), 0)
-     FROM purchase_items xpit5
-     WHERE xpit5.purchase_id = pi.id ${matClause}) AS item_count`;
-  const params = matClause ? [String(material).trim()] : [];
-  return { sql, params };
+// Numri i artikujve për faturë — numëron TË GJITHË rreshtat, pa filtër materiali.
+// Përdoret për verifikim me Excel: nëse Excel-i kishte 19 rreshta, ky duhet të
+// tregojë 19, edhe nëse ndonjë produkt është fshirë më vonë (rreshti orphan te
+// purchase_items).
+function purchaseItemCountSubquery() {
+  return {
+    sql: `(SELECT COALESCE(SUM(COALESCE(xpit5.qty,0)), 0)
+       FROM purchase_items xpit5
+       WHERE xpit5.purchase_id = pi.id) AS item_count`,
+    params: [],
+  };
 }
 
 app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
@@ -3238,7 +3238,7 @@ app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
     const gram = purchaseGramSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
     const sell = purchaseSellTotalSubquery(req.query.material);
-    const cnt = purchaseItemCountSubquery(req.query.material);
+    const cnt = purchaseItemCountSubquery();
     res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
@@ -3260,7 +3260,7 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
     const gram = purchaseGramSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
     const sell = purchaseSellTotalSubquery(req.query.material);
-    const cnt = purchaseItemCountSubquery(req.query.material);
+    const cnt = purchaseItemCountSubquery();
     res.json(await queryAll(
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
