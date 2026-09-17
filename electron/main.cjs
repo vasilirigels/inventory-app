@@ -476,11 +476,12 @@ async function checkForUpdateMac(manual = false) {
 // Portable .exe s'mund të mbivendoset ndërsa është duke ekzekutuar. Për të
 // mbështetur auto-update:
 //   1. Fetch nga GitHub API → gjej ChamShop-Portable-{version}.exe të fundit
-//   2. Shkarko .exe-në e re në të njëjtën direktori ku ndodhet aktualja
+//   2. Shkarko .exe-në e re me emër temporar në të njëjtën direktori
 //   3. Shkruaj një .bat script në temp që:
 //      - pret 3s që procesi aktual të mbyllet plotësisht (unlock file)
-//      - fshin .exe-në e vjetër
-//      - nis .exe-në e re
+//      - fshin .exe-në origjinale
+//      - riemërton .exe-në e re me emrin origjinal (ruan shortcuts)
+//      - nis .exe-në me emrin origjinal
 //      - fshin veten
 //   4. Spawn .bat detached + quit
 let portableUpdateInProgress = false;
@@ -534,10 +535,16 @@ async function checkForUpdatePortable(manual = false) {
     });
     if (response !== 0) { updaterLog('Portable updater: user cancelled'); return; }
 
-    // Shkarko në të njëjtën direktori ku ndodhet .exe-ja aktuale (te USB-ja).
+    // Shkarko në të njëjtën direktori ku ndodhet .exe-ja aktuale (te USB-ja),
+    // por me një emër temporar (`{orig}.new-{version}.exe`). Batch-i pastaj do
+    // ta riemërtojë me emrin origjinal, që shkurtoret e user-it (që tregojnë
+    // te emri i vjetër, p.sh. ChamShop-Portable-1.2.0.exe) të vazhdojnë të
+    // punojnë pas update-it.
     const currentExePath = process.execPath;
     const currentExeDir = path.dirname(currentExePath);
-    const newExePath = path.join(currentExeDir, exeName);
+    const currentExeBase = path.basename(currentExePath, '.exe');
+    const tmpExeName = `${currentExeBase}.new-${latestVersion}.exe`;
+    const newExePath = path.join(currentExeDir, tmpExeName);
     updaterLog(`Portable updater: downloading to ${newExePath}`);
     let lastLogged = 0;
     await downloadFile(exeAsset.browser_download_url, newExePath, (done, total) => {
@@ -558,16 +565,21 @@ async function checkForUpdatePortable(manual = false) {
     if (r2 !== 0) { updaterLog('Portable updater: user postponed install'); return; }
 
     // Shkruaj batch script-in që do të bëjë replace + relaunch pas mbylljes.
+    // Ruan emrin origjinal të .exe-së që shkurtoret e user-it të vazhdojnë të
+    // punojnë. Nëse riemërtimi dështon (locked/perms), fallback: nis .exe-në e
+    // re me emër temporar (user-i s'mbetet pa asgjë).
     const batchPath = path.join(app.getPath('temp'), `chamshop-update-${Date.now()}.bat`);
-    // Nëse emri i ri është i njëjtë me atë të vjetër (rast i pamundur meqë kemi
-    // version në emër, por për siguri), mos e fshi.
-    const shouldDeleteOld = path.resolve(currentExePath).toLowerCase() !== path.resolve(newExePath).toLowerCase();
-    const delLine = shouldDeleteOld ? `del /f /q "${currentExePath}"` : 'rem old = new, no delete';
     const batchContent = [
       '@echo off',
       'timeout /t 3 /nobreak >nul',
-      delLine,
+      `del /f /q "${currentExePath}"`,
+      `move /y "${newExePath}" "${currentExePath}"`,
+      'if errorlevel 1 goto fallback',
+      `start "" "${currentExePath}"`,
+      'goto end',
+      ':fallback',
       `start "" "${newExePath}"`,
+      ':end',
       'del "%~f0"',
       '',
     ].join('\r\n');
