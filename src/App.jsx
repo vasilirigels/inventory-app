@@ -44,6 +44,7 @@ const UnifiedReport          = lazy(() => import('./components/sections/UnifiedR
 const Komentet               = lazy(() => import('./components/Komentet.jsx'))
 const Riparimet              = lazy(() => import('./components/Riparimet.jsx'))
 const ShitjeOnline           = lazy(() => import('./components/ShitjeOnline.jsx'))
+const Porosi                 = lazy(() => import('./components/Porosi.jsx'))
 
 function PageFallback() {
   return (
@@ -201,6 +202,9 @@ function AppInner({ user }) {
 
       // Shitje Online — moduli i ri (bazuar te invoices me is_online=1).
       case 'shitje-online': return <ShitjeOnline date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} openNew={openNewInvoice} onConsumeNew={() => setOpenNewInvoice(false)} />
+
+      // Porosi — Custom Orders me depozita paraprake dhe dorëzim si faturë shitje.
+      case 'porosi':         return <Porosi />
       // Legacy: kthimet online mbeten te SalesSection derisa të migrohen.
       case 'kthime-online':  return <SalesSection date={currentDate} type="online" />
 

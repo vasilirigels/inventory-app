@@ -67,6 +67,7 @@ const NAV_GROUPS = [
         children: [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
           { id: 'shitje-online',         label: '🛒 Shitje Online' },
+          { id: 'porosi',                label: '🛠️ Porosi' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },
           { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
         ],

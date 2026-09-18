@@ -123,6 +123,8 @@ function tableFromPath(p) {
     'purchase-payments': 'purchase_payments',
     'comments': 'comments',
     'repairs': 'repairs',
+    'porosi': 'porosi',
+    'porosi-deposits': 'porosi_deposits',
   };
   return map[seg] || null;
 }
@@ -4907,6 +4909,21 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const hasGramRow = await queryOne('SELECT COALESCE(SUM(gram),0) AS g FROM has_purchases WHERE date = ?', [date]);
     has_gram_total = +(hasGramRow?.g || 0).toFixed(3);
 
+    // Depozitat nga porositë (custom orders) — cash që hyri në sirtar për
+    // pagesa paraprake të porosive. Regjistrohet për datën e depozitës.
+    const porosiDepRows = await queryAll(
+      `SELECT COALESCE(currency, 'EUR') AS cur,
+              COALESCE(amount, 0)       AS amt
+         FROM porosi_deposits
+        WHERE date = ? AND method = 'cash'`,
+      [date]
+    );
+    const porosi_deposits = zeroPerCur();
+    for (const r of porosiDepRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (c in porosi_deposits) porosi_deposits[c] += r.amt;
+    }
+
     const dailyRow = await queryOne(
       `SELECT COALESCE(opening_lek, 0)              AS opening_LEK,
               COALESCE(opening_eur, 0)              AS opening_EUR,
@@ -4943,7 +4960,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const difference = zeroPerCur();
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
-      cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c]
+      cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
       difference[c]      = physical_cash[c] - cash_balance[c];
@@ -4959,6 +4976,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       opening_cash:      fx(opening_cash),
       cash_from_sales:   fx(cash_from_sales),
       debt_repayments:   fx(debt_repayments),
+      porosi_deposits:   fx(porosi_deposits),
       expenses:          fx(expenses),
       purchase_cash:     fx(purchase_cash),
       hurda_cash:        fx(hurda_cash),
@@ -4976,6 +4994,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         purchases_cash: purRows.length,
         hurda_purchases: hurdaRows.length,
         has_purchases: hasRows.length,
+        porosi_deposits: porosiDepRows.length,
         debt_repayments: debtPayRows.length,
       },
     });
@@ -5137,11 +5156,23 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       if (c in has_cash) has_cash[c] += r.amt;
     }
 
+    const porosiDepRows = await queryAll(
+      `SELECT COALESCE(currency, 'EUR') AS cur, COALESCE(amount, 0) AS amt
+         FROM porosi_deposits
+        WHERE date BETWEEN ? AND ? AND method = 'cash'`,
+      [from, to]
+    );
+    const porosi_deposits = zeroPerCur();
+    for (const r of porosiDepRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (c in porosi_deposits) porosi_deposits[c] += r.amt;
+    }
+
     const cash_from_sales = zeroPerCur();
     const cash_balance    = zeroPerCur();
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
-      cash_balance[c]    = cash_from_sales[c] + debt_repayments[c]
+      cash_balance[c]    = cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
     }
 
@@ -5154,6 +5185,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       amount_due:      fx(amount_due),
       cash_from_sales: fx(cash_from_sales),
       debt_repayments: fx(debt_repayments),
+      porosi_deposits: fx(porosi_deposits),
       expenses:        fx(expenses),
       purchase_cash:   fx(purchase_cash),
       hurda_cash:      fx(hurda_cash),
@@ -5165,6 +5197,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
         purchases_cash: purRows.length,
         hurda_purchases: hurdaRows.length,
         has_purchases: hasRows.length,
+        porosi_deposits: porosiDepRows.length,
         debt_repayments: debtPayRows.length,
       },
     });
@@ -6979,6 +7012,328 @@ app.delete('/api/marketing-contract-entries/:id', async (req, res) => {
       );
     }
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// POROSI (Custom Orders) — klienti sheh nje produkt referencë, e do me
+// modifikime (gur tjeter, iniciale, permasa etj), paguan një depozitë
+// dhe kur artikulli është gati krijohet fatura reale e shitjes.
+// ============================================================
+async function nextPorosiNo(date) {
+  const year = (date || '').slice(0, 4) || new Date().getFullYear().toString();
+  const prefix = `P${year}-`;
+  const row = await queryOne(
+    `SELECT MAX(CAST(SUBSTR(porosi_no, ${prefix.length + 1}) AS INTEGER)) AS max_no
+       FROM porosi WHERE porosi_no LIKE ?`,
+    [`${prefix}%`],
+  );
+  const next = Number(row?.max_no || 0) + 1;
+  return `${prefix}${String(next).padStart(5, '0')}`;
+}
+
+app.get('/api/porosi/next-no', async (req, res) => {
+  try {
+    const { date } = req.query;
+    res.json({ porosi_no: await nextPorosiNo(date) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/porosi', async (req, res) => {
+  try {
+    const { from, to, status } = req.query;
+    const where = [];
+    const params = [];
+    if (from) { where.push('p.date >= ?'); params.push(from); }
+    if (to)   { where.push('p.date <= ?'); params.push(to); }
+    if (status && ['ne_progres','gati','dorezuar'].includes(status)) {
+      where.push('p.status = ?'); params.push(status);
+    }
+    const rows = await queryAll(
+      `SELECT p.*,
+              COALESCE((SELECT SUM(amount * COALESCE(exchange_rate, 1))
+                          FROM porosi_deposits WHERE porosi_id = p.id
+                            AND currency = p.currency), 0)
+                + COALESCE((SELECT SUM(amount * COALESCE(exchange_rate, 1))
+                              FROM porosi_deposits WHERE porosi_id = p.id
+                                AND currency != p.currency), 0)
+                AS total_deposits_in_currency,
+              COALESCE((SELECT COUNT(*) FROM porosi_deposits WHERE porosi_id = p.id), 0) AS deposits_count,
+              rp.name AS reference_product_name, rp.barcode AS reference_product_barcode
+         FROM porosi p
+         LEFT JOIN products rp ON rp.id = p.reference_product_id
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY p.date DESC, p.id DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/porosi/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const p = await queryOne(
+      `SELECT p.*, rp.name AS reference_product_name, rp.barcode AS reference_product_barcode,
+              rp.image_path AS reference_product_image
+         FROM porosi p
+         LEFT JOIN products rp ON rp.id = p.reference_product_id
+        WHERE p.id = ?`,
+      [id]
+    );
+    if (!p) return res.status(404).json({ error: 'not found' });
+    const deposits = await queryAll(
+      `SELECT * FROM porosi_deposits WHERE porosi_id = ? ORDER BY date ASC, id ASC`,
+      [id]
+    );
+    res.json({ ...p, deposits });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/porosi', async (req, res) => {
+  try {
+    const d = req.body || {};
+    if (!d.date) return res.status(400).json({ error: 'date required' });
+    const porosi_no = (d.porosi_no || '').trim() || await nextPorosiNo(d.date);
+    await ensureClientExists(d.customer_name, '');
+    await run(
+      `INSERT INTO porosi (
+         porosi_no, date, expected_delivery_date, status,
+         customer_name, customer_phone, customer_id,
+         reference_product_id, reference_note,
+         category, karat, gram, stones, initials, size, notes, image_path,
+         currency, sell_price, updated_at
+       ) VALUES (?, ?, ?, 'ne_progres', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))`,
+      [
+        porosi_no, d.date, d.expected_delivery_date || '',
+        d.customer_name || '', d.customer_phone || '',
+        d.customer_id ? parseInt(d.customer_id) : null,
+        d.reference_product_id ? parseInt(d.reference_product_id) : null,
+        d.reference_note || '',
+        d.category || '', d.karat || '', parseFloat(d.gram) || 0,
+        d.stones || '', d.initials || '', d.size || '',
+        d.notes || '', d.image_path || '',
+        (d.currency || 'EUR').toUpperCase(), parseFloat(d.sell_price) || 0,
+      ]
+    );
+    const row = await queryOne('SELECT * FROM porosi WHERE porosi_no = ? ORDER BY id DESC LIMIT 1', [porosi_no]);
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/porosi/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne('SELECT * FROM porosi WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    if (existing.status === 'dorezuar') {
+      return res.status(400).json({ error: 'porosi e dorëzuar nuk mund të ndryshohet' });
+    }
+    const d = req.body || {};
+    await ensureClientExists(d.customer_name, '');
+    await run(
+      `UPDATE porosi SET
+         date = ?, expected_delivery_date = ?, status = ?,
+         customer_name = ?, customer_phone = ?, customer_id = ?,
+         reference_product_id = ?, reference_note = ?,
+         category = ?, karat = ?, gram = ?, stones = ?, initials = ?, size = ?,
+         notes = ?, image_path = ?, currency = ?, sell_price = ?,
+         updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+       WHERE id = ?`,
+      [
+        d.date || existing.date, d.expected_delivery_date || '',
+        ['ne_progres','gati','dorezuar'].includes(d.status) ? d.status : existing.status,
+        d.customer_name || '', d.customer_phone || '',
+        d.customer_id ? parseInt(d.customer_id) : null,
+        d.reference_product_id ? parseInt(d.reference_product_id) : null,
+        d.reference_note || '',
+        d.category || '', d.karat || '', parseFloat(d.gram) || 0,
+        d.stones || '', d.initials || '', d.size || '',
+        d.notes || '', d.image_path || existing.image_path || '',
+        (d.currency || existing.currency || 'EUR').toUpperCase(),
+        parseFloat(d.sell_price) || 0,
+        id,
+      ]
+    );
+    res.json(await queryOne('SELECT * FROM porosi WHERE id = ?', [id]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/porosi/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne('SELECT * FROM porosi WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    if (existing.status === 'dorezuar') {
+      return res.status(400).json({ error: 'porosi e dorëzuar nuk mund të fshihet — fshi së pari faturën e shitjes' });
+    }
+    // Fshi imazhin nga disku nëse ekziston
+    if (existing.image_path) {
+      const fp = path.join(uploadDir, existing.image_path);
+      try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch (_) {}
+    }
+    await run('DELETE FROM porosi WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/porosi/:id/image', upload.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const image_path = req.file.filename;
+    await run('UPDATE porosi SET image_path = ? WHERE id = ?', [image_path, id]);
+    res.json({ success: true, image_path });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/porosi/:id/image', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const p = await queryOne('SELECT image_path FROM porosi WHERE id = ?', [id]);
+    if (p?.image_path) {
+      const fp = path.join(uploadDir, p.image_path);
+      try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch (_) {}
+    }
+    await run("UPDATE porosi SET image_path = '' WHERE id = ?", [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Depozitat për një porosi
+app.post('/api/porosi/:id/deposits', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const p = await queryOne('SELECT * FROM porosi WHERE id = ?', [id]);
+    if (!p) return res.status(404).json({ error: 'porosi not found' });
+    if (p.status === 'dorezuar') {
+      return res.status(400).json({ error: 'porosi e dorëzuar — depozitat nuk lejohen' });
+    }
+    const { date, amount, currency, method, exchange_rate, notes } = req.body || {};
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const amt = parseFloat(amount) || 0;
+    if (amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
+    await run(
+      `INSERT INTO porosi_deposits (porosi_id, date, amount, currency, method, exchange_rate, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, date, +amt.toFixed(2),
+        (currency || p.currency || 'EUR').toUpperCase(),
+        ['cash','bank','pos'].includes(method) ? method : 'cash',
+        parseFloat(exchange_rate) || 1,
+        notes || '',
+      ]
+    );
+    const row = await queryOne(
+      'SELECT * FROM porosi_deposits WHERE porosi_id = ? ORDER BY id DESC LIMIT 1',
+      [id]
+    );
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/porosi-deposits/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const dep = await queryOne('SELECT porosi_id FROM porosi_deposits WHERE id = ?', [id]);
+    if (!dep) return res.status(404).json({ error: 'not found' });
+    const p = await queryOne('SELECT status FROM porosi WHERE id = ?', [dep.porosi_id]);
+    if (p?.status === 'dorezuar') {
+      return res.status(400).json({ error: 'porosi e dorëzuar — depozitat nuk mund të fshihen' });
+    }
+    await run('DELETE FROM porosi_deposits WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Dorëzim: krijon një faturë shitjeje me artikull custom (pa lidhje inventari)
+// dhe aplikon automatikisht depozitat si "paguar tashmë". Diferenca paguhet
+// nga klienti me metodën e zgjedhur (cash/bank/pos/debt).
+app.post('/api/porosi/:id/deliver', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const p = await queryOne('SELECT * FROM porosi WHERE id = ?', [id]);
+    if (!p) return res.status(404).json({ error: 'porosi not found' });
+    if (p.status === 'dorezuar') return res.status(400).json({ error: 'porosi tashmë e dorëzuar' });
+    if (!(parseFloat(p.sell_price) > 0)) return res.status(400).json({ error: 'vendos sell_price para dorëzimit' });
+
+    const d = req.body || {};
+    const date = d.date || new Date().toISOString().slice(0, 10);
+    if (req.user?.role !== 'admin' && date !== new Date().toISOString().slice(0, 10)) {
+      return res.status(403).json({ error: 'only admin can set a non-today date' });
+    }
+
+    const deposits = await queryAll('SELECT * FROM porosi_deposits WHERE porosi_id = ?', [id]);
+    // Depozitat konvertohen në monedhën e porosisë me exchange_rate të depozitës.
+    let depositsInInvoiceCurrency = 0;
+    for (const dep of deposits) {
+      if (dep.currency === p.currency) {
+        depositsInInvoiceCurrency += dep.amount;
+      } else {
+        // Depozita në monedhë tjetër → konvertim direkt via kursin e ruajtur.
+        depositsInInvoiceCurrency += dep.amount * (dep.exchange_rate || 1);
+      }
+    }
+    depositsInInvoiceCurrency = +depositsInInvoiceCurrency.toFixed(2);
+
+    const total = +parseFloat(p.sell_price).toFixed(2);
+    const remaining = Math.max(0, +(total - depositsInInvoiceCurrency).toFixed(2));
+
+    // Fatura krijohet me: total = sell_price, amount_paid = depozitat + pagesa e re
+    const newPayAmount = Math.min(remaining, parseFloat(d.new_payment_amount) || 0);
+    const amountPaid = +(depositsInInvoiceCurrency + newPayAmount).toFixed(2);
+    const amountDue  = Math.max(0, +(total - amountPaid).toFixed(2));
+    const pm = amountDue > 0.005 ? 'debt' : (['cash','bank','pos'].includes(d.new_payment_method) ? d.new_payment_method : 'cash');
+
+    // Emri i artikullit — përfshin kategorinë + karatin + gramin + iniciale për qartësi.
+    const itemName = d.item_name || [
+      p.category || 'Artikull custom',
+      p.karat ? p.karat : '',
+      p.gram ? `${p.gram}g` : '',
+      p.initials ? `("${p.initials}")` : '',
+    ].filter(Boolean).join(' ');
+
+    await ensureClientExists(p.customer_name, '');
+    const userProvidedNo = (d.invoice_no || '').trim();
+    const doInsert = (invNo) => run(
+      `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
+        paid_cash, paid_pos, paid_bank, notes)
+       VALUES (?, ?, ?, '', ?, ?, ?, 0, 0, ?, ?, ?, ?, 0, 0, 0, ?)`,
+      [
+        date, invNo, p.customer_name || '',
+        p.currency, 1,
+        total, total, pm, amountPaid, amountDue,
+        `Dorëzim porosie ${p.porosi_no}${p.notes ? ' · ' + p.notes : ''}`,
+      ]
+    );
+    const invoice_no = await retryOnUniqueNo(
+      () => nextInvoiceNo(date),
+      doInsert,
+      5,
+      userProvidedNo || null,
+    );
+    const inv = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
+    const invoiceId = inv?.id;
+
+    // Nje rresht "artikull custom" (product_id = null, s'ka lidhje inventari).
+    await run(
+      `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
+        discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
+        on_promotion, promo_discount_pct)
+       VALUES (?, NULL, '', '', ?, 1, ?, ?, 0, ?, 0, 0, ?, 0, 0)`,
+      [invoiceId, itemName, parseFloat(p.gram) || 0, total, total, total]
+    );
+
+    // Marko porosinë si dorëzuar
+    await run(
+      `UPDATE porosi SET status = 'dorezuar', delivered_invoice_id = ?, delivered_at = ?,
+                        updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+        WHERE id = ?`,
+      [invoiceId, date, id]
+    );
+
+    res.json({ success: true, invoice_id: invoiceId, invoice_no, total, deposits_applied: depositsInInvoiceCurrency, new_payment: newPayAmount, amount_due: amountDue });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

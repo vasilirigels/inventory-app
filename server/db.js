@@ -839,6 +839,56 @@ const MIGRATIONS = [
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (contract_id) REFERENCES marketing_contracts(id) ON DELETE CASCADE
   )`,
+
+  // Porosi (Custom Orders) — klienti sheh nje produkt referencë, e do me
+  // modifikime (gur tjeter, iniciale, permasa etj), paguan një depozitë,
+  // dhe kur artikulli është gati krijohet fatura reale e shitjes.
+  `CREATE TABLE IF NOT EXISTS porosi (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    porosi_no TEXT NOT NULL,
+    date TEXT NOT NULL,
+    expected_delivery_date TEXT DEFAULT '',
+    status TEXT DEFAULT 'ne_progres',
+    customer_name TEXT DEFAULT '',
+    customer_phone TEXT DEFAULT '',
+    customer_id INTEGER,
+    reference_product_id INTEGER,
+    reference_note TEXT DEFAULT '',
+    category TEXT DEFAULT '',
+    karat TEXT DEFAULT '',
+    gram REAL DEFAULT 0,
+    stones TEXT DEFAULT '',
+    initials TEXT DEFAULT '',
+    size TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    image_path TEXT DEFAULT '',
+    currency TEXT DEFAULT 'EUR',
+    sell_price REAL DEFAULT 0,
+    delivered_invoice_id INTEGER,
+    delivered_at TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT ''
+  )`,
+
+  // Depozitat për një porosi (mund të jenë të shumta). Regjistrohen si arkëtim
+  // te Arka Ditore me datën e depozitës (jo datën e porosisë).
+  `CREATE TABLE IF NOT EXISTS porosi_deposits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    porosi_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT DEFAULT 'EUR',
+    method TEXT DEFAULT 'cash',
+    exchange_rate REAL DEFAULT 1,
+    notes TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (porosi_id) REFERENCES porosi(id) ON DELETE CASCADE
+  )`,
+
+  "CREATE INDEX IF NOT EXISTS idx_porosi_date ON porosi(date)",
+  "CREATE INDEX IF NOT EXISTS idx_porosi_status ON porosi(status)",
+  "CREATE INDEX IF NOT EXISTS idx_porosi_deposits_porosi ON porosi_deposits(porosi_id)",
+  "CREATE INDEX IF NOT EXISTS idx_porosi_deposits_date ON porosi_deposits(date)",
 ];
 
 async function initDB() {
