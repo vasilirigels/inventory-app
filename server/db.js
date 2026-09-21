@@ -505,6 +505,14 @@ const MIGRATIONS = [
   "ALTER TABLE purchase_invoices ADD COLUMN payment_method TEXT DEFAULT 'cash'",
   "ALTER TABLE purchase_invoices ADD COLUMN amount_paid REAL DEFAULT 0",
   "ALTER TABLE purchase_invoices ADD COLUMN amount_due REAL DEFAULT 0",
+  // Kosto transporti — shtohet te totali i faturës si linjë ekstra, pa TVSH,
+  // në të njëjtën monedhë me faturën. S'ndikon në kostot e artikujve.
+  "ALTER TABLE purchase_invoices ADD COLUMN transport_cost REAL DEFAULT 0",
+  // Kthime te furnitori — faturat me type='return' janë kthime parciale të një
+  // fature blerjeje ekzistuese; original_purchase_id lidhet me faturën origjinale.
+  "ALTER TABLE purchase_invoices ADD COLUMN type TEXT DEFAULT 'purchase'",
+  "ALTER TABLE purchase_invoices ADD COLUMN original_purchase_id INTEGER",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_original ON purchase_invoices(original_purchase_id)",
   "ALTER TABLE expense_entries ADD COLUMN currency TEXT DEFAULT 'LEK'",
   "ALTER TABLE expense_entries ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE expense_entries ADD COLUMN exchange_rate REAL DEFAULT 1",

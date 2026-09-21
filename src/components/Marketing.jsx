@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
 
@@ -734,17 +733,18 @@ export default function Marketing({ date }) {
   const [rateSource, setRateSource] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(null)
-  const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [fromDate, setFromDate] = useState(() => date)
+  const [toDate,   setToDate]   = useState(() => date)
 
-  const rangeActive = !!(dateRange.from || dateRange.to)
-  const showDateCol = rangeActive && dateRange.from !== dateRange.to
+  const rangeActive = fromDate !== date || toDate !== date
+  const showDateCol = fromDate !== toDate
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const entriesUrl = rangeActive
-        ? `/api/reports/marketing?from=${dateRange.from || '2000-01-01'}&to=${dateRange.to || date}`
-        : `/api/marketing-entries/${date}`
+      const entriesUrl = fromDate === toDate
+        ? `/api/marketing-entries/${fromDate}`
+        : `/api/reports/marketing?from=${fromDate}&to=${toDate}`
       const [cats, entries, ratesRes] = await Promise.all([
         fetch('/api/marketing-categories').then(r => r.json()),
         fetch(entriesUrl).then(r => r.json()),
@@ -769,7 +769,7 @@ export default function Marketing({ date }) {
     } finally {
       setLoading(false)
     }
-  }, [date, rangeActive, dateRange.from, dateRange.to])
+  }, [date, fromDate, toDate])
 
   useEffect(() => { load() }, [load])
 
@@ -832,11 +832,9 @@ export default function Marketing({ date }) {
       // Ruaj monedhën aktuale + datën për shtimin pasues.
       setDraft({ ...emptyDraft(savedDate), currency: cur, exchange_rate: isProduct ? '1' : String(n(draft.exchange_rate) || 1) })
       if (savedDate !== date) {
-        setDateRange(r => {
-          const from = r.from && r.from < savedDate ? r.from : savedDate
-          const to = r.to && r.to > savedDate ? r.to : (savedDate > date ? savedDate : date)
-          return { from, to }
-        })
+        // Zgjero periudhën për të përfshirë datën e sapo-ruajtur.
+        setFromDate(prev => (prev && prev < savedDate ? prev : savedDate))
+        setToDate(prev => (prev && prev > savedDate ? prev : (savedDate > date ? savedDate : date)))
       } else {
         load()
       }
@@ -973,8 +971,6 @@ export default function Marketing({ date }) {
   }, { by_currency: {}, total_eur: 0 })
 
   const totalsList = Object.entries(totals.by_currency).filter(([, v]) => Math.abs(v) > 0.005)
-
-  if (loading && rows.length === 0) return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
 
   return (
     <div className="space-y-4">
@@ -1229,18 +1225,42 @@ export default function Marketing({ date }) {
         </div>
       </div>
 
-      {/* Filtër Periudhe */}
-      <DateRangeFilter
-        from={dateRange.from}
-        to={dateRange.to}
-        onChange={setDateRange}
-        loading={loading}
-        emptyForAll
-        compact
-        hint={rangeActive
-          ? 'Shpenzimet e marketingut për periudhën e zgjedhur'
-          : `Vetëm data ${date} · zgjidh periudhë për historik më të gjerë`}
-      />
+      {/* Filtër Periudhe — i njëjtë me atë të Blerjeve */}
+      <div className="card flex flex-wrap items-end gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">📅</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
+        </div>
+        <div>
+          <label className="form-label">Nga data</label>
+          <input
+            type="date" value={fromDate}
+            max={toDate}
+            onChange={e => setFromDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        <div>
+          <label className="form-label">Deri më datë</label>
+          <input
+            type="date" value={toDate}
+            min={fromDate}
+            onChange={e => setToDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        {rangeActive && (
+          <button
+            onClick={() => { setFromDate(date); setToDate(date) }}
+            className="btn-secondary text-xs"
+          >Pastro filtrin</button>
+        )}
+        {loading && (
+          <span className="text-[11px] text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg border border-blue-200">
+            ⏳ Duke ngarkuar...
+          </span>
+        )}
+      </div>
 
       {/* Existing entries */}
       <div className="card p-0 overflow-hidden">

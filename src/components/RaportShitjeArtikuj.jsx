@@ -396,6 +396,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Materiali</th>
                     <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Mon.</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Gram</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Shitje</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritje %</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera pa TVSH</th>
@@ -437,6 +438,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                         <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                           {fmtQty(r.qty)} <span className="text-[10px] text-slate-400 dark:text-slate-500">{r.unit}</span>
                         </td>
+                        <td className="px-3 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200 font-semibold">
+                          {r.gram > 0 ? `${r.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                           {fmt(r.unit_price)}
                           {isForeign && <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">= {fmt(r.unit_price_lek)} LEK</div>}
@@ -475,6 +479,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                         <tr key={cur} className={`font-bold text-xs ${idx > 0 ? 'border-t border-emerald-200' : ''}`}>
                           <td colSpan={7} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL ({cur}):</td>
                           <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(t.qty)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200">
+                            {t.gram > 0 ? `${t.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
+                          </td>
                           <td></td>
                           <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
                             {t.discount > 0.005 ? `-${fmt(t.discount)}` : '—'}

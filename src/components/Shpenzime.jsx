@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
 
@@ -154,17 +153,18 @@ export default function Shpenzime({ date, onNavigate }) {
   const [rateSource, setRateSource] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(null)
-  const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [fromDate, setFromDate] = useState(() => date)
+  const [toDate,   setToDate]   = useState(() => date)
 
-  const rangeActive = !!(dateRange.from || dateRange.to)
-  const showDateCol = rangeActive && dateRange.from !== dateRange.to
+  const rangeActive = fromDate !== date || toDate !== date
+  const showDateCol = fromDate !== toDate
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const entriesUrl = rangeActive
-        ? `/api/reports/expenses?from=${dateRange.from || '2000-01-01'}&to=${dateRange.to || date}`
-        : `/api/expense-entries/${date}`
+      const entriesUrl = fromDate === toDate
+        ? `/api/expense-entries/${fromDate}`
+        : `/api/reports/expenses?from=${fromDate}&to=${toDate}`
       const [cats, entries, ratesRes] = await Promise.all([
         fetch('/api/expense-categories').then(r => r.json()),
         fetch(entriesUrl).then(r => r.json()),
@@ -189,7 +189,7 @@ export default function Shpenzime({ date, onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }, [date, rangeActive, dateRange.from, dateRange.to])
+  }, [date, fromDate, toDate])
 
   useEffect(() => {
     const t = setTimeout(() => { load() }, 400)
@@ -225,11 +225,9 @@ export default function Shpenzime({ date, onNavigate }) {
       const savedDate = draft.date
       setDraft({ ...emptyDraft(savedDate), currency: cur, exchange_rate: String(rate) })
       if (savedDate !== date) {
-        setDateRange(r => {
-          const from = r.from && r.from < savedDate ? r.from : savedDate
-          const to = r.to && r.to > savedDate ? r.to : (savedDate > date ? savedDate : date)
-          return { from, to }
-        })
+        // Zgjero periudhën për të përfshirë datën e sapo-ruajtur.
+        setFromDate(prev => (prev && prev < savedDate ? prev : savedDate))
+        setToDate(prev => (prev && prev > savedDate ? prev : (savedDate > date ? savedDate : date)))
       } else {
         load()
       }
@@ -308,9 +306,6 @@ export default function Shpenzime({ date, onNavigate }) {
   }, { by_currency: {}, total_lek: 0, total_eur: 0 })
 
   const totalsList = Object.entries(totals.by_currency).filter(([, v]) => Math.abs(v) > 0.005)
-
-  // ── Raport periodik
-  if (loading && rows.length === 0) return <div className="card p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
 
   return (
     <div className="space-y-4">
@@ -422,16 +417,42 @@ export default function Shpenzime({ date, onNavigate }) {
         </div>
       </div>
 
-      {/* Filtër Periudhe */}
-      <DateRangeFilter
-        from={dateRange.from}
-        to={dateRange.to}
-        onChange={setDateRange}
-        compact
-        hint={rangeActive
-          ? 'Shpenzimet për periudhën e zgjedhur'
-          : `Vetëm data ${date} · zgjidh periudhë ose kliko një preset për historik më të gjerë`}
-      />
+      {/* Filtër Periudhe — i njëjtë me atë të Blerjeve */}
+      <div className="card flex flex-wrap items-end gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">📅</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
+        </div>
+        <div>
+          <label className="form-label">Nga data</label>
+          <input
+            type="date" value={fromDate}
+            max={toDate}
+            onChange={e => setFromDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        <div>
+          <label className="form-label">Deri më datë</label>
+          <input
+            type="date" value={toDate}
+            min={fromDate}
+            onChange={e => setToDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        {rangeActive && (
+          <button
+            onClick={() => { setFromDate(date); setToDate(date) }}
+            className="btn-secondary text-xs"
+          >Pastro filtrin</button>
+        )}
+        {loading && (
+          <span className="text-[11px] text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg border border-blue-200">
+            ⏳ Duke ngarkuar...
+          </span>
+        )}
+      </div>
 
       {/* Existing entries */}
       <div className="card p-0 overflow-hidden">
@@ -441,7 +462,7 @@ export default function Shpenzime({ date, onNavigate }) {
               Shpenzimet e Regjistruara
               {rangeActive && (
                 <span className="ml-2 text-xs font-normal text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded">
-                  {fmtDate(dateRange.from || '2000-01-01')} → {fmtDate(dateRange.to || date)}
+                  {fmtDate(fromDate)} → {fmtDate(toDate)}
                 </span>
               )}
             </h3>
@@ -455,7 +476,7 @@ export default function Shpenzime({ date, onNavigate }) {
             {rangeActive && (
               <button
                 type="button"
-                onClick={() => setDateRange({ from: '', to: '' })}
+                onClick={() => { setFromDate(date); setToDate(date) }}
                 className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-2 py-1 rounded"
                 title="Hiq filtrin dhe kthehu te data aktuale"
               >✕ Pastro filtrin</button>
@@ -487,7 +508,7 @@ export default function Shpenzime({ date, onNavigate }) {
                   <td colSpan={showDateCol ? 8 : 7} className="p-6 text-center text-slate-400 dark:text-slate-500 text-sm italic">
                     {rows.length === 0
                       ? (rangeActive
-                        ? `Asnjë shpenzim në periudhën ${fmtDate(dateRange.from || '2000-01-01')} → ${fmtDate(dateRange.to || date)}. Provo presetin "Ky vit" ose "Të gjitha" për historik më të gjerë.`
+                        ? `Asnjë shpenzim në periudhën ${fmtDate(fromDate)} → ${fmtDate(toDate)}.`
                         : 'Asnjë shpenzim për këtë datë. Shto rreshtin e parë më lart.')
                       : `Asnjë shpenzim në ${filterCur}. Ndrysho filtrin për të parë të tjerët.`}
                   </td>

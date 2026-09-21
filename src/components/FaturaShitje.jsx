@@ -471,6 +471,11 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
   // Kur user e ndryshon, dërgohet si refund_amount te backend-i.
   const [refundOverride, setRefundOverride] = useState('')
   const [refundTouched, setRefundTouched] = useState(false)
+  // Metoda e rimbursimit — default cash për borxh/mikse, ose ai i faturës.
+  // User mund ta ndryshojë (p.sh. pagesë me bankë, rimbursim me cash).
+  const parentPm = (invoice.payment_method || 'cash').toLowerCase()
+  const defaultRefundMethod = ['cash', 'bank', 'pos'].includes(parentPm) ? parentPm : 'cash'
+  const [refundMethod, setRefundMethod] = useState(defaultRefundMethod)
 
   useEffect(() => {
     let cancel = false
@@ -546,6 +551,7 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
     try {
       const payload = {
         items: selected.map(x => ({ item_id: x.it.id, qty: x.retQty })),
+        refund_method: refundMethod,
         ...(refundTouched ? { refund_amount: effectiveRefund } : {}),
       }
       const res = await fetch(`/api/invoices/${invoice.id}/credit-note`, {
@@ -632,6 +638,33 @@ function PartialReturnModal({ invoice, onClose, onCreated }) {
           )}
         </div>
         <div className="modal-footer flex-col items-stretch gap-3">
+          <div>
+            <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block mb-1">
+              Metoda e Rimbursimit
+              <span className="ml-1 text-[9px] text-slate-400 normal-case">(fatura origjinale: {parentPm})</span>
+            </label>
+            <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              {[
+                { v: 'cash', label: '💵 Cash' },
+                { v: 'bank', label: '🏦 Bankë' },
+                { v: 'pos',  label: '💳 POS' },
+              ].map(opt => (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => setRefundMethod(opt.v)}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${refundMethod === opt.v
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+              Reflekton te xhiro ditore me shenjë negative sipas metodës së zgjedhur.
+            </p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali i artikujve ({currency})</label>
@@ -1131,7 +1164,14 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                     {isCancelled && <span className="ml-1.5 badge bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px]">ANULUAR</span>}
                     {isCredit && <span className="ml-1.5 badge bg-red-100 text-red-700 dark:text-red-300 text-[9px]">KREDITORE</span>}
                   </td>
-                  <td className="px-2 py-2 text-xs text-slate-600 dark:text-slate-300 tabular-nums whitespace-nowrap">{inv.date || '—'}</td>
+                  <td className="px-2 py-2 text-[16px] text-slate-600 dark:text-slate-300 tabular-nums whitespace-nowrap">
+                    <div>{inv.date || '—'}</div>
+                    {inv.created_at && (
+                      <div className="text-[16px] text-slate-400 dark:text-slate-500">
+                        {new Date(String(inv.created_at).replace(' ', 'T') + 'Z').toLocaleTimeString('sq-AL', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-2 py-2 text-slate-800 dark:text-slate-100">{inv.customer_name || <span className="text-slate-400 dark:text-slate-500 italic">— pa klient —</span>}</td>
                   <td className="px-2 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{inv.customer_nipt || '—'}</td>
                   <td className="px-2 py-2 text-center text-xs">
@@ -1644,6 +1684,13 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
     const effectivePrice = onPromo
       ? basePrice * (1 - n(p.promo_discount_pct) / 100)
       : basePrice
+    // Fusha "Has ne shitje" duhet të shfaqë Cmim Shitje Has = Cmim Blerje Has
+    // × Shumëzues (siç është përcaktuar te faqja Produkte). Për të mos dyfishuar
+    // shumëzuesin kur unit_price rillogaritet me formulën `has × mul × sell_rate`,
+    // ruajmë multiplier=1 dhe të gjithë efektin e shumëzuesit të kalkuluar te has_gram.
+    const buyHas    = n(p.has_gram)
+    const mult      = n(p.multiplier)
+    const sellHas   = buyHas > 0 && mult > 0 ? +(buyHas * mult).toFixed(4) : buyHas
     setItem(idx, {
       product_id: p.id,
       serial_no: p.serial_no || '',
@@ -1654,12 +1701,12 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
       vat_rate: p.vat_rate != null ? p.vat_rate : 0,
       on_promotion: onPromo ? 1 : 0,
       promo_discount_pct: onPromo ? n(p.promo_discount_pct) : 0,
-      // Kursi i Shitjes fillestar — merret nga produkti (ruhet me blerjen e
-      // fundit). User-i mund ta ndryshojë manualisht dhe unit_price rillogaritet
-      // (proporcionalisht ose me formulë flori nëse has_gram+multiplier janë>0).
-      sell_rate: n(p.sell_rate) > 0 ? n(p.sell_rate) : (n(p.has_rate) > 0 ? n(p.has_rate) : 0),
-      has_gram: n(p.has_gram) > 0 ? n(p.has_gram) : 0,
-      multiplier: n(p.multiplier) > 0 ? n(p.multiplier) : 0,
+      // Kursi i Shitjes — vendoset manualisht nga user-i (jo auto). Kur user-i
+      // e vendos, unit_price rillogaritet (proporcionalisht ose me formulë flori
+      // nëse has_gram+multiplier janë>0).
+      sell_rate: 0,
+      has_gram: sellHas > 0 ? sellHas : 0,
+      multiplier: sellHas > 0 ? 1 : 0,
     })
   }
 
@@ -2078,7 +2125,7 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                 <th className="px-2 py-2 text-right font-semibold w-16">Sasia</th>
                 <th className="px-2 py-2 text-right font-semibold w-20">Gramatura</th>
                 <th className="px-2 py-2 text-right font-semibold w-20 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" title="Pesha e florit të pastër (gram HAS) — mbushet auto nga produkti">Has ne shitje</th>
-                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes për këtë rresht — kur ndryshohet, çmimi rillogaritet (formula flori nëse Has+Shumëzues>0, ndryshe proporcionalisht)">Kursi Shitje</th>
+                <th className="px-2 py-2 text-right font-semibold w-20 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes për këtë rresht — vendoset manualisht nga user-i (jo auto). Kur ndryshohet, çmimi rillogaritet (formula flori nëse Has+Shumëzues>0, ndryshe proporcionalisht)">Kursi Shitje</th>
                 <th className="px-2 py-2 text-right font-semibold w-24">Zbritje €</th>
                 <th className="px-2 py-2 text-right font-semibold w-16">Zbritje %</th>
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>

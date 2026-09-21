@@ -184,9 +184,9 @@ function emptyItem() {
     // Kodi i floririt (p.sh. 585, 750) — përdoret si kodi/1000 në formulën:
     // has_gram = (kodi/1000) × gram. Shumëzuesi për çmim shitjeje.
     kodi: 0, multiplier: 0,
-    // Kursi i shitjes për këtë rresht — përdoret në formulën flori për të
-    // llogaritur `sell_price` të pavarur nga kursi i blerjes (`has_rate`).
-    // Default = has_rate kur rreshti krijohet; user-i mund ta ndryshojë manualisht.
+    // Kursi i shitjes për këtë rresht — vendoset manualisht nga user-i (jo auto).
+    // Përdoret në formulën flori për të llogaritur `sell_price` të pavarur nga
+    // kursi i blerjes (`has_rate`). Fallback te has_rate kur sell_rate <= 0.
     sell_rate: 0,
     // Etiketa valute për kursin e blerjes/shitjes — marker (EUR/USD) që user-i
     // të dijë në ç'valutë ka futur numrin. Formula përdor vlerën si-është.
@@ -458,9 +458,10 @@ function ProductPickerCell({ value, onPick, onNameChange }) {
 }
 
 // ── List view: all purchase invoices for the day ────────────────────────────
-function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, materialFilter,
+function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn, onDeleteReturn, refreshKey, title, materialFilter,
                        fromDate, setFromDate, toDate, setToDate }) {
   const [list, setList] = useState([])
+  const [returns, setReturns] = useState([])
   const [loading, setLoading] = useState(true)
   const [usdByDate, setUsdByDate] = useState({})
   // fromDate/toDate janë ngritur te parent-i (FaturaBlerje) që të mbahen kur
@@ -479,6 +480,19 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
       .then(d => { setList(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => { setList([]); setLoading(false) })
   }, [fromDate, toDate, refreshKey, materialFilter])
+
+  // Ngarko kthimet për të njëjtën periudhë — shfaqen si sekcion i veçantë poshtë
+  // listës kryesore të blerjeve.
+  useEffect(() => {
+    if (!fromDate || !toDate) return
+    const url = fromDate === toDate
+      ? `/api/purchase-returns/by-date/${fromDate}`
+      : `/api/purchase-returns/by-range?from=${fromDate}&to=${toDate}`
+    fetch(url)
+      .then(r => r.json())
+      .then(d => setReturns(Array.isArray(d) ? d : []))
+      .catch(() => setReturns([]))
+  }, [fromDate, toDate, refreshKey])
 
   // Convert per-invoice LEK subtotals into USD: need USD rate for each invoice's date.
   useEffect(() => {
@@ -692,6 +706,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1.5">
                       <button onClick={() => onOpen(inv.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
+                      <button onClick={() => onReturn(inv.id, inv.invoice_no)} className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 text-amber-700 text-xs font-medium" title="Kthe artikuj te furnitori">↩ Kthe</button>
                       <button onClick={() => onDelete(inv.id, inv.invoice_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
                     </div>
                   </td>
@@ -746,6 +761,384 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, refreshKey, title, mat
           </div>
         )}
       </div>
+
+      {returns.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">↩</span>
+              <span className="text-sm font-bold text-amber-800 dark:text-amber-200 uppercase tracking-wide">
+                Kthime te Furnitorët
+              </span>
+              <span className="text-xs text-amber-700 dark:text-amber-300">
+                — {returns.length} {returns.length === 1 ? 'kthim' : 'kthime'} për periudhën
+              </span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Kthimi</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Faturë origjinale</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitori</th>
+                  <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Mënyra</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Cash-back</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Ul Borxhin</th>
+                  <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
+                </tr>
+              </thead>
+              <tbody>
+                {returns.map(r => {
+                  const total = n(r.total_with_vat)
+                  const paid  = n(r.amount_paid)
+                  const debt  = Math.max(0, total - paid)
+                  const pmBadge = r.payment_method === 'cash'
+                    ? <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
+                    : <span className="badge bg-slate-100 text-slate-700 dark:text-slate-300">📉 Ul borxhin</span>
+                  return (
+                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                      <td className="px-4 py-2 font-mono text-xs text-amber-700 dark:text-amber-300 font-semibold">{r.invoice_no}</td>
+                      <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300 tabular-nums whitespace-nowrap">{r.date || '—'}</td>
+                      <td className="px-4 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{r.original_invoice_no || '—'}</td>
+                      <td className="px-4 py-2 text-xs text-slate-700 dark:text-slate-200">{r.supplier_name || <span className="text-slate-400 italic">—</span>}</td>
+                      <td className="px-4 py-2 text-center">{pmBadge}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-bold text-slate-900 dark:text-white">{fmt(total)}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{paid > 0.005 ? fmt(paid) : '—'}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{debt > 0.005 ? fmt(debt) : '—'}</td>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => onDeleteReturn(r.id, r.invoice_no)}
+                            className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
+                            title="Zhbën kthimin — stoku dhe borxhi rikthehen"
+                          >Zhbën</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Purchase Return Editor ─────────────────────────────────────────────────
+// Formulari për të krijuar një faturë kthimi për një blerje ekzistuese. Merr
+// rreshtat e faturës origjinale me sasinë e mbetur për kthim, lejon user-in
+// të vendosë sasitë për çdo produkt, dhe krijon një fature KTH-YYYY-NNNNN.
+function PurchaseReturnEditor({ originalInvoiceId, onClose, onSaved }) {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
+  const [original, setOriginal] = useState(null)
+  const [items, setItems]     = useState([])
+  const [returnDate, setReturnDate] = useState(new Date().toISOString().slice(0, 10))
+  const [notes, setNotes]     = useState('')
+
+  useEffect(() => {
+    let cancel = false
+    async function load() {
+      try {
+        const res = await fetch(`/api/purchase-invoices/${originalInvoiceId}/returnable`).then(r => r.json())
+        if (cancel) return
+        if (res.error) { setError(res.error); setLoading(false); return }
+        setOriginal(res.original || null)
+        // Filtrim vetëm rreshtat me sasi të mbetur për kthim; sasia default = 0.
+        const rows = (res.items || [])
+          .filter(it => n(it.qty_remaining) > 0.0001)
+          .map(it => ({ ...it, return_qty: '' }))
+        setItems(rows)
+      } catch (err) {
+        setError(err.message || 'Gabim gjatë ngarkimit')
+      } finally { if (!cancel) setLoading(false) }
+    }
+    load()
+    return () => { cancel = true }
+  }, [originalInvoiceId])
+
+  const setItemQty = (idx, val) => {
+    setItems(prev => prev.map((it, i) => {
+      if (i !== idx) return it
+      // Kufizim: max = sasia e mbetur për kthim.
+      const num = parseFloat(String(val).replace(',', '.'))
+      if (!isFinite(num) || num < 0) return { ...it, return_qty: '' }
+      const max = n(it.qty_remaining)
+      const clamped = num > max ? max : num
+      return { ...it, return_qty: String(clamped) }
+    }))
+  }
+
+  const setAllToMax = () => {
+    setItems(prev => prev.map(it => ({ ...it, return_qty: String(n(it.qty_remaining)) })))
+  }
+  const clearAll = () => {
+    setItems(prev => prev.map(it => ({ ...it, return_qty: '' })))
+  }
+
+  // Total i kthimit — përllogaritja e njejtë me computePurchaseLineTotals (server-side).
+  const lineTotals = items.map(it => {
+    const qty  = n(it.return_qty)
+    const price = n(it.purchase_price_no_vat) || n(it.cost_price)
+    const disc  = n(it.discount_percent)
+    const vat   = n(it.vat_rate)
+    const gross = qty * price
+    const sub   = gross * (1 - disc / 100)
+    const vatAmt = sub * (vat / 100)
+    const total = sub + vatAmt
+    return { qty, sub: +sub.toFixed(2), vatAmt: +vatAmt.toFixed(2), total: +total.toFixed(2) }
+  })
+  const totalSub = +lineTotals.reduce((s, l) => s + l.sub, 0).toFixed(2)
+  const totalVat = +lineTotals.reduce((s, l) => s + l.vatAmt, 0).toFixed(2)
+  const totalGross = +lineTotals.reduce((s, l) => s + l.total, 0).toFixed(2)
+  const totalQty = lineTotals.reduce((s, l) => s + l.qty, 0)
+
+  const origDue = original ? Math.max(0, n(original.amount_due)) : 0
+  const debtReduction = Math.min(totalGross, origDue)
+  const cashBack = +(totalGross - debtReduction).toFixed(2)
+
+  const save = async () => {
+    setError('')
+    const toSend = items
+      .map((it, i) => ({ purchase_item_id: it.purchase_item_id, qty: n(it.return_qty) }))
+      .filter(it => it.qty > 0)
+    if (toSend.length === 0) {
+      setError('Vendos sasinë për të paktën një produkt.')
+      return
+    }
+    if (!(await showConfirm(
+      `Do të krijohet një faturë kthimi për ${toSend.length} rresht(a), me total ${fmt(totalGross)} ${original?.currency || ''}. Vazhdo?`,
+      { title: 'Konfirmo kthimin', confirmLabel: 'Ruaj kthimin' }
+    ))) return
+
+    setSaving(true)
+    try {
+      const res = await fetch('/api/purchase-returns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          original_purchase_id: originalInvoiceId,
+          date: returnDate,
+          items: toSend,
+          notes,
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error || 'Gabim gjatë ruajtjes së kthimit')
+        setSaving(false)
+        return
+      }
+      onSaved?.(body)
+    } catch (err) {
+      setError(err.message || 'Gabim rrjeti')
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-slate-500 dark:text-slate-400">Duke ngarkuar...</div>
+    )
+  }
+  if (error && !original) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Kthim te furnitori</h2>
+          <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
+        </div>
+        <div className="card p-8 text-center text-rose-600">{error}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
+            ↩ Kthim te Furnitori
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Krijim i një fature kthimi për <span className="font-mono font-semibold">{original?.invoice_no}</span>
+            {original?.supplier_name && <> — {original.supplier_name}</>}
+          </p>
+        </div>
+        <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
+      </div>
+
+      <div className="card grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className="form-label">Data e Kthimit</label>
+          <input type="date" value={returnDate} onChange={e => setReturnDate(e.target.value)} className="input-field" />
+        </div>
+        <div>
+          <label className="form-label">Faturë Origjinale</label>
+          <div className="input-field bg-slate-100 dark:bg-slate-800 font-mono text-sm">{original?.invoice_no}</div>
+        </div>
+        <div>
+          <label className="form-label">Furnitori</label>
+          <div className="input-field bg-slate-100 dark:bg-slate-800 truncate">{original?.supplier_name || '—'}</div>
+        </div>
+        <div>
+          <label className="form-label">Monedha</label>
+          <div className="input-field bg-slate-100 dark:bg-slate-800 font-semibold">{original?.currency || 'LEK'}</div>
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="card p-8 text-center">
+          <div className="text-5xl mb-3">✓</div>
+          <p className="text-slate-600 dark:text-slate-300 mb-2 font-semibold">Nuk ka artikuj për t'u kthyer</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Të gjithë rreshtat e kësaj fature janë kthyer plotësisht ose fatura është bosh.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button type="button" onClick={setAllToMax} className="btn-secondary text-xs">
+              📥 Zgjidh Të Gjitha (sasi max)
+            </button>
+            <button type="button" onClick={clearAll} className="btn-secondary text-xs">
+              🗙 Pastro të gjitha
+            </button>
+            <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
+              {items.length} rreshta për t'u kthyer
+            </span>
+          </div>
+
+          <div className="card p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Produkti</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Blerë</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kthyer më parë</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase bg-amber-50/40 dark:bg-amber-900/10">Mbetet</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase bg-blue-50/40 dark:bg-blue-900/10">Sasia për Kthim</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çmimi</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVSH %</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali Rreshti</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, idx) => {
+                    const lt = lineTotals[idx]
+                    return (
+                      <tr key={it.purchase_item_id} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="px-3 py-2">
+                          <div className="text-sm text-slate-800 dark:text-slate-100">{it.name || <span className="text-slate-400 italic">— pa emër —</span>}</div>
+                          {(it.barcode || it.serial_no) && (
+                            <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                              {it.barcode && <span>BC: {it.barcode}</span>}
+                              {it.barcode && it.serial_no && <span> · </span>}
+                              {it.serial_no && <span>SN: {it.serial_no}</span>}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{n(it.qty_purchased)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">
+                          {n(it.qty_returned_so_far) > 0 ? n(it.qty_returned_so_far) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-700 dark:text-amber-300 bg-amber-50/40 dark:bg-amber-900/10">
+                          {n(it.qty_remaining)}
+                        </td>
+                        <td className="px-3 py-2 bg-blue-50/40 dark:bg-blue-900/10">
+                          <input
+                            type="number" step="any" min="0" max={n(it.qty_remaining)}
+                            value={it.return_qty}
+                            onChange={e => setItemQty(idx, e.target.value)}
+                            placeholder="0"
+                            className="input-field text-right tabular-nums w-24 mx-auto"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                          {fmt(n(it.purchase_price_no_vat) || n(it.cost_price))}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400 text-xs">
+                          {n(it.vat_rate)}%
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
+                          {lt.total > 0.005 ? fmt(lt.total) : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-300 dark:border-slate-700">
+                  <tr>
+                    <td colSpan={4} className="px-3 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">Totali i Kthimit</td>
+                    <td className="px-3 py-3 text-center tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{totalQty}</td>
+                    <td colSpan={2} className="px-3 py-3 text-right tabular-nums font-bold text-slate-600 dark:text-slate-300">
+                      Pa TVSH: {fmt(totalSub)} · TVSH: {fmt(totalVat)}
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums font-extrabold text-lg text-blue-700 dark:text-blue-300">{fmt(totalGross)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          <div className="card space-y-3">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 uppercase tracking-wide">
+              Fluksi i Parave (llogaritur automatikisht)
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="p-3 rounded-lg bg-slate-100 dark:bg-slate-800/60">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Borxhi aktual i faturës origjinale</div>
+                <div className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmt(origDue)}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-slate-100 dark:bg-slate-800/60">
+                <div className="text-xs text-slate-500 dark:text-slate-400">📉 Ul borxhin me</div>
+                <div className={`text-lg font-bold tabular-nums ${debtReduction > 0.005 ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'}`}>
+                  {fmt(debtReduction)}
+                </div>
+              </div>
+              <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                <div className="text-xs text-emerald-700 dark:text-emerald-300">💵 Hyn në Arka Ditore (cash-back)</div>
+                <div className={`text-lg font-bold tabular-nums ${cashBack > 0.005 ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400 dark:text-slate-500'}`}>
+                  {fmt(cashBack)}
+                </div>
+              </div>
+            </div>
+            <div>
+              <label className="form-label">Shënime (opsionale)</label>
+              <textarea
+                value={notes} onChange={e => setNotes(e.target.value)}
+                placeholder={`Kthim për faturën ${original?.invoice_no}`}
+                rows={2}
+                className="input-field"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="card bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onClose} className="btn-secondary" disabled={saving}>Anulo</button>
+            <button
+              onClick={save}
+              className="btn-primary"
+              disabled={saving || totalGross <= 0.005}
+            >
+              {saving ? 'Duke ruajtur...' : 'Ruaj Kthimin'}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1054,6 +1447,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // method (cash|bank), monedhë, shumë dhe kurs drejt LEK.
   const [paymentSplits, setPaymentSplits] = useState([])
   const [notes, setNotes]       = useState('')
+  const [transportCost, setTransportCost] = useState('')
   // Flag "Dhuratë" — kur aktivizohet për Blerje Artikuj të Tjerë, të gjithë
   // produktet e faturës markohen te products.is_gift = 1 që të shfaqen si
   // mundësi te "+ Shto Dhuratë" në Fatura Shitje.
@@ -1069,6 +1463,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const [showImport, setShowImport] = useState(false)
   const [bulkPromoPct, setBulkPromoPct] = useState('20')
   const [bulkMultiplier, setBulkMultiplier] = useState('')
+  const [bulkSellRate, setBulkSellRate]     = useState('')
   const [materialCategories, setMaterialCategories] = useState([])
   // Kursi aktual EUR / gram HAS (nga /api/gold-spot-price). Ruhet globalisht
   // për të gjithë rreshtat e faturës — çdo rresht mund ta shohë por kursi
@@ -1102,22 +1497,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   }
   useEffect(() => { fetchHasRate() }, [])
 
-  // Auto-mbush has_rate + sell_rate te çdo rresht që ende s'ka kurs të vetin,
-  // kur hasRate vjen nga API-ja. Nuk mbishkruajmë kursin që erdhi tashmë me
-  // faturën ekzistuese. Fire edhe kur items ndryshojnë (p.sh. fatura ekzistuese
-  // ngarkohet pas hasRate). Për Blerje Flori NUK auto-mbushim has_rate — user-i
-  // e vendos vetë Kursin e Blerjes.
+  // Auto-mbush has_rate te çdo rresht që ende s'ka kurs të vetin, kur hasRate
+  // vjen nga API-ja. Nuk mbishkruajmë kursin që erdhi tashmë me faturën
+  // ekzistuese. `sell_rate` (Kursi Shitje) NUK mbushet automatikisht — user-i
+  // e vendos vetë manualisht. Për Blerje Flori edhe has_rate vendoset manualisht.
   useEffect(() => {
     if (!hasRate) return
-    const skipHasRate = forcedCategory === 'flori'
+    if (forcedCategory === 'flori') return
     setItems(prev => {
-      if (!prev.some(it => (!skipHasRate && !(n(it.has_rate) > 0)) || !(n(it.sell_rate) > 0))) return prev
-      return prev.map(it => {
-        const patch = {}
-        if (!skipHasRate && !(n(it.has_rate) > 0)) patch.has_rate = hasRate
-        if (!(n(it.sell_rate) > 0)) patch.sell_rate = hasRate
-        return Object.keys(patch).length ? { ...it, ...patch } : it
-      })
+      if (!prev.some(it => !(n(it.has_rate) > 0))) return prev
+      return prev.map(it => (n(it.has_rate) > 0 ? it : { ...it, has_rate: hasRate }))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRate, items.length])
@@ -1188,11 +1577,23 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             }
           }
           setNotes(inv.notes || '')
+          setTransportCost(inv.transport_cost != null && n(inv.transport_cost) > 0 ? String(inv.transport_cost) : '')
           setIsGift(!!inv.is_gift)
           const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
           const mats = invItems.map(it => it.material).filter(Boolean)
           setCategory(forcedCategory || (mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : ''))
           setItems(invItems)
+          // Sinkronizo bulkSellRate nga rreshtat: nëse të gjithë rreshtat me
+          // has_gram>0 kanë të njëjtin sell_rate, tregoje atë te inputi bulk
+          // — kështu user-i sheh kursin që ka aplikuar në ruajtjen e mëparshme.
+          if (forcedCategory === 'flori') {
+            const eligible = invItems.filter(it => n(it.has_gram) > 0)
+            if (eligible.length > 0) {
+              const first = n(eligible[0].sell_rate)
+              const allSame = first > 0 && eligible.every(it => Math.abs(n(it.sell_rate) - first) < 1e-9)
+              if (allSame) setBulkSellRate(String(first))
+            }
+          }
         } else {
           setInvoiceDate(date)
           const r = await fetch(`/api/purchase-invoices/next-no?date=${date}`).then(r => r.json())
@@ -1237,8 +1638,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const addItem = () => setItems(prev => [...prev, {
     ...emptyItem(),
     // Për Blerje Flori, Kursi Blerje (has_rate) vendoset manualisht.
+    // Kursi Shitje (sell_rate) vendoset gjithmonë manualisht nga user-i.
     has_rate: forcedCategory === 'flori' ? 0 : (hasRate || 0),
-    sell_rate: hasRate || 0,
   }])
 
   // Blerje Diamant: (1) migro çdo discount_percent të vjetër → sell_discount_percent
@@ -1532,11 +1933,14 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   }
 
   const lineTotals = items.map(computeLine)
+  const transportCostN = n(transportCost)
   const totals = lineTotals.reduce((acc, l) => ({
     sub: acc.sub + l.subtotal_no_vat,
     vat: acc.vat + l.vat_amount,
     tot: acc.tot + l.total_with_vat,
   }), { sub: 0, vat: 0, tot: 0 })
+  // Kosto transporti shtohet te totali final si linjë ekstra (pa TVSH).
+  totals.tot = +(totals.tot + transportCostN).toFixed(2)
 
   const save = async () => {
     if (saving) return
@@ -1582,6 +1986,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         // për backward compat me çdo konsumator të vjetër që lexon nga payload-i.
         amount_paid: 0,
         notes,
+        transport_cost: transportCostN || 0,
         is_gift: isGift ? 1 : 0,
         items: valid,
       }
@@ -1791,7 +2196,16 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             )
           })()}
         </div>
-        <div className="col-span-2">
+        <div>
+          <label className="form-label" title="Kosto transporti (opsionale) — shtohet te totali i faturës në të njëjtën monedhë, pa TVSH. Nuk ndikon në kostot e artikujve.">
+            Kosto Transporti
+            <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">({currency})</span>
+          </label>
+          <MoneyInput value={transportCost}
+            onChange={v => setTransportCost(v)}
+            className="input-field text-right" />
+        </div>
+        <div>
           <label className="form-label">Shënime</label>
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             className="input-field" placeholder="opsional" />
@@ -1865,7 +2279,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                   </>
                 )}
                 {forcedCategory !== 'diamant' && (
-                  <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS që përdoret për të llogaritur Çmimin e Shitjes">Kursi Shitje</th>
+                  <th className="px-2 py-2 text-right font-semibold w-28 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" title="Kursi i Shitjes — EUR / gram HAS; vendoset manualisht nga user-i (jo auto)">Kursi Shitje</th>
                 )}
                 <th className="px-2 py-2 text-right font-semibold w-14">TVSH %</th>
                 {forcedCategory === 'diamant' && (
@@ -2125,6 +2539,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 <td colSpan={forcedCategory === 'flori' ? 17 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
+                  {transportCostN > 0 && (
+                    <>{' · '}Transporti: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(transportCostN)}</span></>
+                  )}
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
                 </td>
                 <td></td>
@@ -2205,6 +2622,40 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 title="Vendos Çm. Shitje = Çm. Blerje × shumëzues për të gjithë rreshtat"
               >⚡ Apliko ×</button>
             </div>
+            {forcedCategory === 'flori' && (
+              <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-700">
+                <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold uppercase">Kursi Shitje:</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={bulkSellRate}
+                  onChange={e => setBulkSellRate(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.nextElementSibling?.click() } }}
+                  className="input-field-sm text-center w-24 font-bold text-emerald-700 dark:text-emerald-300"
+                  placeholder="EUR/gr HAS"
+                  title="Vendos kursin e shitjes (EUR / gram HAS) që do aplikohet për të gjithë rreshtat me Has Gram > 0"
+                />
+                <button
+                  onClick={async () => {
+                    const r = parseFloat(String(bulkSellRate).replace(',', '.'))
+                    if (!r || r <= 0) { alert('Vendos një kurs shitje > 0.'); return }
+                    const eligible = items.filter(it => n(it.has_gram) > 0).length
+                    if (eligible === 0) { alert('Asnjë rresht me Has Gram > 0.'); return }
+                    if (!(await showConfirm(`Vendos Kursi Shitje = ${r} për ${eligible} rreshta?`, {
+                      title: 'Apliko kursin e shitjes', confirmLabel: 'Apliko',
+                    }))) return
+                    // Vendos sell_rate për çdo rresht flori (has_gram > 0).
+                    // Çmimi i shitjes rillogaritet auto nga useEffect-i i formulës
+                    // flori: sell_price = has_gram × multiplier × sell_rate × (1+TVSH%).
+                    setItems(prev => prev.map(it =>
+                      n(it.has_gram) > 0 ? { ...it, sell_rate: r } : it
+                    ))
+                  }}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-2 py-1.5 rounded-lg"
+                  title="Vendos Kursi Shitje për të gjithë rreshtat me Has Gram > 0"
+                >⚡ Apliko kursin</button>
+              </div>
+            )}
             <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-700">
               <span className="text-[10px] text-rose-700 font-semibold uppercase">Promo Bulk:</span>
               <input
@@ -2292,6 +2743,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
 export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title, forcedCategory }) {
   const [mode, setMode] = useState('list')
   const [editingId, setEditingId] = useState(null)
+  const [returningId, setReturningId] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   // Range i kërkimit ngrihet këtu (jo brenda PurchaseList) që të mbahet kur
   // user-i hap një faturë për ta modifikuar dhe kthehet mbrapa. Lazy init:
@@ -2311,8 +2763,9 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title
 
   const openInvoice = (id) => { setEditingId(id); setMode('edit') }
   const createNew   = ()   => { setEditingId(null); setMode('edit') }
-  const backToList  = ()   => { setEditingId(null); setMode('list') }
+  const backToList  = ()   => { setEditingId(null); setReturningId(null); setMode('list') }
   const onSaved     = ()   => { setRefreshKey(k => k + 1); backToList() }
+  const openReturn  = (origId) => { setReturningId(origId); setMode('return') }
 
   const deleteInvoice = async (id, no) => {
     if (!(await showConfirm(`Fshi faturën e blerjes ${no}? Stoku do të zbritet.`, {
@@ -2322,8 +2775,20 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title
     setRefreshKey(k => k + 1)
   }
 
+  const deleteReturn = async (id, no) => {
+    if (!(await showConfirm(
+      `Zhbën kthimin ${no}? Stoku do të rihyjë në inventar dhe borxhi te furnitori do të rikthehet.`,
+      { title: 'Zhbën kthimin', confirmLabel: 'Zhbën', danger: true }
+    ))) return
+    await fetch(`/api/purchase-returns/${id}`, { method: 'DELETE' })
+    setRefreshKey(k => k + 1)
+  }
+
   if (mode === 'edit') {
     return <PurchaseEditor date={date} invoiceId={editingId} onClose={backToList} onSaved={onSaved} title={title} forcedCategory={forcedCategory} />
+  }
+  if (mode === 'return') {
+    return <PurchaseReturnEditor originalInvoiceId={returningId} onClose={backToList} onSaved={onSaved} />
   }
   return (
     <PurchaseList
@@ -2331,6 +2796,8 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title
       onOpen={openInvoice}
       onCreate={createNew}
       onDelete={deleteInvoice}
+      onReturn={openReturn}
+      onDeleteReturn={deleteReturn}
       refreshKey={refreshKey}
       title={title}
       materialFilter={forcedCategory}
