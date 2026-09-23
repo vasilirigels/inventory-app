@@ -45,7 +45,11 @@ export default function MoneyInput({ value, onChange, allowNegative = false, cla
   }
 
   const displayed = digitsToDisplay(digits)
-  const showValue = isNegative && parseFloat(displayed) !== 0 ? `-${displayed}` : displayed
+  // Kur allowNegative dhe user pat shtypur "-", mbaje "-" të dukshëm gjithmonë
+  // (edhe kur digits janë bosh) që të mos humbet gjendja negative kur user shtyp
+  // shifra shtesë — përndryshe minusi zhduket nga input string dhe /-/.test
+  // dështon në keystroke-un pasues.
+  const showValue = isNegative ? `-${displayed}` : displayed
 
   return (
     <input
