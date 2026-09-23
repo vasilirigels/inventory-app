@@ -471,12 +471,10 @@ function ManageEventsModal({ date, onClose, onChanged }) {
   useEffect(() => { load() }, [date])
 
   const doDelete = async (kind, id, label) => {
-    const ok = await showConfirm({
-      title: 'Fshi këtë veprim?',
-      message: `${label}\n\nKy veprim është i pakthyeshëm. Bilanci i kasafortës do të rikllogaritet automatikisht.`,
-      confirmText: 'Po, fshi',
-      cancelText: 'Anulo',
-    })
+    const ok = await showConfirm(
+      `${label}\n\nKy veprim është i pakthyeshëm. Bilanci i kasafortës do të rikllogaritet automatikisht.`,
+      { title: 'Fshi këtë veprim?', confirmLabel: 'Po, fshi', danger: true },
+    )
     if (!ok) return
     setBusyId(`${kind}-${id}`); setErr('')
     try {
