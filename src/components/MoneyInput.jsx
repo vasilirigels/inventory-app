@@ -16,31 +16,42 @@ function valueToDigits(v) {
   return String(cents)
 }
 
-export default function MoneyInput({ value, onChange, className = '', disabled, placeholder, ...rest }) {
+export default function MoneyInput({ value, onChange, allowNegative = false, className = '', disabled, placeholder, ...rest }) {
   const [digits, setDigits] = useState(() => valueToDigits(value))
+  const [isNegative, setIsNegative] = useState(() => allowNegative && (parseFloat(value) || 0) < 0)
   const lastEmitted = useRef(parseFloat(value) || 0)
 
   useEffect(() => {
     const incoming = parseFloat(value) || 0
     if (Math.abs(incoming - lastEmitted.current) > 0.005) {
       setDigits(valueToDigits(value))
+      setIsNegative(allowNegative && incoming < 0)
       lastEmitted.current = incoming
     }
-  }, [value])
+  }, [value, allowNegative])
 
   const handleChange = (e) => {
-    const raw = e.target.value.replace(/\D/g, '').replace(/^0+/, '')
+    const input = e.target.value
+    // Kur allowNegative=true, prezenca e "-" në input e bën vlerën negative
+    // (kudo brenda tekstit — user mund të shtypë "-" edhe në fund për ta togluar).
+    const negative = allowNegative && /-/.test(input)
+    const raw = input.replace(/\D/g, '').replace(/^0+/, '')
     setDigits(raw)
-    const num = raw === '' ? 0 : parseInt(raw, 10) / 100
+    setIsNegative(negative)
+    const abs = raw === '' ? 0 : parseInt(raw, 10) / 100
+    const num = negative ? -abs : abs
     lastEmitted.current = num
     onChange(num)
   }
 
+  const displayed = digitsToDisplay(digits)
+  const showValue = isNegative && parseFloat(displayed) !== 0 ? `-${displayed}` : displayed
+
   return (
     <input
       type="text"
-      inputMode="numeric"
-      value={digitsToDisplay(digits)}
+      inputMode={allowNegative ? 'text' : 'numeric'}
+      value={showValue}
       onChange={handleChange}
       onFocus={(e) => e.target.select()}
       className={className}

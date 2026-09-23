@@ -355,6 +355,7 @@ export default function ArkaDitore({ date, onNavigate }) {
               <MoneyInput
                 value={physInput[c] ?? ''}
                 onChange={v => handlePhysChange(c, String(v))}
+                allowNegative
                 className="input-field text-right font-bold text-amber-900"
                 placeholder="0.00"
               />
