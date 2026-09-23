@@ -2407,12 +2407,10 @@ app.get('/api/sales/items/search', async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (!q) return res.json([]);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
-    const days = Math.max(1, parseInt(req.query.days) || 365);
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
     const like = `%${q.toLowerCase()}%`;
 
+    // Pa cutoff date — bizhutë kthehen edhe pas 1-2 vitesh; filtri LIKE
+    // + LIMIT-i mjaftojnë për performancën.
     const rows = await queryAll(
       `SELECT ii.id AS item_id, ii.invoice_id, ii.product_id, ii.barcode, ii.name,
               ii.qty, ii.gram, ii.unit_price_no_vat, ii.discount_percent, ii.vat_rate,
@@ -2435,14 +2433,13 @@ app.get('/api/sales/items/search', async (req, res) => {
         WHERE COALESCE(inv.is_credit_note, 0) = 0
           AND COALESCE(inv.cancelled, 0) = 0
           AND ii.qty > 0
-          AND inv.date >= ?
           AND (
             LOWER(ii.barcode) LIKE ?
             OR LOWER(ii.name) LIKE ?
           )
         ORDER BY inv.date DESC, inv.id DESC, ii.id DESC
         LIMIT ?`,
-      [cutoffStr, like, like, limit]
+      [like, like, limit]
     );
 
     const today = new Date();
