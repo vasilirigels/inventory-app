@@ -305,9 +305,6 @@ export default function ArkaDitore({ date, onNavigate }) {
             <div className="mt-3 rounded-lg bg-gradient-to-r from-emerald-900/40 to-slate-800 border border-emerald-800/50 px-4 py-3 flex items-baseline justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-[10px] text-emerald-300/80 uppercase tracking-wide font-semibold">Total i Konvertuar</div>
-                <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
-                  me kursin e datës · 1 EUR = {fmt(eurRate)} LEK
-                </div>
               </div>
               <div className={`text-2xl font-extrabold tabular-nums whitespace-nowrap ${totalCls}`}>
                 {fmt(eurTotal)} <span className="text-sm font-semibold text-slate-300">EUR</span>
