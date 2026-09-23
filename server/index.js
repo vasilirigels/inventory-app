@@ -5765,7 +5765,11 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
-      difference[c]      = physical_cash[c] - cash_balance[c];
+      // Për rastin normal (cash_balance >= 0): physical - teorike, si zakonisht.
+      // Kur cash_balance del negative (të dhëna inkonsistente — daljet tejkalojnë
+      // hyrjet e regjistruara), përdorim |cash_balance| që shenja e diferencës të
+      // jetë intuitive: mungesa shfaqet si negative, tepricat si pozitive.
+      difference[c]      = physical_cash[c] - Math.abs(cash_balance[c]);
     }
 
     res.json({
