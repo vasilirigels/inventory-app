@@ -25,6 +25,7 @@ export default function KthimShitje() {
   const [selected, setSelected] = useState(null) // item nga results
   const [qty, setQty] = useState(1)
   const [feePctOverride, setFeePctOverride] = useState(null) // null = tier default
+  const [unitPriceOverride, setUnitPriceOverride] = useState(null) // null = çmimi i faturës
   const [refundMethod, setRefundMethod] = useState('cash')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -52,6 +53,7 @@ export default function KthimShitje() {
     setSelected(it)
     setQty(Math.min(1, it.qty_remaining))
     setFeePctOverride(null)
+    setUnitPriceOverride(null)
     setError('')
     setSuccess(null)
   }
@@ -60,15 +62,25 @@ export default function KthimShitje() {
     setSelected(null)
     setQty(1)
     setFeePctOverride(null)
+    setUnitPriceOverride(null)
     setError('')
   }
 
   // Llogaritjet e refund-it
   const tier = selected ? computeReturnTier(selected.days_since_sale) : null
   const effectivePct = feePctOverride != null ? feePctOverride : (tier?.pct ?? 0)
-  const lineTotal = selected ? +(selected.unit_total_with_vat * qty).toFixed(2) : 0
+  const effectiveUnitPrice = unitPriceOverride != null
+    ? unitPriceOverride
+    : (selected?.unit_total_with_vat || 0)
+  const lineTotal = selected ? +(effectiveUnitPrice * qty).toFixed(2) : 0
   const feeKept   = +(lineTotal * (effectivePct / 100)).toFixed(2)
-  const refund    = +(lineTotal - feeKept).toFixed(2)
+  const rawRefund = +(lineTotal - feeKept).toFixed(2)
+  // Serveri e klampon refund_amount te totali i rreshtit të faturës origjinale
+  // (retTotal). Nëse user rrit çmimin mbi atë të faturës, rimbursimi mund të
+  // tejkalojë atë kufi — e klampojmë edhe në UI që të mos ketë keqkuptim.
+  const invoiceLineTotal = selected ? +((selected.unit_total_with_vat || 0) * qty).toFixed(2) : 0
+  const refundClamped = rawRefund > invoiceLineTotal
+  const refund = Math.min(rawRefund, invoiceLineTotal)
 
   const qtyValid = selected && qty > 0 && qty <= selected.qty_remaining + 1e-6
   const pctValid = effectivePct >= 0 && effectivePct <= 100
@@ -79,7 +91,7 @@ export default function KthimShitje() {
       title: 'Konfirmo kthimin',
       message:
         `Fatura ${selected.invoice_no} — ${selected.name}\n` +
-        `Sasi: ${qty} × ${fmt(selected.unit_total_with_vat)} = ${fmt(lineTotal)} ${selected.currency || 'LEK'}\n` +
+        `Sasi: ${qty} × ${fmt(effectiveUnitPrice)} = ${fmt(lineTotal)} ${selected.currency || 'LEK'}\n` +
         `Zbritje ${effectivePct}% = ${fmt(feeKept)} (${tier?.label})\n` +
         `Rimbursim: ${fmt(refund)} ${selected.currency || 'LEK'} — ${refundMethod.toUpperCase()}`,
       confirmText: 'Po, kthej',
@@ -244,7 +256,7 @@ export default function KthimShitje() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                 Sasi (max {selected.qty_remaining})
@@ -258,6 +270,35 @@ export default function KthimShitje() {
                 onChange={e => setQty(parseFloat(e.target.value) || 0)}
                 className="input-field w-full"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                Çmim/copë (i shitur)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={effectiveUnitPrice}
+                  onChange={e => setUnitPriceOverride(parseFloat(e.target.value) || 0)}
+                  className="input-field w-full"
+                />
+                {unitPriceOverride != null && unitPriceOverride !== selected.unit_total_with_vat && (
+                  <button
+                    onClick={() => setUnitPriceOverride(null)}
+                    title="Kthehu te çmimi i faturës"
+                    className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  >
+                    ↺
+                  </button>
+                )}
+              </div>
+              {unitPriceOverride != null && unitPriceOverride !== selected.unit_total_with_vat && (
+                <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                  Fatura: {fmt(selected.unit_total_with_vat)}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
@@ -333,6 +374,14 @@ export default function KthimShitje() {
             <SummaryLine label={`Tarifa (${effectivePct}%)`} value={`− ${fmt(feeKept)} ${selected.currency || 'LEK'}`} tone="red" />
             <SummaryLine label="Rimbursim për klientin" value={`${fmt(refund)} ${selected.currency || 'LEK'}`} tone="green" big />
           </div>
+
+          {refundClamped && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm text-amber-800 dark:text-amber-200">
+              ⚠️ Rimbursimi u limitua në {fmt(invoiceLineTotal)} {selected.currency || 'LEK'} —
+              totali i rreshtit të faturës origjinale. Për t'i kthyer një shumë më të madhe,
+              duhet të ndryshohet fatura origjinale.
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-700 dark:text-red-300">
