@@ -1447,7 +1447,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // method (cash|bank), monedhë, shumë dhe kurs drejt LEK.
   const [paymentSplits, setPaymentSplits] = useState([])
   const [notes, setNotes]       = useState('')
-  const [transportCost, setTransportCost] = useState('')
   // Flag "Dhuratë" — kur aktivizohet për Blerje Artikuj të Tjerë, të gjithë
   // produktet e faturës markohen te products.is_gift = 1 që të shfaqen si
   // mundësi te "+ Shto Dhuratë" në Fatura Shitje.
@@ -1577,7 +1576,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
             }
           }
           setNotes(inv.notes || '')
-          setTransportCost(inv.transport_cost != null && n(inv.transport_cost) > 0 ? String(inv.transport_cost) : '')
           setIsGift(!!inv.is_gift)
           const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
           const mats = invItems.map(it => it.material).filter(Boolean)
@@ -1933,14 +1931,12 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   }
 
   const lineTotals = items.map(computeLine)
-  const transportCostN = n(transportCost)
   const totals = lineTotals.reduce((acc, l) => ({
     sub: acc.sub + l.subtotal_no_vat,
     vat: acc.vat + l.vat_amount,
     tot: acc.tot + l.total_with_vat,
   }), { sub: 0, vat: 0, tot: 0 })
-  // Kosto transporti shtohet te totali final si linjë ekstra (pa TVSH).
-  totals.tot = +(totals.tot + transportCostN).toFixed(2)
+  totals.tot = +totals.tot.toFixed(2)
 
   const save = async () => {
     if (saving) return
@@ -1986,7 +1982,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         // për backward compat me çdo konsumator të vjetër që lexon nga payload-i.
         amount_paid: 0,
         notes,
-        transport_cost: transportCostN || 0,
         is_gift: isGift ? 1 : 0,
         items: valid,
       }
@@ -2195,15 +2190,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
               </div>
             )
           })()}
-        </div>
-        <div>
-          <label className="form-label" title="Kosto transporti (opsionale) — shtohet te totali i faturës në të njëjtën monedhë, pa TVSH. Nuk ndikon në kostot e artikujve.">
-            Kosto Transporti
-            <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">({currency})</span>
-          </label>
-          <MoneyInput value={transportCost}
-            onChange={v => setTransportCost(v)}
-            className="input-field text-right" />
         </div>
         <div>
           <label className="form-label">Shënime</label>
@@ -2539,9 +2525,6 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                 <td colSpan={forcedCategory === 'flori' ? 17 : forcedCategory === 'diamant' ? 12 : 11} className="px-2 py-2 text-right text-slate-600 dark:text-slate-300">
                   TOTALI ({currency}) — pa TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.sub)}</span>
                   {' · '}TVSH: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(totals.vat)}</span>
-                  {transportCostN > 0 && (
-                    <>{' · '}Transporti: <span className="tabular-nums text-slate-800 dark:text-slate-100">{fmt(transportCostN)}</span></>
-                  )}
                   {' · '}me TVSH: <span className="tabular-nums text-blue-700 dark:text-blue-300 text-sm">{fmt(totals.tot)}</span>
                 </td>
                 <td></td>

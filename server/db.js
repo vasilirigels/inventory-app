@@ -897,6 +897,14 @@ const MIGRATIONS = [
   "CREATE INDEX IF NOT EXISTS idx_porosi_status ON porosi(status)",
   "CREATE INDEX IF NOT EXISTS idx_porosi_deposits_porosi ON porosi_deposits(porosi_id)",
   "CREATE INDEX IF NOT EXISTS idx_porosi_deposits_date ON porosi_deposits(date)",
+
+  // Pagesat e transportit — një zë shpenzimi që lidhet me një faturë blerjeje.
+  // Ruhet te expense_entries (që të reflektohet automatikisht si shpenzim te
+  // Arka Ditore); kolona `purchase_invoice_id` bën diskriminimin: NULL = shpenzim
+  // ditor i zakonshëm, jo-NULL = pagesë transporti për faturën përkatëse. Indeksi
+  // unik siguron një pagesë transporti për faturë (kërkesa e biznesit).
+  "ALTER TABLE expense_entries ADD COLUMN purchase_invoice_id INTEGER",
+  "CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_entries_purchase_invoice ON expense_entries(purchase_invoice_id) WHERE purchase_invoice_id IS NOT NULL",
 ];
 
 async function initDB() {

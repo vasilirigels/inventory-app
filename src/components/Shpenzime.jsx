@@ -163,8 +163,8 @@ export default function Shpenzime({ date, onNavigate }) {
     setLoading(true)
     try {
       const entriesUrl = fromDate === toDate
-        ? `/api/expense-entries/${fromDate}`
-        : `/api/reports/expenses?from=${fromDate}&to=${toDate}`
+        ? `/api/expense-entries/${fromDate}?type=daily`
+        : `/api/reports/expenses?from=${fromDate}&to=${toDate}&type=daily`
       const [cats, entries, ratesRes] = await Promise.all([
         fetch('/api/expense-categories').then(r => r.json()),
         fetch(entriesUrl).then(r => r.json()),

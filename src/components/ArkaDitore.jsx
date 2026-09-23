@@ -322,13 +322,13 @@ export default function ArkaDitore({ date, onNavigate }) {
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-fuchsia-700 dark:text-fuchsia-300">
-                🎁 Shpenzime Marketingu (informative)
+                🎁 Shpenzime Marketingu
               </p>
               <p className="text-[11px] text-fuchsia-600 dark:text-fuchsia-400 mt-0.5">
                 Kosto e produkteve të dhëna si dhuratë/mostër/promo · {data.counts?.marketing_in_kind || 0} zëra
               </p>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 italic">
-                S'zbritet nga arka — paratë kanë dalë tashmë te blerja origjinale. Shfaqet për të kuptuar humbjen reale (P&L).
+                Përfshihet te "Shpenzime (Arkë)" më sipër — me kostoń e produktit.
               </p>
             </div>
             <div className="text-right">

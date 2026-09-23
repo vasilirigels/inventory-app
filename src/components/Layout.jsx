@@ -68,6 +68,7 @@ const NAV_GROUPS = [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
           { id: 'shitje-online',         label: '🛒 Shitje Online' },
           { id: 'porosi',                label: '🛠️ Porosi' },
+          { id: 'kthim-produkt',         label: '🔄 Kthim Produkt' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },
           { id: 'raport-shitje-artikuj', label: 'Raport Shitje Artikuj' },
         ],
@@ -78,7 +79,16 @@ const NAV_GROUPS = [
           { id: 'artikuj-te-tjere',      label: 'ARTIKUJ TË TJERË' },
           { id: 'blerje-flori',          label: '🟡 BLERJE FLORI' },
           { id: 'blerje-diamant',        label: '💎 BLERJE DIAMANT' },
+          { id: 'kthime-furnitori',      label: '🔄 Kthime Furnitori (Excel)' },
           { id: 'raport-blerje-artikuj', label: 'Raport Blerje Artikuj' },
+        ],
+      },
+      {
+        id: 'shpenzime', label: 'Shpenzime', icon: '💸',
+        children: [
+          { id: 'arka-shpenzime',        label: 'Shpenzime Ditore' },
+          { id: 'shpenzime-transporti',  label: 'Shpenzime Transporti' },
+          { id: 'marketing',             label: 'Shpenzime Marketingu' },
         ],
       },
       {
@@ -95,7 +105,6 @@ const NAV_GROUPS = [
         children: [
           { id: 'arka-ditore',       label: 'Arka Ditore' },
           { id: 'arka-kasaforta',    label: 'Kasaforta' },
-          { id: 'arka-shpenzime',    label: 'Shpenzime' },
           { id: 'arka-konv-hurda',   label: 'Konvertim Hurda' },
           { id: 'arka-terheqje',     label: 'Tërheqje nga Kasaforta' },
           { id: 'arka-levizje-banke', label: 'Lëvizje Banke' },
@@ -111,7 +120,6 @@ const NAV_GROUPS = [
       { id: 'detyrime-furnitor', label: 'Detyrime Furnitor', icon: '🏭' },
       { id: 'analize-veprime-furnitor', label: 'ANALIZE VEPRIME FURNITOR', icon: '📉' },
       { id: 'permbledhese',  label: 'Përmbledhëse',           icon: '📊' },
-      { id: 'marketing',     label: 'Marketingu',             icon: '📣' },
     ],
   },
 ]
@@ -136,12 +144,15 @@ const PAGE_TITLES = {
   'raport-shitje-artikuj': 'Raport Shitje — Artikuj',
   'raport-blerje-artikuj': 'Raport Blerje — Artikuj',
   'raport-shpenzime':      'Raport Shpenzime Ditore',
+  'kthime-furnitori':      'Kthime Furnitori (Import nga Excel)',
+  'kthim-produkt':         'Kthim Produkt (Shitje)',
   permbledhese: 'Përmbledhëse',
   marketing:    'Shpenzime Marketingu',
   komentet:     'Komentet',
   riparimet:    'Riparimet',
   shitje:       'Shitje',
   blerje:       'Blerje',
+  shpenzime:    'Shpenzime',
   magazina:     'Magazina',
   arka:         'Arka',
 }

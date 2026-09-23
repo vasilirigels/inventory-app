@@ -26,6 +26,8 @@ const FaturaShitje           = lazy(() => import('./components/FaturaShitje.jsx'
 const FaturaBlerje           = lazy(() => import('./components/FaturaBlerje.jsx'))
 const BlerjeFlori            = lazy(() => import('./components/BlerjeFlori.jsx'))
 const BlerjeDiamant          = lazy(() => import('./components/BlerjeDiamant.jsx'))
+const KthimeFurnitori        = lazy(() => import('./components/KthimeFurnitori.jsx'))
+const KthimShitje            = lazy(() => import('./components/KthimShitje.jsx'))
 const Magazina               = lazy(() => import('./components/Magazina.jsx'))
 const Magazinat              = lazy(() => import('./components/Magazinat.jsx'))
 const InventarPermbledhese   = lazy(() => import('./components/InventarPermbledhese.jsx'))
@@ -38,6 +40,7 @@ const AnalizeVeprimeFurnitor = lazy(() => import('./components/AnalizeVeprimeFur
 const RaportShitjeArtikuj    = lazy(() => import('./components/RaportShitjeArtikuj.jsx'))
 const RaportBlerjeArtikuj    = lazy(() => import('./components/RaportBlerjeArtikuj.jsx'))
 const Shpenzime              = lazy(() => import('./components/Shpenzime.jsx'))
+const ShpenziTransporti      = lazy(() => import('./components/ShpenziTransporti.jsx'))
 const RaportShpenzime        = lazy(() => import('./components/RaportShpenzime.jsx'))
 const DailyFieldsForm        = lazy(() => import('./components/sections/DailyFieldsForm.jsx'))
 const UnifiedReport          = lazy(() => import('./components/sections/UnifiedReport.jsx'))
@@ -55,9 +58,10 @@ function PageFallback() {
 }
 
 const PARENT_TITLES = {
-  shitje:   'Shitje',
-  blerje:   'Blerje',
-  magazina: 'Magazina',
+  shitje:    'Shitje',
+  blerje:    'Blerje',
+  shpenzime: 'Shpenzime',
+  magazina:  'Magazina',
 }
 
 const PLACEHOLDER_TITLES = {
@@ -184,6 +188,7 @@ function AppInner({ user }) {
       case 'raport-shitje-artikuj': return <RaportShitjeArtikuj onNavigate={navigateTo} />
       case 'raport-blerje-artikuj': return <RaportBlerjeArtikuj onNavigate={navigateTo} />
       case 'arka-shpenzime': return <Shpenzime date={currentDate} onNavigate={navigateTo} />
+      case 'shpenzime-transporti': return <ShpenziTransporti date={currentDate} />
       case 'raport-shpenzime': return <RaportShpenzime />
       case 'marketing': return <Marketing date={currentDate} />
       case 'arka':      return <CashRegister date={currentDate} />
@@ -193,6 +198,8 @@ function AppInner({ user }) {
       case 'artikuj-te-tjere':  return <FaturaBlerje date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
       case 'blerje-flori':   return <BlerjeFlori date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
       case 'blerje-diamant': return <BlerjeDiamant date={currentDate} openInvoiceId={openInvoiceId} onConsumeOpen={() => setOpenInvoiceId(null)} />
+      case 'kthime-furnitori': return <KthimeFurnitori />
+      case 'kthim-produkt':    return <KthimShitje />
 
       // Magazina — fletë hyrje / dalje me kod magazine + monedhë (pa TVSH)
       case 'magazina-hyrje': return <Magazina date={currentDate} kind="hyrje" />

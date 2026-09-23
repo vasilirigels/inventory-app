@@ -1,0 +1,376 @@
+import { useState, useEffect, useRef } from 'react'
+import { showConfirm } from './ConfirmDialog.jsx'
+
+// Rregullat e zbritjes (tarifës) sipas ditëve nga shitja:
+//   0 ditë (të njëjtën ditë) → 0%
+//   1–10 ditë               → 10%
+//   11–30 ditë              → 25%
+//   > 30 ditë               → 40%
+function computeReturnTier(days) {
+  if (days <= 0)  return { pct: 0,  label: 'Brenda ditës' }
+  if (days <= 10) return { pct: 10, label: '1–10 ditë' }
+  if (days <= 30) return { pct: 25, label: '11–30 ditë' }
+  return              { pct: 40, label: 'Mbi 30 ditë' }
+}
+
+function fmt(n) {
+  const v = Number(n) || 0
+  return v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+export default function KthimShitje() {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [selected, setSelected] = useState(null) // item nga results
+  const [qty, setQty] = useState(1)
+  const [feePctOverride, setFeePctOverride] = useState(null) // null = tier default
+  const [refundMethod, setRefundMethod] = useState('cash')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(null)
+  const timerRef = useRef()
+
+  // Debounced search
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); return }
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(`/api/sales/items/search?q=${encodeURIComponent(q.trim())}&limit=30`)
+        if (res.ok) setResults(await res.json())
+      } finally {
+        setSearching(false)
+      }
+    }, 300)
+    return () => clearTimeout(timerRef.current)
+  }, [q])
+
+  const selectItem = (it) => {
+    setSelected(it)
+    setQty(Math.min(1, it.qty_remaining))
+    setFeePctOverride(null)
+    setError('')
+    setSuccess(null)
+  }
+
+  const clearSelection = () => {
+    setSelected(null)
+    setQty(1)
+    setFeePctOverride(null)
+    setError('')
+  }
+
+  // Llogaritjet e refund-it
+  const tier = selected ? computeReturnTier(selected.days_since_sale) : null
+  const effectivePct = feePctOverride != null ? feePctOverride : (tier?.pct ?? 0)
+  const lineTotal = selected ? +(selected.unit_total_with_vat * qty).toFixed(2) : 0
+  const feeKept   = +(lineTotal * (effectivePct / 100)).toFixed(2)
+  const refund    = +(lineTotal - feeKept).toFixed(2)
+
+  const qtyValid = selected && qty > 0 && qty <= selected.qty_remaining + 1e-6
+  const pctValid = effectivePct >= 0 && effectivePct <= 100
+
+  const submit = async () => {
+    if (!selected || !qtyValid || !pctValid) return
+    const ok = await showConfirm({
+      title: 'Konfirmo kthimin',
+      message:
+        `Fatura ${selected.invoice_no} — ${selected.name}\n` +
+        `Sasi: ${qty} × ${fmt(selected.unit_total_with_vat)} = ${fmt(lineTotal)} ${selected.currency || 'LEK'}\n` +
+        `Zbritje ${effectivePct}% = ${fmt(feeKept)} (${tier?.label})\n` +
+        `Rimbursim: ${fmt(refund)} ${selected.currency || 'LEK'} — ${refundMethod.toUpperCase()}`,
+      confirmText: 'Po, kthej',
+      cancelText: 'Anulo',
+    })
+    if (!ok) return
+    setSaving(true); setError('')
+    try {
+      const res = await fetch(`/api/invoices/${selected.invoice_id}/credit-note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: [{ item_id: selected.item_id, qty }],
+          refund_amount: refund,
+          refund_method: refundMethod,
+          notes: notes.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Gabim gjatë kthimit')
+      setSuccess({
+        invoice_no: data.invoice_no,
+        product: selected.name,
+        qty,
+        refund,
+        feeKept,
+      })
+      // rifresko rezultatet për të reflektuar qty_remaining të re
+      if (q.trim()) {
+        const r = await fetch(`/api/sales/items/search?q=${encodeURIComponent(q.trim())}&limit=30`)
+        if (r.ok) setResults(await r.json())
+      }
+      clearSelection()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 space-y-4">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-1">
+          🔄 Kthim Produkt (Shitje)
+        </h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Kërko produktin me <b>barkod</b> ose <b>emër</b>, zgjidh rreshtin nga fatura e shitjes, dhe kryeje kthimin.
+        </p>
+        <div className="mt-3 text-xs text-slate-500 dark:text-slate-400 grid grid-cols-2 md:grid-cols-4 gap-1">
+          <div>📅 Brenda ditës → <b>0%</b></div>
+          <div>📅 1–10 ditë → <b>10%</b></div>
+          <div>📅 11–30 ditë → <b>25%</b></div>
+          <div>📅 Mbi 30 ditë → <b>40%</b></div>
+        </div>
+      </div>
+
+      {success && (
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+          <p className="text-green-800 dark:text-green-200 font-semibold">
+            ✅ Kthimi u regjistrua — kreditore <span className="font-mono">{success.invoice_no}</span>
+          </p>
+          <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+            {success.product} × {success.qty} — u rimbursuan <b>{fmt(success.refund)}</b>
+            {success.feeKept > 0 ? <> (tarifë e mbajtur: <b>{fmt(success.feeKept)}</b>)</> : null}
+          </p>
+        </div>
+      )}
+
+      {/* Kutia e kërkimit */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
+          <input
+            type="text"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Skano barkodin ose shkruaj emrin e produktit..."
+            className="input-field pl-9 w-full"
+            autoFocus
+          />
+        </div>
+        {searching && <p className="text-xs text-slate-500 mt-2">Duke kërkuar…</p>}
+        {!searching && q.trim() && results.length === 0 && (
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-3">
+            Asnjë rresht i vlefshëm nuk u gjet për <b>{q}</b>.
+          </p>
+        )}
+      </div>
+
+      {/* Lista e rezultateve */}
+      {results.length > 0 && !selected && (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow overflow-hidden">
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 dark:bg-slate-700 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold">Data</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold">Fatura</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold">Klienti</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold">Barkod</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold">Produkt</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold">Sasia (mbetur)</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold">Çmim/copë</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold">Ditë</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map(it => {
+                  const t = computeReturnTier(it.days_since_sale)
+                  return (
+                    <tr key={it.item_id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-900/10">
+                      <td className="px-3 py-1.5">{it.invoice_date}</td>
+                      <td className="px-3 py-1.5 font-mono text-xs">{it.invoice_no}</td>
+                      <td className="px-3 py-1.5 truncate max-w-[10rem]">{it.customer_name || '—'}</td>
+                      <td className="px-3 py-1.5 font-mono text-xs">{it.barcode || '—'}</td>
+                      <td className="px-3 py-1.5 truncate max-w-[16rem]">{it.name}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <span className="font-semibold">{it.qty_remaining}</span>
+                        <span className="text-slate-400 text-xs"> / {it.qty_original}</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">{fmt(it.unit_total_with_vat)}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <span className="text-slate-700 dark:text-slate-200">{it.days_since_sale}</span>
+                        <span className="ml-1 text-xs text-amber-700 dark:text-amber-400">({t.pct}%)</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <button
+                          onClick={() => selectItem(it)}
+                          className="px-3 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold"
+                        >
+                          Zgjidh
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Forma e kthimit */}
+      {selected && (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-4 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-lg font-bold text-slate-800 dark:text-slate-100">{selected.name}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Fatura <span className="font-mono">{selected.invoice_no}</span> · {selected.invoice_date}
+                {selected.customer_name && <> · {selected.customer_name}</>}
+                {selected.barcode && <> · Barkod: <span className="font-mono">{selected.barcode}</span></>}
+              </p>
+            </div>
+            <button
+              onClick={clearSelection}
+              className="text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+            >
+              ← Kthehu te lista
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                Sasi (max {selected.qty_remaining})
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={selected.qty_remaining}
+                step="any"
+                value={qty}
+                onChange={e => setQty(parseFloat(e.target.value) || 0)}
+                className="input-field w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                Ditë nga shitja
+              </label>
+              <div className="input-field w-full bg-slate-50 dark:bg-slate-900/40 flex items-center">
+                <span className="font-semibold">{selected.days_since_sale}</span>
+                <span className="ml-2 text-xs text-slate-500">({tier?.label})</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                Zbritje % (tarifa e dyqanit)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="1"
+                  value={effectivePct}
+                  onChange={e => setFeePctOverride(parseFloat(e.target.value) || 0)}
+                  className="input-field w-full"
+                />
+                {feePctOverride != null && feePctOverride !== tier.pct && (
+                  <button
+                    onClick={() => setFeePctOverride(null)}
+                    title="Kthehu te tier-i default"
+                    className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  >
+                    ↺
+                  </button>
+                )}
+              </div>
+              {feePctOverride != null && feePctOverride !== tier.pct && (
+                <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                  Override manual (default: {tier.pct}%)
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                Metoda e rimbursimit
+              </label>
+              <select
+                value={refundMethod}
+                onChange={e => setRefundMethod(e.target.value)}
+                className="input-field w-full"
+              >
+                <option value="cash">💵 Cash</option>
+                <option value="bank">🏦 Bankë</option>
+                <option value="pos">💳 POS</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+              Shënime (opsionale)
+            </label>
+            <input
+              type="text"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="P.sh. Defekt fabrike, nuk i përshtatet, etj."
+              className="input-field w-full"
+            />
+          </div>
+
+          {/* Përmbledhje llogaritjeje */}
+          <div className="bg-slate-50 dark:bg-slate-900/40 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <SummaryLine label="Vlera e artikujve" value={`${fmt(lineTotal)} ${selected.currency || 'LEK'}`} />
+            <SummaryLine label={`Tarifa (${effectivePct}%)`} value={`− ${fmt(feeKept)} ${selected.currency || 'LEK'}`} tone="red" />
+            <SummaryLine label="Rimbursim për klientin" value={`${fmt(refund)} ${selected.currency || 'LEK'}`} tone="green" big />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-700 dark:text-red-300">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={clearSelection}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"
+            >
+              Anulo
+            </button>
+            <button
+              onClick={submit}
+              disabled={saving || !qtyValid || !pctValid || refund < 0}
+              className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold"
+            >
+              {saving ? 'Duke ruajtur…' : `💾 Kryej Kthimin (${fmt(refund)})`}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SummaryLine({ label, value, tone = 'slate', big = false }) {
+  const toneClass =
+    tone === 'green' ? 'text-green-700 dark:text-green-400' :
+    tone === 'red'   ? 'text-red-700 dark:text-red-400' :
+                       'text-slate-700 dark:text-slate-200'
+  return (
+    <div>
+      <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
+      <div className={`${big ? 'text-2xl' : 'text-lg'} font-bold ${toneClass}`}>{value}</div>
+    </div>
+  )
+}

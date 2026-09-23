@@ -1762,12 +1762,12 @@ export default function Products() {
     else if (stockFilter === 'low') { if (!(stockN > 0 && stockN <= minN)) return false }
     else if (stockFilter === 'ok')  { if (!(stockN > minN)) return false }
     else                            { if (stockN <= 0) return false }
-    const q = search.toLowerCase()
+    const q = search.trim().toLowerCase()
     const matchSearch = !q ||
       p.name.toLowerCase().includes(q) ||
       (p.brand || '').toLowerCase().includes(q) ||
       (p.sku || '').toLowerCase().includes(q) ||
-      (p.barcode || '').includes(q) ||
+      (p.barcode || '').toLowerCase().includes(q) ||
       productNo(p.id).toLowerCase().includes(q)
     const matchCat = filterCat === 'Të gjitha' || p.category === filterCat
     let matchDate = true
@@ -1976,7 +1976,7 @@ export default function Products() {
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text"
-            placeholder="Kërko emër, brand, SKU, GS-0001..."
+            placeholder="Kërko emër, brand, SKU, barkod, GS-0001..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="input-field pl-9"

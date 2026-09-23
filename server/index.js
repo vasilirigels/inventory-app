@@ -2398,6 +2398,78 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
 //    krijohet vetëm me ato rreshta të zgjedhur (me sasinë e specifikuar).
 //    Refund i pagesave (paid_cash/bank + splits) shkallëzohet proporcionalisht
 //    sipas raportit total_i_kthyer / total_origjinal.
+// GET — kërko produkte të shitura sipas barkodit ose emrit. Kthen rreshtat
+// e faturave të shitjes që përputhen, me qty_returned_so_far dhe qty_remaining
+// të llogaritur nga kreditoret (invoices me is_credit_note=1 dhe parent_invoice_id
+// që tregon origjinalin). Përdoret te faqja "Kthim Produkt".
+app.get('/api/sales/items/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const days = Math.max(1, parseInt(req.query.days) || 365);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const like = `%${q.toLowerCase()}%`;
+
+    const rows = await queryAll(
+      `SELECT ii.id AS item_id, ii.invoice_id, ii.product_id, ii.barcode, ii.name,
+              ii.qty, ii.gram, ii.unit_price_no_vat, ii.discount_percent, ii.vat_rate,
+              ii.subtotal_no_vat, ii.vat_amount, ii.total_with_vat,
+              inv.invoice_no, inv.date AS invoice_date, inv.customer_name,
+              inv.currency, inv.payment_method,
+              COALESCE((
+                SELECT SUM(ABS(cnii.qty))
+                  FROM invoice_items cnii
+                  JOIN invoices cninv ON cninv.id = cnii.invoice_id
+                 WHERE cninv.parent_invoice_id = inv.id
+                   AND cninv.is_credit_note = 1
+                   AND (
+                     (cnii.product_id IS NOT NULL AND cnii.product_id = ii.product_id)
+                     OR (cnii.product_id IS NULL AND LOWER(cnii.name) = LOWER(ii.name))
+                   )
+              ), 0) AS qty_returned_so_far
+         FROM invoice_items ii
+         JOIN invoices inv ON inv.id = ii.invoice_id
+        WHERE COALESCE(inv.is_credit_note, 0) = 0
+          AND COALESCE(inv.cancelled, 0) = 0
+          AND ii.qty > 0
+          AND inv.date >= ?
+          AND (
+            LOWER(ii.barcode) LIKE ?
+            OR LOWER(ii.name) LIKE ?
+          )
+        ORDER BY inv.date DESC, inv.id DESC, ii.id DESC
+        LIMIT ?`,
+      [cutoffStr, like, like, limit]
+    );
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const enriched = rows.map(r => {
+      const qtyOrig = Math.abs(parseFloat(r.qty) || 0);
+      const returned = parseFloat(r.qty_returned_so_far) || 0;
+      const remaining = Math.max(0, +(qtyOrig - returned).toFixed(4));
+      const invDate = r.invoice_date ? new Date(r.invoice_date + 'T00:00:00') : null;
+      const daysSince = invDate
+        ? Math.max(0, Math.floor((today.getTime() - invDate.getTime()) / 86400000))
+        : 0;
+      const unitTotal = qtyOrig > 0 ? +(parseFloat(r.total_with_vat) / qtyOrig).toFixed(2) : 0;
+      return {
+        ...r,
+        qty_original: qtyOrig,
+        qty_returned_so_far: returned,
+        qty_remaining: remaining,
+        days_since_sale: daysSince,
+        unit_total_with_vat: unitTotal,
+      };
+    }).filter(r => r.qty_remaining > 0);
+
+    res.json(enriched);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/invoices/:id/credit-note', async (req, res) => {
   try {
     const { id } = req.params;
@@ -3202,6 +3274,35 @@ app.get('/api/purchase-invoices/next-no', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Lista e thjeshtë e faturave të blerjes për picker-in te Shpenzime Transporti.
+// Kthen id, invoice_no, date, supplier + shenjë nëse fatura ka tashmë një pagesë
+// transporti (që UI ta shfaqë disabled ose me indikator). Filtër opsional `q`
+// (kërkon te invoice_no ose supplier_name); pa filtër, kthen 200 më të fundit.
+app.get('/api/purchase-invoices/list-simple', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const params = [];
+    let where = `COALESCE(pi.type, 'purchase') = 'purchase'`;
+    if (q) {
+      where += ` AND (pi.invoice_no LIKE ? OR pi.supplier_name LIKE ?)`;
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    const rows = await queryAll(
+      `SELECT pi.id, pi.invoice_no, pi.date, pi.supplier_name, pi.currency,
+              pi.total_with_vat,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM expense_entries e WHERE e.purchase_invoice_id = pi.id
+              ) THEN 1 ELSE 0 END AS has_transport_payment
+         FROM purchase_invoices pi
+        WHERE ${where}
+        ORDER BY pi.date DESC, pi.id DESC
+        LIMIT 200`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Filtër opsional për faqet Blerje Flori / Blerje Diamant — kthen vetëm faturat
 // që kanë të paktën një artikull të lidhur me një produkt të asaj materialiteti.
 function buildPurchaseMaterialFilter(material) {
@@ -3351,8 +3452,7 @@ app.post('/api/purchase-invoices', async (req, res) => {
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
     const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
-    const transportCost = +(parseFloat(d.transport_cost) || 0).toFixed(2);
-    const tot = +(items.reduce((s, it) => s + it.total_with_vat, 0) + transportCost).toFixed(2);
+    const tot = +items.reduce((s, it) => s + it.total_with_vat, 0).toFixed(2);
     const totalDiscount = +items.reduce((s, it) => {
       const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.purchase_price_no_vat) || 0);
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
@@ -3382,8 +3482,8 @@ app.post('/api/purchase-invoices', async (req, res) => {
 
     const doInsertPurchase = (invNo) => run(
       `INSERT INTO purchase_invoices (date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
-        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes, is_gift, transport_cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due, notes, is_gift)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         d.date, invNo, d.supplier_name || '', d.supplier_nipt || '',
         d.currency || 'LEK', parseFloat(d.exchange_rate) || 1,
@@ -3391,7 +3491,6 @@ app.post('/api/purchase-invoices', async (req, res) => {
         pmI, amountPaidI, amountDueI,
         d.notes || '',
         d.is_gift ? 1 : 0,
-        transportCost,
       ]
     );
     // Retry-i tani provon userProvidedNo si numër fillestar; nëse ai numër
@@ -3489,8 +3588,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
     const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
-    const transportCost = +(parseFloat(d.transport_cost) || 0).toFixed(2);
-    const tot = +(items.reduce((s, it) => s + it.total_with_vat, 0) + transportCost).toFixed(2);
+    const tot = +items.reduce((s, it) => s + it.total_with_vat, 0).toFixed(2);
     const totalDiscount = +items.reduce((s, it) => {
       const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.purchase_price_no_vat) || 0);
       return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
@@ -3523,7 +3621,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
 
     await run(
       `UPDATE purchase_invoices SET date=?, supplier_name=?, supplier_nipt=?, currency=?, exchange_rate=?,
-        subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?, notes=?, is_gift=?, transport_cost=?
+        subtotal_no_vat=?, total_discount=?, total_vat=?, total_with_vat=?, payment_method=?, amount_paid=?, amount_due=?, notes=?, is_gift=?
        WHERE id=?`,
       [
         d.date || existing.date,
@@ -3533,7 +3631,6 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         pmU, amountPaidU, amountDueU,
         d.notes || '',
         d.is_gift ? 1 : 0,
-        transportCost,
         id,
       ]
     );
@@ -3900,16 +3997,15 @@ app.post('/api/purchase-returns', async (req, res) => {
       `INSERT INTO purchase_invoices (
          date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
          subtotal_no_vat, total_discount, total_vat, total_with_vat,
-         payment_method, amount_paid, amount_due, notes, transport_cost,
+         payment_method, amount_paid, amount_due, notes,
          type, original_purchase_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'return', ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'return', ?)`,
       [
         d.date, invNo, orig.supplier_name || '', orig.supplier_nipt || '',
         orig.currency || 'LEK', parseFloat(orig.exchange_rate) || 1,
         sub, totalDiscount, vat, tot,
         pmR, amountPaid, amountDue,
         d.notes || `Kthim për faturën ${orig.invoice_no}`,
-        0, // transport_cost — s'ka transport për kthim
         origId,
       ]
     );
@@ -3964,6 +4060,261 @@ app.post('/api/purchase-returns', async (req, res) => {
       total_with_vat: tot,
       cash_back: cashBack,
       debt_reduction: debtReduction,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST — bulk import kthimesh nga Excel. Pranon një listë rreshtash
+// { purchase_date, barcode, name, qty, purchase_price } dhe krijon një
+// faturë kthimi për secilën faturë origjinale. Çmimet kopjohen nga rreshti
+// origjinal (Excel-i shërben si listë referencash, jo si burim çmimi).
+app.post('/api/purchase-returns/import', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date = d.date || new Date().toISOString().slice(0, 10);
+    if (req.user?.role !== 'admin' && date !== new Date().toISOString().slice(0, 10)) {
+      return res.status(403).json({ error: 'only admin can set a non-today date' });
+    }
+    const rows = Array.isArray(d.rows) ? d.rows : [];
+    if (rows.length === 0) return res.status(400).json({ error: 'Nuk ka rreshta për kthim' });
+
+    const errors = [];
+    // purchase_id -> { items: [{ purchase_item_id, qty, origItem, remaining }] }
+    const byPurchase = new Map();
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] || {};
+      const rowNum = i + 1;
+      const barcode = String(r.barcode || '').trim();
+      const qty = parseFloat(r.qty) || 0;
+      if (!barcode) { errors.push({ row: rowNum, message: 'Barkodi mungon' }); continue; }
+      if (qty <= 0) { errors.push({ row: rowNum, barcode, message: 'Sasi jo e vlefshme' }); continue; }
+
+      const prod = await queryOne(
+        'SELECT id, stock, name FROM products WHERE barcode = ?',
+        [barcode]
+      );
+      if (!prod) {
+        errors.push({ row: rowNum, barcode, message: 'Produkti nuk u gjet për këtë barkod' });
+        continue;
+      }
+      if ((parseFloat(prod.stock) || 0) < qty - 1e-6) {
+        errors.push({
+          row: rowNum, barcode,
+          message: `Stoku aktual (${prod.stock}) < sasia për kthim (${qty}) — ndoshta është shitur`,
+        });
+        continue;
+      }
+
+      // User pohoi që produktet janë unike nëpër fatura, por për siguri
+      // filtrojmë me date nëse dërgohet dhe kemi disa përputhje.
+      const pItems = await queryAll(
+        `SELECT pi.*, inv.date AS invoice_date
+           FROM purchase_items pi
+           JOIN purchase_invoices inv ON inv.id = pi.purchase_id
+          WHERE pi.product_id = ?
+            AND COALESCE(inv.type, 'purchase') = 'purchase'
+          ORDER BY inv.date DESC, pi.id DESC`,
+        [prod.id]
+      );
+      if (pItems.length === 0) {
+        errors.push({ row: rowNum, barcode, message: 'Produkti s\'gjendet në asnjë faturë blerjeje' });
+        continue;
+      }
+      let chosen = pItems[0];
+      if (pItems.length > 1 && r.purchase_date) {
+        const match = pItems.find(x => x.invoice_date === r.purchase_date);
+        if (match) chosen = match;
+      }
+
+      const rr = await queryOne(
+        `SELECT COALESCE(SUM(rit.qty), 0) AS returned
+           FROM purchase_items rit
+           JOIN purchase_invoices rinv ON rinv.id = rit.purchase_id
+          WHERE rinv.original_purchase_id = ?
+            AND rinv.type = 'return'
+            AND rit.product_id = ?`,
+        [chosen.purchase_id, chosen.product_id]
+      );
+      const alreadyReturned = parseFloat(rr?.returned) || 0;
+      const qtyPurchased = parseFloat(chosen.qty) || 0;
+      const remaining = +(qtyPurchased - alreadyReturned).toFixed(4);
+
+      const grp = byPurchase.get(chosen.purchase_id);
+      if (grp) {
+        const existing = grp.items.find(x => x.purchase_item_id === chosen.id);
+        if (existing) {
+          const combined = existing.qty + qty;
+          if (combined > remaining + 1e-6) {
+            errors.push({
+              row: rowNum, barcode,
+              message: `Sasia totale në Excel (${combined}) > e mbetura (${remaining})`,
+            });
+            continue;
+          }
+          existing.qty = combined;
+        } else {
+          if (qty > remaining + 1e-6) {
+            errors.push({
+              row: rowNum, barcode,
+              message: `Sasia (${qty}) > e mbetura për kthim (${remaining})`,
+            });
+            continue;
+          }
+          grp.items.push({ purchase_item_id: chosen.id, qty, origItem: chosen });
+        }
+      } else {
+        if (qty > remaining + 1e-6) {
+          errors.push({
+            row: rowNum, barcode,
+            message: `Sasia (${qty}) > e mbetura për kthim (${remaining})`,
+          });
+          continue;
+        }
+        byPurchase.set(chosen.purchase_id, {
+          items: [{ purchase_item_id: chosen.id, qty, origItem: chosen }],
+        });
+      }
+    }
+
+    if (byPurchase.size === 0) {
+      return res.status(400).json({ error: 'Asnjë rresht i vlefshëm për kthim', errors });
+    }
+
+    const invoicesCreated = [];
+    for (const [origId, grp] of byPurchase.entries()) {
+      const orig = await queryOne(
+        `SELECT * FROM purchase_invoices WHERE id = ? AND COALESCE(type, 'purchase') = 'purchase'`,
+        [origId]
+      );
+      if (!orig) {
+        errors.push({ original_purchase_id: origId, message: 'Fatura origjinale s\'gjendet' });
+        continue;
+      }
+
+      const itemsToInsert = grp.items.map(({ qty, origItem }) => {
+        const line = { ...origItem, qty };
+        const totals = computePurchaseLineTotals(line);
+        return {
+          product_id: origItem.product_id,
+          serial_no: origItem.serial_no || '',
+          barcode: origItem.barcode || '',
+          name: origItem.name || '',
+          category: origItem.category || '',
+          unit: origItem.unit || '',
+          gram: parseFloat(origItem.gram) || 0,
+          qty: totals.qty,
+          purchase_price_no_vat: totals.purchase_price_no_vat,
+          cost_price: parseFloat(origItem.cost_price) || 0,
+          discount_percent: totals.discount_percent,
+          subtotal_no_vat: totals.subtotal_no_vat,
+          vat_rate: totals.vat_rate,
+          vat_amount: totals.vat_amount,
+          total_with_vat: totals.total_with_vat,
+          sell_price: parseFloat(origItem.sell_price) || 0,
+          has_gram: parseFloat(origItem.has_gram) || 0,
+          has_currency: origItem.has_currency || 'HAS',
+          has_rate: parseFloat(origItem.has_rate) || 0,
+          sell_rate: parseFloat(origItem.sell_rate) || 0,
+          has_rate_currency: origItem.has_rate_currency || 'EUR',
+          sell_rate_currency: origItem.sell_rate_currency || 'EUR',
+          koeficent_pune: parseFloat(origItem.koeficent_pune) || 0,
+          multiplier: parseFloat(origItem.multiplier) || 0,
+        };
+      });
+
+      const sub = +itemsToInsert.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
+      const vat = +itemsToInsert.reduce((s, it) => s + it.vat_amount, 0).toFixed(2);
+      const tot = +itemsToInsert.reduce((s, it) => s + it.total_with_vat, 0).toFixed(2);
+      const totalDiscount = +itemsToInsert.reduce((s, it) => {
+        const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.purchase_price_no_vat) || 0);
+        return s + gross * ((parseFloat(it.discount_percent) || 0) / 100);
+      }, 0).toFixed(2);
+
+      const origDue = Math.max(0, parseFloat(orig.amount_due) || 0);
+      const debtReduction = Math.min(tot, origDue);
+      const cashBack = +(tot - debtReduction).toFixed(2);
+      const amountPaid = cashBack;
+      const amountDue = 0;
+      const pmR = cashBack > 0 ? 'cash' : 'debt';
+
+      const doInsert = (invNo) => run(
+        `INSERT INTO purchase_invoices (
+           date, invoice_no, supplier_name, supplier_nipt, currency, exchange_rate,
+           subtotal_no_vat, total_discount, total_vat, total_with_vat,
+           payment_method, amount_paid, amount_due, notes,
+           type, original_purchase_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'return', ?)`,
+        [
+          date, invNo, orig.supplier_name || '', orig.supplier_nipt || '',
+          orig.currency || 'LEK', parseFloat(orig.exchange_rate) || 1,
+          sub, totalDiscount, vat, tot,
+          pmR, amountPaid, amountDue,
+          d.notes || `Kthim nga Excel — për faturën ${orig.invoice_no}`,
+          origId,
+        ]
+      );
+      const invoice_no = await retryOnUniqueNo(
+        () => nextPurchaseNo(date, 'return'),
+        doInsert,
+        5,
+        null,
+      );
+      const created = await queryOne(
+        'SELECT id FROM purchase_invoices WHERE date = ? AND invoice_no = ?',
+        [date, invoice_no]
+      );
+      const newId = created?.id;
+
+      const batch = [];
+      for (const it of itemsToInsert) {
+        batch.push({
+          sql: `INSERT INTO purchase_items (purchase_id, product_id, serial_no, barcode, name, category, unit, gram, qty,
+                  purchase_price_no_vat, cost_price, discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat, sell_price,
+                  has_gram, has_currency, has_rate, sell_rate, has_rate_currency, sell_rate_currency, koeficent_pune, multiplier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            newId, it.product_id || null, it.serial_no, it.barcode, it.name,
+            it.category, it.unit, it.gram, it.qty,
+            it.purchase_price_no_vat, it.cost_price, it.discount_percent,
+            it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+            it.sell_price,
+            it.has_gram, it.has_currency, it.has_rate,
+            it.sell_rate, it.has_rate_currency, it.sell_rate_currency,
+            it.koeficent_pune, it.multiplier,
+          ],
+        });
+      }
+      batch.push(...buildAdjustPurchaseStockStmts(itemsToInsert, -1));
+      if (debtReduction > 0) {
+        batch.push({
+          sql: `UPDATE purchase_invoices
+                   SET amount_due = MAX(0, COALESCE(amount_due, 0) - ?)
+                 WHERE id = ?`,
+          args: [debtReduction, origId],
+        });
+      }
+      if (batch.length) await batchWrite(batch);
+
+      invoicesCreated.push({
+        id: newId,
+        invoice_no,
+        original_purchase_id: origId,
+        original_invoice_no: orig.invoice_no,
+        supplier_name: orig.supplier_name,
+        total_with_vat: tot,
+        cash_back: cashBack,
+        debt_reduction: debtReduction,
+        items_count: itemsToInsert.length,
+      });
+    }
+
+    res.json({
+      success: true,
+      invoices_created: invoicesCreated,
+      errors,
+      rows_ok: rows.length - errors.length,
+      rows_failed: errors.length,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -5253,10 +5604,24 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     );
     for (const r of mktCashRows) expenses.EUR += r.amt;
 
-    // Marketing "in kind" (produkt si formë pagese) — kostoja e produktit
-    // llogaritet informative por NUK zbritet nga arka (paratë kanë dalë tashmë
-    // te blerja origjinale — do të ishte double-counting). Kthehet si fushë e
-    // veçantë `marketing_in_kind_eur` që UI ta shfaqë si linjë P&L.
+    // Zërat direkt cash të Marketingut (jo nga kontratë, pa produkt) → shpenzim
+    // në arkë me monedhën përkatëse. Rreshtat me product_id janë in-kind dhe
+    // trajtohen veças si `marketing_in_kind_eur` më poshtë (nuk zbriten nga arka).
+    const mktDirectCashRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount, 0)       AS amt
+         FROM marketing_expenses
+        WHERE date = ? AND product_id IS NULL`,
+      [date]
+    );
+    for (const r of mktDirectCashRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in expenses) expenses[c] += r.amt;
+    }
+
+    // Marketing "in kind" (produkt si formë pagese) — regjistrohet me KOSTON e
+    // produktit (qty × cost_price) si shpenzim EUR në arkë. Njëkohësisht kthehet
+    // te `marketing_in_kind_eur` që UI ta shfaqë ndarë si zbërthim (P&L breakdown).
     const mktProdRows = await queryAll(
       `SELECT COALESCE(m.product_qty, 0)  AS qty,
               COALESCE(p.cost_price, 0)   AS cost
@@ -5277,6 +5642,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const r of mktProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
+    expenses.EUR += marketing_in_kind_eur;
 
     // Fatura Blerje kesh (payment_method='cash') → amount_paid në monedhën origjinale.
     // Kthimet (type='return') me pm='cash' kontribuojnë me shenjë negative:
@@ -5550,7 +5916,21 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     );
     for (const r of mktCashRangeRows) expenses.EUR += r.amt;
 
-    // Marketing "in kind" për periudhën — kosto informative, s'zbritet nga arka.
+    // Zërat direkt cash të Marketingut për periudhën — shpenzime në arkë sipas monedhës.
+    const mktDirectCashRangeRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount, 0)       AS amt
+         FROM marketing_expenses
+        WHERE date BETWEEN ? AND ? AND product_id IS NULL`,
+      [from, to]
+    );
+    for (const r of mktDirectCashRangeRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in expenses) expenses[c] += r.amt;
+    }
+
+    // Marketing "in kind" për periudhën — regjistrohet me kostoń e produktit si
+    // shpenzim EUR në arkë (dhe kthehet edhe si zbërthim informativ).
     const mktProdRangeRows = await queryAll(
       `SELECT COALESCE(m.product_qty, 0) AS qty,
               COALESCE(p.cost_price, 0)  AS cost
@@ -5571,6 +5951,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     for (const r of mktProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
+    expenses.EUR += marketing_in_kind_eur;
 
     const purRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
@@ -6798,12 +7179,22 @@ function pickCurrency(cur) {
 app.get('/api/expense-entries/:date', async (req, res) => {
   try {
     const { date } = req.params;
+    // `type` diskriminon: 'daily' = shpenzime të zakonshme (pa lidhje me faturë blerje),
+    // 'transport' = pagesa transporti të lidhura me fatura blerje, 'all' = të gjitha.
+    const type = String(req.query.type || 'all').toLowerCase();
+    let extra = '';
+    if (type === 'daily')     extra = ' AND e.purchase_invoice_id IS NULL';
+    else if (type === 'transport') extra = ' AND e.purchase_invoice_id IS NOT NULL';
     const rows = await queryAll(
       `SELECT e.*, c.name AS category_name,
+              pi.invoice_no AS purchase_invoice_no,
+              pi.supplier_name AS purchase_supplier_name,
+              pi.date AS purchase_invoice_date,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
        FROM expense_entries e
        LEFT JOIN expense_categories c ON c.id = e.category_id
-       WHERE e.date = ?
+       LEFT JOIN purchase_invoices pi ON pi.id = e.purchase_invoice_id
+       WHERE e.date = ?${extra}
        ORDER BY e.id ASC`,
       [date]
     );
@@ -6819,16 +7210,26 @@ app.get('/api/expense-entries/:date', async (req, res) => {
 
 app.post('/api/expense-entries', async (req, res) => {
   try {
-    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
+    const { date, category_id, description, currency, amount, exchange_rate, purchase_invoice_id } = req.body || {};
     if (!date) return res.status(400).json({ error: 'date required' });
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
     if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+    const invId = purchase_invoice_id ? parseInt(purchase_invoice_id) || null : null;
+    if (invId) {
+      // Validime për pagesat e transportit: fatura duhet të ekzistojë, dhe një
+      // faturë mund të ketë vetëm një pagesë transporti (indeksi unik e mbron
+      // te DB, por kthejmë gabim të qartë para se të prekim DB-në).
+      const exists = await queryOne('SELECT id FROM purchase_invoices WHERE id = ?', [invId]);
+      if (!exists) return res.status(400).json({ error: 'fatura e blerjes nuk u gjet' });
+      const dup = await queryOne('SELECT id FROM expense_entries WHERE purchase_invoice_id = ?', [invId]);
+      if (dup) return res.status(409).json({ error: 'kjo faturë ka tashmë një pagesë transporti' });
+    }
     await run(
       `INSERT INTO expense_entries (date, category_id, description, currency, amount, exchange_rate,
-         amount_lek, amount_eur, amount_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         amount_lek, amount_eur, amount_usd, purchase_invoice_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date,
         category_id || null,
@@ -6838,13 +7239,19 @@ app.post('/api/expense-entries', async (req, res) => {
         cur === 'LEK' ? amt : 0,
         cur === 'EUR' ? amt : 0,
         cur === 'USD' ? amt : 0,
+        invId,
       ]
     );
     await syncExpenseTotals(date);
     const row = await queryOne(
       `SELECT e.*, c.name AS category_name,
+              pi.invoice_no AS purchase_invoice_no,
+              pi.supplier_name AS purchase_supplier_name,
+              pi.date AS purchase_invoice_date,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
-       FROM expense_entries e LEFT JOIN expense_categories c ON c.id = e.category_id
+       FROM expense_entries e
+       LEFT JOIN expense_categories c ON c.id = e.category_id
+       LEFT JOIN purchase_invoices pi ON pi.id = e.purchase_invoice_id
        ORDER BY e.id DESC LIMIT 1`
     );
     res.json(row);
@@ -6854,17 +7261,29 @@ app.post('/api/expense-entries', async (req, res) => {
 app.put('/api/expense-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, category_id, description, currency, amount, exchange_rate } = req.body || {};
-    const existing = await queryOne('SELECT date FROM expense_entries WHERE id = ?', [id]);
+    const { date, category_id, description, currency, amount, exchange_rate, purchase_invoice_id } = req.body || {};
+    const existing = await queryOne('SELECT date, purchase_invoice_id FROM expense_entries WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
     if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
+    // Nëse fusha `purchase_invoice_id` s'kalohet fare, ruhet vlera ekzistuese
+    // (mos e prek — PUT nga Shpenzime Ditore nuk duhet ta zerojë lidhjen).
+    const invId = purchase_invoice_id === undefined
+      ? (existing.purchase_invoice_id || null)
+      : (purchase_invoice_id ? parseInt(purchase_invoice_id) || null : null);
+    if (invId && invId !== existing.purchase_invoice_id) {
+      const exists = await queryOne('SELECT id FROM purchase_invoices WHERE id = ?', [invId]);
+      if (!exists) return res.status(400).json({ error: 'fatura e blerjes nuk u gjet' });
+      const dup = await queryOne('SELECT id FROM expense_entries WHERE purchase_invoice_id = ? AND id <> ?', [invId, id]);
+      if (dup) return res.status(409).json({ error: 'kjo faturë ka tashmë një pagesë transporti' });
+    }
     await run(
       `UPDATE expense_entries SET date = ?, category_id = ?, description = ?,
          currency = ?, amount = ?, exchange_rate = ?,
-         amount_lek = ?, amount_eur = ?, amount_usd = ?
+         amount_lek = ?, amount_eur = ?, amount_usd = ?,
+         purchase_invoice_id = ?
        WHERE id = ?`,
       [
         date || existing.date,
@@ -6874,6 +7293,7 @@ app.put('/api/expense-entries/:id', async (req, res) => {
         cur === 'LEK' ? amt : 0,
         cur === 'EUR' ? amt : 0,
         cur === 'USD' ? amt : 0,
+        invId,
         id,
       ]
     );
@@ -6881,8 +7301,13 @@ app.put('/api/expense-entries/:id', async (req, res) => {
     if (date && date !== existing.date) await syncExpenseTotals(date);
     res.json(await queryOne(
       `SELECT e.*, c.name AS category_name,
+              pi.invoice_no AS purchase_invoice_no,
+              pi.supplier_name AS purchase_supplier_name,
+              pi.date AS purchase_invoice_date,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
-       FROM expense_entries e LEFT JOIN expense_categories c ON c.id = e.category_id
+       FROM expense_entries e
+       LEFT JOIN expense_categories c ON c.id = e.category_id
+       LEFT JOIN purchase_invoices pi ON pi.id = e.purchase_invoice_id
        WHERE e.id = ?`, [id]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -6901,7 +7326,7 @@ app.delete('/api/expense-entries/:id', async (req, res) => {
 // ── Raporti i Shpenzimeve ────────────────────────────────────
 app.get('/api/reports/expenses', async (req, res) => {
   try {
-    const { from, to, category_id, currency } = req.query;
+    const { from, to, category_id, currency, type } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
 
     const params = [from, to];
@@ -6914,12 +7339,19 @@ app.get('/api/reports/expenses', async (req, res) => {
       where += ` AND COALESCE(e.currency, 'LEK') = ?`;
       params.push(String(currency).toUpperCase());
     }
+    const t = String(type || 'all').toLowerCase();
+    if (t === 'daily')     where += ' AND e.purchase_invoice_id IS NULL';
+    else if (t === 'transport') where += ' AND e.purchase_invoice_id IS NOT NULL';
 
     const entries = await queryAll(
       `SELECT e.*, c.name AS category_name,
+              pi.invoice_no AS purchase_invoice_no,
+              pi.supplier_name AS purchase_supplier_name,
+              pi.date AS purchase_invoice_date,
               (COALESCE(e.amount, 0) * COALESCE(e.exchange_rate, 1)) AS total_lek
        FROM expense_entries e
        LEFT JOIN expense_categories c ON c.id = e.category_id
+       LEFT JOIN purchase_invoices pi ON pi.id = e.purchase_invoice_id
        WHERE ${where}
        ORDER BY e.date ASC, e.id ASC`,
       params
