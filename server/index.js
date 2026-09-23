@@ -6280,6 +6280,80 @@ async function syncSafeWithdrawTotals(date) {
   }
 }
 
+// GET — ngjarjet individuale të kasafortës për një datë specifike, të grupuara
+// sipas llojit (withdrawals, conversions, bank→safe deposits, closeout). Përdoret
+// nga modal-i "Menaxho Veprime" te Kasaforta për admin (fshirja e gabimeve).
+app.get('/api/kasaforta/events/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    if (!date) return res.status(400).json({ error: 'date required' });
+
+    const withdrawals = await queryAll(
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              person, note, created_at
+         FROM safe_withdrawals
+        WHERE date = ?
+        ORDER BY created_at ASC, id ASC`,
+      [date]
+    );
+
+    const conversions = await queryAll(
+      `SELECT id, date, from_currency, from_amount, to_currency, to_amount,
+              exchange_rate, note, created_at
+         FROM safe_conversions
+        WHERE date = ?
+        ORDER BY created_at ASC, id ASC`,
+      [date]
+    );
+
+    const bankDeposits = await queryAll(
+      `SELECT id, date, direction, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              note, created_at
+         FROM bank_movements
+        WHERE date = ? AND direction = 'to_safe'
+        ORDER BY created_at ASC, id ASC`,
+      [date]
+    );
+
+    const closeoutRow = await queryOne(
+      `SELECT COALESCE(closeout_to_safe_lek, 0) AS lek,
+              COALESCE(closeout_to_safe_eur, 0) AS eur,
+              COALESCE(closeout_to_safe_usd, 0) AS usd,
+              COALESCE(closeout_to_safe_gbp, 0) AS gbp,
+              COALESCE(closeout_to_safe_chf, 0) AS chf
+         FROM daily_records
+        WHERE date = ?`,
+      [date]
+    );
+    const closeoutTotal = closeoutRow
+      ? (closeoutRow.lek + closeoutRow.eur + closeoutRow.usd + closeoutRow.gbp + closeoutRow.chf)
+      : 0;
+    const closeout = closeoutTotal > 0 ? {
+      date,
+      amounts: {
+        LEK: closeoutRow.lek, EUR: closeoutRow.eur, USD: closeoutRow.usd,
+        GBP: closeoutRow.gbp, CHF: closeoutRow.chf,
+      },
+    } : null;
+
+    res.json({ date, withdrawals, conversions, bank_deposits: bankDeposits, closeout });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE — anulon closeout_to_safe për një datë (zeron kolonat në daily_records).
+// Vetëm admin. Përdoret kur "Mbyllja e Ditës" është kryer gabimisht.
+app.delete('/api/kasaforta/closeout/:date', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const { date } = req.params;
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const CURS_LC = ['lek', 'eur', 'usd', 'gbp', 'chf'];
+    const setClause = CURS_LC.map(c => `closeout_to_safe_${c} = 0`).join(', ');
+    await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [date]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/safe-withdrawals', async (req, res) => {
   try {
     const { from, to, limit } = req.query;

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
+import { getUser } from '../lib/auth.js'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -31,6 +32,8 @@ export default function Kasaforta() {
   const [showConvert, setShowConvert] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [manageDate, setManageDate] = useState(null) // 'YYYY-MM-DD' ose null
+  const isAdmin = getUser()?.role === 'admin'
 
   useEffect(() => {
     let cancel = false
@@ -99,6 +102,14 @@ export default function Kasaforta() {
         />
       )}
 
+      {manageDate && (
+        <ManageEventsModal
+          date={manageDate}
+          onClose={() => setManageDate(null)}
+          onChanged={() => { setRefreshKey(k => k + 1) }}
+        />
+      )}
+
       <DateRangeFilter
         from={dateRange.from}
         to={dateRange.to}
@@ -138,6 +149,7 @@ export default function Kasaforta() {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Tërheqje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Neto</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase" title="Gjendja e kasafortës në fund të kësaj date (fillestar + neto)">Bilanci Final</th>
+                  {isAdmin && <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase" title="Menaxho / fshi veprime të kësaj date">Veprime</th>}
                 </tr>
               </thead>
               <tbody>
@@ -199,6 +211,19 @@ export default function Kasaforta() {
                         <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-900 dark:text-white" title={`${fmt(cur.balance_before)} + ${cur.net > 0 ? '+' : ''}${fmt(cur.net)} = ${fmt(cur.balance)}`}>
                           {fmt(cur.balance)}
                         </td>
+                        {isAdmin && (
+                          <td className="px-3 py-2 text-center">
+                            {idx === 0 && (
+                              <button
+                                onClick={() => setManageDate(r.date)}
+                                className="text-xs px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-slate-700 dark:text-slate-200 hover:text-rose-700 dark:hover:text-rose-300"
+                                title="Menaxho veprime të kësaj date (admin)"
+                              >
+                                🔧
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     )
                   })
@@ -416,6 +441,183 @@ function ConvertModal({ balance, onClose, onSaved }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Modal admin-only: liston veprimet individuale të një date dhe lejon fshirjen
+// e ndonjë veprimi të gabuar (tërheqje, konvertim, derdhje bankë→kasafortë,
+// mbyllje dite). Fshirja e mbylljes së ditës zeron kolonat closeout_to_safe_*
+// të asaj date te daily_records.
+function ManageEventsModal({ date, onClose, onChanged }) {
+  const [events, setEvents] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [busyId, setBusyId] = useState('')
+
+  const load = async () => {
+    setLoading(true); setErr('')
+    try {
+      const r = await fetch(`/api/kasaforta/events/${date}`)
+      if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
+      setEvents(await r.json())
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [date])
+
+  const doDelete = async (kind, id, label) => {
+    const ok = await showConfirm({
+      title: 'Fshi këtë veprim?',
+      message: `${label}\n\nKy veprim është i pakthyeshëm. Bilanci i kasafortës do të rikllogaritet automatikisht.`,
+      confirmText: 'Po, fshi',
+      cancelText: 'Anulo',
+    })
+    if (!ok) return
+    setBusyId(`${kind}-${id}`); setErr('')
+    try {
+      let url
+      if (kind === 'withdrawal') url = `/api/safe-withdrawals/${id}`
+      else if (kind === 'conversion') url = `/api/safe-conversions/${id}`
+      else if (kind === 'bank_deposit') url = `/api/bank-movements/${id}`
+      else if (kind === 'closeout') url = `/api/kasaforta/closeout/${date}`
+      else throw new Error('Lloj i panjohur')
+      const r = await fetch(url, { method: 'DELETE' })
+      if (!r.ok) throw new Error((await r.json()).error || 'Gabim gjatë fshirjes')
+      await load()
+      onChanged?.()
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  const amountsSummary = (obj) => {
+    const parts = []
+    for (const c of CURS) {
+      const key = `amount_${c.toLowerCase()}`
+      const v = parseFloat(obj[key]) || 0
+      if (v > 0) parts.push(`${fmt(v)} ${c}`)
+    }
+    return parts.join(' · ') || '—'
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="modal-header">
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">🔧 Menaxho Veprime — {fmtDate(date)}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Fshi veprime të bëra gabimisht. Bilanci rifreskohet automatikisht.</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {loading && <p className="text-sm text-slate-500">Duke ngarkuar…</p>}
+          {err && <p className="text-sm text-red-600">{err}</p>}
+
+          {events && (
+            <>
+              {/* Tërheqjet */}
+              <Section title="Tërheqje nga Kasaforta" empty="Asnjë tërheqje">
+                {events.withdrawals?.map(w => (
+                  <EventRow
+                    key={w.id}
+                    label={amountsSummary(w)}
+                    subtitle={[w.person, w.note].filter(Boolean).join(' · ')}
+                    onDelete={() => doDelete('withdrawal', w.id, `Tërheqje: ${amountsSummary(w)}`)}
+                    busy={busyId === `withdrawal-${w.id}`}
+                  />
+                ))}
+              </Section>
+
+              {/* Konvertimet */}
+              <Section title="Konvertim Monedhe" empty="Asnjë konvertim">
+                {events.conversions?.map(cv => (
+                  <EventRow
+                    key={cv.id}
+                    label={`${fmt(cv.from_amount)} ${cv.from_currency} → ${fmt(cv.to_amount)} ${cv.to_currency}`}
+                    subtitle={`Kursi: 1 ${cv.from_currency} = ${cv.exchange_rate} ${cv.to_currency}${cv.note ? ' · ' + cv.note : ''}`}
+                    onDelete={() => doDelete('conversion', cv.id, `Konvertim: ${fmt(cv.from_amount)} ${cv.from_currency} → ${fmt(cv.to_amount)} ${cv.to_currency}`)}
+                    busy={busyId === `conversion-${cv.id}`}
+                  />
+                ))}
+              </Section>
+
+              {/* Derdhjet nga banka */}
+              <Section title="Derdhje Bankë → Kasafortë" empty="Asnjë derdhje">
+                {events.bank_deposits?.map(bd => (
+                  <EventRow
+                    key={bd.id}
+                    label={amountsSummary(bd)}
+                    subtitle={bd.note || ''}
+                    onDelete={() => doDelete('bank_deposit', bd.id, `Derdhje bankë: ${amountsSummary(bd)}`)}
+                    busy={busyId === `bank_deposit-${bd.id}`}
+                  />
+                ))}
+              </Section>
+
+              {/* Mbyllja e Ditës */}
+              <Section title="Mbyllje Dite (Arka → Kasafortë)" empty="Asnjë mbyllje ditore">
+                {events.closeout && (
+                  <EventRow
+                    label={CURS.map(c => {
+                      const v = events.closeout.amounts[c] || 0
+                      return v > 0 ? `${fmt(v)} ${c}` : null
+                    }).filter(Boolean).join(' · ') || '—'}
+                    subtitle="Fshirja zeron mbylljen për këtë datë; do të duhet të ripërsërisësh mbylljen te Arka Ditore nëse ka pasur kesh të tepërt."
+                    danger
+                    onDelete={() => doDelete('closeout', date, `Mbyllje dite për ${fmtDate(date)}`)}
+                    busy={busyId === `closeout-${date}`}
+                  />
+                )}
+              </Section>
+            </>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button onClick={onClose} className="btn-secondary">Mbyll</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Section({ title, empty, children }) {
+  const hasChildren = Array.isArray(children)
+    ? children.filter(Boolean).length > 0
+    : !!children
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1">{title}</h4>
+      {hasChildren
+        ? <div className="space-y-1">{children}</div>
+        : <p className="text-xs text-slate-400 dark:text-slate-500 italic">{empty}</p>}
+    </div>
+  )
+}
+
+function EventRow({ label, subtitle, onDelete, busy, danger }) {
+  return (
+    <div className={`flex items-start justify-between gap-3 rounded-lg border ${danger ? 'border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40'} p-2`}>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 tabular-nums">{label}</p>
+        {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{subtitle}</p>}
+      </div>
+      <button
+        onClick={onDelete}
+        disabled={busy}
+        className="shrink-0 text-xs px-2 py-1 rounded-md bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold"
+      >
+        {busy ? '…' : '🗑️ Fshi'}
+      </button>
     </div>
   )
 }
