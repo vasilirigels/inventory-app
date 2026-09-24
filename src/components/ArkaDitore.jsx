@@ -143,6 +143,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     (data.porosi_deposits?.[c] || 0) ||
     (data.safe_to_arka?.[c]    || 0) ||
     (data.worker_payments_cash?.[c] || 0) ||
+    (data.returns_gross?.[c]   || 0) ||
     (data.opening_cash?.[c]    || 0) ||
     (data.expenses?.[c]        || 0) ||
     (data.purchase_cash?.[c]   || 0) ||
@@ -169,6 +170,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Tërheqje nga Kasaforta',          src: 'safe_to_arka',      sign: '+', color: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-900/30', detail: `${data.counts?.safe_to_arka || 0} tërheqje me destinacion arkë` },
   ]
   const outRows = [
+    { label: 'Kthime Shitjesh (Kesh)',          src: 'returns_cash',      sign: '−', color: 'text-red-700 dark:text-red-300',      bg: 'bg-red-50 dark:bg-red-900/30',       detail: `${data.counts?.credit_notes || 0} kreditore · rimbursim kesh (dalje nga sirtari)` },
     { label: 'Shpenzime (Arkë)',                src: 'expenses',          sign: '−', color: 'text-orange-700 dark:text-orange-300',  bg: 'bg-orange-50 dark:bg-orange-900/30',  detail: `${data.counts.expenses} regjistrime` },
     { label: 'Fatura Blerje Kesh',              src: 'purchase_cash',     sign: '−', color: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.purchases_cash} fatura` },
     { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },

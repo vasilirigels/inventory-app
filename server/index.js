@@ -5593,6 +5593,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
          COALESCE(i.paid_cash, 0)             AS paid_cash,
          COALESCE(i.paid_pos, 0)              AS paid_pos,
          COALESCE(i.paid_bank, 0)             AS paid_bank,
+         COALESCE(i.is_credit_note, 0)        AS is_credit_note,
          (COALESCE(i.amount_paid, 0)
            - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)
          )                                    AS initial_paid
@@ -5618,13 +5619,49 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       }
     }
 
-    const xhiro_total = zeroPerCur();
-    const paid_bank   = zeroPerCur();
-    const paid_pos    = zeroPerCur();
-    const amount_due  = zeroPerCur();
+    const xhiro_total   = zeroPerCur();  // vetëm shitjet pozitive
+    const paid_bank     = zeroPerCur();
+    const paid_pos      = zeroPerCur();
+    const amount_due    = zeroPerCur();
+    // Kthimet ndahen për vete që të shfaqen si rresht i dedikuar te UI,
+    // e jo të ndotin totalin e xhiros. `returns_gross` = vlera totale e artikujve
+    // të kthyer; ndarja bank/pos/cash tregon nga cili kanal doli rimbursimi.
+    const returns_gross = zeroPerCur();
+    const returns_cash  = zeroPerCur();  // rimbursime kesh (dalje nga arka)
+    const returns_bank  = zeroPerCur();  // rimbursime bankë (dalje nga bank)
+    const returns_pos   = zeroPerCur();  // rimbursime POS (dalje nga pos)
+    const returns_debt  = zeroPerCur();  // reduktim borxhi klienti (jo lëvizje kesh)
+    let credit_note_count = 0;
+
     for (const r of salesRows) {
       const c = (r.cur || 'LEK').toUpperCase();
       if (!(c in xhiro_total)) continue;
+
+      // ── Kthimet (kreditoret) — ndahen nga xhiro ──────────────────────────
+      // total_with_vat është negativ; ekspozojmë vlerë pozitive për UI.
+      if (r.is_credit_note) {
+        credit_note_count += 1;
+        const abs = Math.abs(r.total);
+        returns_gross[c] += abs;
+        if (r.pm === 'cash')      returns_cash[c] += abs;
+        else if (r.pm === 'bank') returns_bank[c] += abs;
+        else if (r.pm === 'pos')  returns_pos[c]  += abs;
+        else if (r.pm === 'debt') returns_debt[c] += abs;
+        else if (r.pm === 'mikse') {
+          const splits = splitsByInv[r.id] || [];
+          for (const s of splits) {
+            const sc = (s.currency || c).toUpperCase();
+            if (!(sc in returns_gross)) continue;
+            const amt = Math.abs(parseFloat(s.amount) || 0);
+            if (s.method === 'cash')      returns_cash[sc] += amt;
+            else if (s.method === 'bank') returns_bank[sc] += amt;
+            else if (s.method === 'pos')  returns_pos[sc]  += amt;
+          }
+        }
+        continue;
+      }
+
+      // ── Shitjet e zakonshme (pozitive) ───────────────────────────────────
       if (r.pm === 'bank') {
         xhiro_total[c] += r.total;
         paid_bank[c] += r.total;
@@ -5877,7 +5914,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           + safe_to_arka[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
-                          - worker_payments_cash[c];
+                          - worker_payments_cash[c]
+                          - returns_cash[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
       // Për rastin normal (cash_balance >= 0): physical - teorike, si zakonisht.
       // Kur cash_balance del negative (të dhëna inkonsistente — daljet tejkalojnë
@@ -5899,6 +5937,11 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       porosi_deposits:   fx(porosi_deposits),
       safe_to_arka:      fx(safe_to_arka),
       worker_payments_cash: fx(worker_payments_cash),
+      returns_gross:     fx(returns_gross),
+      returns_cash:      fx(returns_cash),
+      returns_bank:      fx(returns_bank),
+      returns_pos:       fx(returns_pos),
+      returns_debt:      fx(returns_debt),
       expenses:          fx(expenses),
       // Kosto e produkteve të dhëna si marketing "in kind" — vetëm informative,
       // s'ka lëvizje kesh (paratë u shpenzuan te blerja origjinale).
@@ -5914,7 +5957,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       closeout_to_safe:  fx(closeout_to_safe),
       carryover_next_day: fx(carryover_next_day),
       counts: {
-        invoices: salesRows.length,
+        invoices: salesRows.length - credit_note_count,
+        credit_notes: credit_note_count,
         expenses: expRows.length,
         purchases_cash: purRows.length,
         hurda_purchases: hurdaRows.length,
