@@ -174,6 +174,8 @@ export default function KthimShitje() {
         </div>
       )}
 
+      {isAdmin && <ReturnsHistory />}
+
       {/* Kutia e kërkimit */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
         <div className="relative">
@@ -461,6 +463,242 @@ export default function KthimShitje() {
               {saving ? 'Duke ruajtur…' : `💾 Kryej Kthimin (${fmt(refund)})`}
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Admin: Historia e Kthimeve (kreditoreve) ──────────────────────────────
+// Seksion i mbylleshëm që lejon admin-in të shohë kthimet e bëra, të ndryshojë
+// datën e një kthimi (kur është regjistruar në datë të gabuar) ose ta fshijë
+// që të ripërsëritet.
+function ReturnsHistory() {
+  const todayIso = () => new Date().toISOString().slice(0, 10)
+  const monthAgoIso = () => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1)
+    return d.toISOString().slice(0, 10)
+  }
+
+  const [open, setOpen]     = useState(false)
+  const [from, setFrom]     = useState(monthAgoIso())
+  const [to, setTo]         = useState(todayIso())
+  const [q, setQ]           = useState('')
+  const [rows, setRows]     = useState([])
+  const [loading, setLoad]  = useState(false)
+  const [busyId, setBusy]   = useState(null)
+  const [editDate, setEditDate] = useState(null) // { id, currentDate, newDate }
+  const [msg, setMsg]       = useState('')
+
+  const load = async () => {
+    setLoad(true)
+    try {
+      const p = new URLSearchParams()
+      if (from) p.set('from', from)
+      if (to)   p.set('to', to)
+      if (q.trim()) p.set('q', q.trim())
+      p.set('limit', '200')
+      const res = await fetch(`/api/credit-notes?${p}`)
+      const data = await res.json()
+      setRows(Array.isArray(data) ? data : [])
+    } catch (_) { setRows([]) }
+    finally { setLoad(false) }
+  }
+
+  useEffect(() => { if (open) load() /* eslint-disable-next-line */ }, [open, from, to])
+
+  const doChangeDate = async () => {
+    if (!editDate) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editDate.newDate)) {
+      setMsg('Formati i datës: YYYY-MM-DD'); return
+    }
+    setBusy(editDate.id); setMsg('')
+    try {
+      const res = await fetch(`/api/invoices/${editDate.id}/date`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: editDate.newDate }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Gabim')
+      setMsg(`✓ Data u ndryshua: ${data.old_date || '?'} → ${data.new_date || editDate.newDate}`)
+      setEditDate(null)
+      load()
+    } catch (ex) {
+      setMsg(`Gabim: ${ex.message}`)
+    } finally { setBusy(null) }
+  }
+
+  const doDelete = async (r) => {
+    const ok = await showConfirm(
+      `Kreditore ${r.invoice_no} nga ${r.date}\n` +
+      `Klient: ${r.customer_name || '—'}\n` +
+      `Total i kthyer: ${fmt(Math.abs(r.total_with_vat))} ${r.currency || 'LEK'}\n\n` +
+      `Fshirja e këtij kthimi do të:\n` +
+      `• zbresë artikujt përsëri nga stoku\n` +
+      `• rikthejë rimbursimin te bilancet (arka/bankë)\n` +
+      `• fshijë kreditoren përgjithmonë\n\n` +
+      `Pas kësaj mund të ripërsërisësh kthimin me datën e saktë.`,
+      { title: 'Fshi këtë kthim?', confirmLabel: 'Po, fshi', danger: true },
+    )
+    if (!ok) return
+    setBusy(r.id); setMsg('')
+    try {
+      const res = await fetch(`/api/invoices/${r.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Gabim')
+      }
+      setMsg(`✓ Kreditore ${r.invoice_no} u fshi`)
+      load()
+    } catch (ex) {
+      setMsg(`Gabim: ${ex.message}`)
+    } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 text-left"
+      >
+        <div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            📋 Historia e Kthimeve <span className="text-[10px] font-normal text-amber-700 dark:text-amber-300 uppercase ml-1">Admin</span>
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Shiko, ndrysho datën, ose fshi kthime të bëra më parë
+          </div>
+        </div>
+        <span className="text-slate-400 text-lg">{open ? '▼' : '▶'}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-slate-100 dark:border-slate-800 p-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+            <div>
+              <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Nga</label>
+              <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="input-field" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Deri</label>
+              <input type="date" value={to} onChange={e => setTo(e.target.value)} className="input-field" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Kërko</label>
+              <div className="flex gap-2">
+                <input type="text" value={q} onChange={e => setQ(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') load() }}
+                  placeholder="Nr. kreditore, klient, ose nr. fature origjinale"
+                  className="input-field flex-1" />
+                <button onClick={load} className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm font-semibold">Kërko</button>
+              </div>
+            </div>
+          </div>
+
+          {msg && (
+            <div className={`text-xs px-3 py-2 rounded-lg ${msg.startsWith('✓') ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>
+              {msg}
+            </div>
+          )}
+
+          {loading ? (
+            <p className="text-center text-slate-400 text-sm py-6">Duke ngarkuar…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-center text-slate-400 text-sm py-6">Asnjë kthim s'u gjet për këtë filtër.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Kreditore</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Origjinali</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
+                    <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Copë</th>
+                    <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Rimbursim</th>
+                    <th className="px-3 py-2 text-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Metoda</th>
+                    <th className="px-3 py-2 text-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r => {
+                    const isEditing = editDate?.id === r.id
+                    const busy = busyId === r.id
+                    const refundAbs = Math.abs(r.amount_paid || r.total_with_vat || 0)
+                    return (
+                      <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                          {isEditing ? (
+                            <input type="date" value={editDate.newDate}
+                              onChange={e => setEditDate({ ...editDate, newDate: e.target.value })}
+                              className="input-field !py-1 !text-xs" />
+                          ) : (
+                            <span className="text-slate-700 dark:text-slate-200">{r.date}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">
+                          {r.invoice_no}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap text-slate-600 dark:text-slate-400">
+                          {r.parent_invoice_no || '—'}
+                          {r.parent_invoice_date && (
+                            <div className="text-[10px] text-slate-400">{r.parent_invoice_date}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200 max-w-[10rem] truncate">
+                          {r.customer_name || <span className="italic text-slate-400">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-xs text-slate-700 dark:text-slate-200">
+                          {r.qty_total}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-xs font-bold text-green-700 dark:text-green-400 whitespace-nowrap">
+                          {fmt(refundAbs)} {r.currency || 'LEK'}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className="badge bg-slate-100 dark:bg-slate-800 text-[10px] uppercase">
+                            {r.payment_method || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  onClick={doChangeDate}
+                                  disabled={busy || editDate.newDate === r.date}
+                                  className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white text-[10px] font-semibold"
+                                >{busy ? '…' : '✓ Ruaj'}</button>
+                                <button
+                                  onClick={() => setEditDate(null)}
+                                  className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-semibold"
+                                >Anulo</button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => setEditDate({ id: r.id, newDate: r.date })}
+                                  disabled={busy}
+                                  className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-[10px] font-semibold"
+                                  title="Ndrysho datën e këtij kthimi"
+                                >📅 Datën</button>
+                                <button
+                                  onClick={() => doDelete(r)}
+                                  disabled={busy}
+                                  className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-[10px] font-semibold"
+                                  title="Fshi kthimin (rikthen stokun + rimbursimin)"
+                                >🗑️ Fshi</button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

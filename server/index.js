@@ -2395,6 +2395,82 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ============================================================
+// CREDIT NOTES — listë e kthimeve për menaxhim admin
+// ============================================================
+// Listim i faturave kreditore me filtra date + search. Përdoret nga UI e
+// Kthim Shitjeve (admin-only) për të parë historikun, ndryshuar datën, ose
+// fshirë kthime të bëra gabimisht.
+app.get('/api/credit-notes', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const { from, to, q, limit } = req.query;
+    const params = [];
+    let where = 'cn.is_credit_note = 1';
+    if (from) { where += ' AND cn.date >= ?'; params.push(from); }
+    if (to)   { where += ' AND cn.date <= ?'; params.push(to); }
+    if (q) {
+      const like = `%${String(q).toLowerCase()}%`;
+      where += ' AND (LOWER(cn.invoice_no) LIKE ? OR LOWER(cn.customer_name) LIKE ? OR LOWER(orig.invoice_no) LIKE ?)';
+      params.push(like, like, like);
+    }
+    const lim = Math.min(parseInt(limit) || 200, 500);
+    const rows = await queryAll(
+      `SELECT cn.id, cn.date, cn.invoice_no, cn.customer_name, cn.currency,
+              cn.total_with_vat, cn.amount_paid, cn.payment_method,
+              cn.paid_cash, cn.paid_bank, cn.paid_pos,
+              cn.parent_invoice_id, cn.notes, cn.created_at,
+              orig.invoice_no AS parent_invoice_no,
+              orig.date       AS parent_invoice_date,
+              (SELECT COUNT(*) FROM invoice_items ii WHERE ii.invoice_id = cn.id) AS items_count,
+              (SELECT COALESCE(SUM(ABS(ii.qty)), 0) FROM invoice_items ii WHERE ii.invoice_id = cn.id) AS qty_total
+         FROM invoices cn
+         LEFT JOIN invoices orig ON orig.id = cn.parent_invoice_id
+        WHERE ${where}
+        ORDER BY cn.date DESC, cn.id DESC
+        LIMIT ${lim}`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Detajet e artikujve për një kreditore — për tooltip / preview në UI.
+app.get('/api/credit-notes/:id/items', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const { id } = req.params;
+    const cn = await queryOne('SELECT id FROM invoices WHERE id = ? AND is_credit_note = 1', [id]);
+    if (!cn) return res.status(404).json({ error: 'not found' });
+    const items = await queryAll(
+      `SELECT id, name, barcode, qty, total_with_vat
+         FROM invoice_items WHERE invoice_id = ? ORDER BY id`,
+      [id]
+    );
+    res.json(items);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ndrysho vetëm datën e një fature (kryesisht për kreditoret që janë bërë me
+// datën e gabuar). Admin-only. Nuk prek artikujt, pagesat, stokun — vetëm
+// zhvendos regjistrimin te një ditë tjetër (që reflektohet te Arka Ditore
+// e datës së re dhe zhduket nga ajo e datës së vjetër).
+app.patch('/api/invoices/:id/date', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const { id } = req.params;
+    const newDate = String(req.body?.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+      return res.status(400).json({ error: 'date duhet formati YYYY-MM-DD' });
+    }
+    const inv = await queryOne('SELECT id, date FROM invoices WHERE id = ?', [id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    if (inv.date === newDate) return res.json({ success: true, unchanged: true });
+    await run('UPDATE invoices SET date = ? WHERE id = ?', [newDate, id]);
+    res.json({ success: true, old_date: inv.date, new_date: newDate });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Krijo Faturë Kreditore (me minus). Suporton dy modalitete:
 //  - Kthim i plotë (default): mirror i të gjithë artikujve me sasi negative
 //  - Kthim i pjesshëm: në body dërgohet `items: [{ item_id, qty }]` — kreditorja
