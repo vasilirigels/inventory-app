@@ -2554,7 +2554,13 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
     if (inv.cancelled) return res.status(400).json({ error: 'Nuk lëshohet kreditore për faturë të anuluar' });
     if (inv.is_credit_note) return res.status(400).json({ error: 'Kjo është tashmë një kreditore' });
     const allItems = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
-    const date = (req.body && req.body.date) || new Date().toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    const date = (req.body && req.body.date) || today;
+    // Vetëm admin mund të regjistrojë kthim me datë të mëparshme (p.sh. kur
+    // kthimi ka ndodhur dje/muajin e kaluar por po futet sot në sistem).
+    if (date !== today && req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'vetëm admin mund të vendosë datë të ndryshme nga sot' });
+    }
 
     // Përcakto artikujt që do të mirror-ohen. `partial` = user-i zgjodhi një
     // nënbashkësi. Skalimi i sasive: qty e re nuk mund të kalojë origjinalen.

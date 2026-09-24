@@ -19,6 +19,8 @@ function fmt(n) {
   return v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function todayIso() { return new Date().toISOString().slice(0, 10) }
+
 export default function KthimShitje() {
   const isAdmin = getUser()?.role === 'admin'
   const [q, setQ] = useState('')
@@ -33,6 +35,9 @@ export default function KthimShitje() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(null)
+  // Data e kthimit — default sot. Admini mund ta ndryshojë kur po regjistron
+  // një kthim që faktikisht ka ndodhur në një ditë tjetër.
+  const [returnDate, setReturnDate] = useState(() => todayIso())
   // Admin-only: në modin "shumë direkte" hiqet krejt tarifa % dhe admini vendos
   // shumën e rimbursimit drejtpërsëdrejti (default = totali i rreshtit).
   const [adminManualMode, setAdminManualMode] = useState(false)
@@ -61,6 +66,7 @@ export default function KthimShitje() {
     setFeePctOverride(null)
     setUnitPriceOverride(null)
     setManualRefund(null)
+    setReturnDate(todayIso())
     setError('')
     setSuccess(null)
   }
@@ -121,6 +127,7 @@ export default function KthimShitje() {
           refund_amount: refund,
           refund_method: refundMethod,
           notes: notes.trim(),
+          date: returnDate,
         }),
       })
       const data = await res.json()
@@ -285,6 +292,35 @@ export default function KthimShitje() {
               </label>
             </div>
           )}
+
+          {/* Data e kthimit — default sot; admini mund ta zhvendosë në një ditë tjetër. */}
+          <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${
+            returnDate !== todayIso()
+              ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20'
+              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40'
+          }`}>
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+              📅 Data e kthimit
+            </label>
+            <input
+              type="date"
+              value={returnDate}
+              onChange={e => setReturnDate(e.target.value || todayIso())}
+              className="input-field !py-1 !text-sm w-auto"
+            />
+            {returnDate !== todayIso() && (
+              <>
+                <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                  ⚠️ Kthim me datë të mëparshme
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setReturnDate(todayIso())}
+                  className="text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 underline"
+                >kthe te sot</button>
+              </>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
