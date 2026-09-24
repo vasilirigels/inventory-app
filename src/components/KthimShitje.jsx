@@ -103,16 +103,13 @@ export default function KthimShitje() {
     const feeLine = useManual
       ? `Shumë manuale (admin) — pa tarifë`
       : `Zbritje ${effectivePct}% = ${fmt(feeKept)} (${tier?.label})`
-    const ok = await showConfirm({
-      title: 'Konfirmo kthimin',
-      message:
-        `Fatura ${selected.invoice_no} — ${selected.name}\n` +
-        `Sasi: ${qty} × ${fmt(effectiveUnitPrice)} = ${fmt(lineTotal)} ${selected.currency || 'LEK'}\n` +
-        `${feeLine}\n` +
-        `Rimbursim: ${fmt(refund)} ${selected.currency || 'LEK'} — ${refundMethod.toUpperCase()}`,
-      confirmText: 'Po, kthej',
-      cancelText: 'Anulo',
-    })
+    const ok = await showConfirm(
+      `Fatura ${selected.invoice_no} — ${selected.name}\n` +
+      `Sasi: ${qty} × ${fmt(effectiveUnitPrice)} = ${fmt(lineTotal)} ${selected.currency || 'LEK'}\n` +
+      `${feeLine}\n` +
+      `Rimbursim: ${fmt(refund)} ${selected.currency || 'LEK'} — ${refundMethod.toUpperCase()}`,
+      { title: 'Konfirmo kthimin', confirmLabel: 'Po, kthej' },
+    )
     if (!ok) return
     setSaving(true); setError('')
     try {
