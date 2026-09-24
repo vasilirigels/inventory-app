@@ -5677,6 +5677,15 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         amount_due[c] += due;
         // paidNow bie te kesh_nga_shitjet automatikisht (xhiro − bank − pos − due).
       }
+      else if (r.pm === 'cash') {
+        // Fatura pm='cash' zakonisht janë paguar plotësisht, por user mund të
+        // ketë vendosur manualisht një pjesë të papaguar (p.sh. amount_paid
+        // < total_with_vat). Ne trajtojmë atë pjesë si borxh që nuk hyri kesh.
+        xhiro_total[c] += r.total;
+        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const due     = Math.max(0, r.total - paidNow);
+        if (due > 0.005) amount_due[c] += due;
+      }
       else if (r.pm === 'mikse') {
         // Atribuo çdo split tek monedha e vet reale.
         const splits = splitsByInv[r.id] || [];
