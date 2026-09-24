@@ -52,6 +52,8 @@ const DELETE_ORDER = [
   'expense_entries',
   'expense_categories',
   'marketing_expenses',
+  'marketing_contract_entries',
+  'marketing_contracts',
   'marketing_categories',
   // Të tjera
   'customer_debts',

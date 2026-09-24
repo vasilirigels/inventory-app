@@ -30,6 +30,7 @@ export default function Kasaforta() {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
   const [showConvert, setShowConvert] = useState(false)
+  const [showDeposit, setShowDeposit] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [manageDate, setManageDate] = useState(null) // 'YYYY-MM-DD' ose null
@@ -73,11 +74,18 @@ export default function Kasaforta() {
               Derdhje + Mbyllje Ditore − Tërheqje ± Konvertime (kumulative)
             </p>
           </div>
-          <button
-            onClick={() => setShowConvert(true)}
-            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 dark:text-white text-xs font-bold shadow-sm"
-            title="Konverto valutë brenda kasafortës (p.sh. EUR → LEK)"
-          >💱 Konverto Monedhë</button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setShowDeposit(true)}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-sm"
+              title="Fut kesh direkt në kasafortë"
+            >💰 Derdh në Kasafortë</button>
+            <button
+              onClick={() => setShowConvert(true)}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 dark:text-white text-xs font-bold shadow-sm"
+              title="Konverto valutë brenda kasafortës (p.sh. EUR → LEK)"
+            >💱 Konverto Monedhë</button>
+          </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">
           {CURS.map(c => {
@@ -99,6 +107,13 @@ export default function Kasaforta() {
           balance={balance}
           onClose={() => setShowConvert(false)}
           onSaved={() => { setShowConvert(false); setRefreshKey(k => k + 1) }}
+        />
+      )}
+
+      {showDeposit && (
+        <DepositModal
+          onClose={() => setShowDeposit(false)}
+          onSaved={() => { setShowDeposit(false); setRefreshKey(k => k + 1) }}
         />
       )}
 
@@ -482,6 +497,7 @@ function ManageEventsModal({ date, onClose, onChanged }) {
       if (kind === 'withdrawal') url = `/api/safe-withdrawals/${id}`
       else if (kind === 'conversion') url = `/api/safe-conversions/${id}`
       else if (kind === 'bank_deposit') url = `/api/bank-movements/${id}`
+      else if (kind === 'direct_deposit') url = `/api/safe-deposits/${id}`
       else if (kind === 'closeout') url = `/api/kasaforta/closeout/${date}`
       else throw new Error('Lloj i panjohur')
       const r = await fetch(url, { method: 'DELETE' })
@@ -524,15 +540,20 @@ function ManageEventsModal({ date, onClose, onChanged }) {
             <>
               {/* Tërheqjet */}
               <Section title="Tërheqje nga Kasaforta" empty="Asnjë tërheqje">
-                {events.withdrawals?.map(w => (
-                  <EventRow
-                    key={w.id}
-                    label={amountsSummary(w)}
-                    subtitle={[w.person, w.note].filter(Boolean).join(' · ')}
-                    onDelete={() => doDelete('withdrawal', w.id, `Tërheqje: ${amountsSummary(w)}`)}
-                    busy={busyId === `withdrawal-${w.id}`}
-                  />
-                ))}
+                {events.withdrawals?.map(w => {
+                  const dest = w.destination || 'jashte'
+                  const destLabel = dest === 'arka' ? '→ Arkë' : dest === 'bank' ? '→ Bankë' : '→ Jashtë'
+                  const subtitleParts = [destLabel, w.person, w.note].filter(Boolean)
+                  return (
+                    <EventRow
+                      key={w.id}
+                      label={amountsSummary(w)}
+                      subtitle={subtitleParts.join(' · ')}
+                      onDelete={() => doDelete('withdrawal', w.id, `Tërheqje (${destLabel}): ${amountsSummary(w)}`)}
+                      busy={busyId === `withdrawal-${w.id}`}
+                    />
+                  )
+                })}
               </Section>
 
               {/* Konvertimet */}
@@ -557,6 +578,19 @@ function ManageEventsModal({ date, onClose, onChanged }) {
                     subtitle={bd.note || ''}
                     onDelete={() => doDelete('bank_deposit', bd.id, `Derdhje bankë: ${amountsSummary(bd)}`)}
                     busy={busyId === `bank_deposit-${bd.id}`}
+                  />
+                ))}
+              </Section>
+
+              {/* Derdhjet direkte */}
+              <Section title="Derdhje Direkte në Kasafortë" empty="Asnjë derdhje direkte">
+                {events.direct_deposits?.map(dd => (
+                  <EventRow
+                    key={dd.id}
+                    label={amountsSummary(dd)}
+                    subtitle={dd.note || ''}
+                    onDelete={() => doDelete('direct_deposit', dd.id, `Derdhje direkte: ${amountsSummary(dd)}`)}
+                    busy={busyId === `direct_deposit-${dd.id}`}
                   />
                 ))}
               </Section>
@@ -616,6 +650,102 @@ function EventRow({ label, subtitle, onDelete, busy, danger }) {
       >
         {busy ? '…' : '🗑️ Fshi'}
       </button>
+    </div>
+  )
+}
+
+// ── Modal për derdhje direkte në kasafortë ─────────────────────────────────
+function DepositModal({ onClose, onSaved }) {
+  const [date, setDate]       = useState(todayLocal())
+  const [amounts, setAmounts] = useState({ LEK: '', EUR: '', USD: '', GBP: '', CHF: '' })
+  const [note, setNote]       = useState('')
+  const [saving, setSaving]   = useState(false)
+  const [err, setErr]         = useState('')
+
+  const submit = async () => {
+    setErr('')
+    const parsed = {}
+    let anyPositive = false
+    for (const c of CURS) {
+      const v = parseFloat(amounts[c]) || 0
+      if (v < 0) { setErr(`${c} nuk mund të jetë negative`); return }
+      parsed[c] = v
+      if (v > 0) anyPositive = true
+    }
+    if (!anyPositive) { setErr('Vendos shumë > 0 në të paktën një monedhë'); return }
+    if (!date) { setErr('Vendos datën'); return }
+    setSaving(true)
+    try {
+      const payload = { date, note: note.trim() }
+      for (const c of CURS) payload[`amount_${c.toLowerCase()}`] = parsed[c]
+      const res = await fetch('/api/safe-deposits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const r = await res.json()
+      if (!res.ok) throw new Error(r.error || 'Gabim')
+      onSaved?.()
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="modal-header">
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">💰 Derdh në Kasafortë</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Fut kesh direkt në kasafortë (rrit bilancin)</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="form-label">Data</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-field" />
+          </div>
+
+          <div>
+            <label className="form-label">Shumat për monedhë</label>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {CURS.map(c => (
+                <div key={c}>
+                  <label className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase">{c}</label>
+                  <MoneyInput
+                    value={amounts[c]}
+                    onChange={v => setAmounts(a => ({ ...a, [c]: String(v) }))}
+                    className="input-field text-right font-semibold tabular-nums"
+                    placeholder="0.00"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">Shënim (opsional)</label>
+            <input type="text" value={note} onChange={e => setNote(e.target.value)}
+              className="input-field" placeholder="p.sh. kesh personal / burim tjetër" />
+          </div>
+
+          {err && <p className="text-sm text-red-600">{err}</p>}
+        </div>
+
+        <div className="modal-footer">
+          <button onClick={onClose} className="btn-secondary">Anulo</button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="btn-primary disabled:opacity-50"
+          >
+            {saving ? '⏳ Duke ruajtur...' : '💾 Derdh në Kasafortë'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

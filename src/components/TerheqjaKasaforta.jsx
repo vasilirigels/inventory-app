@@ -22,10 +22,17 @@ function fmtDateTime(s) {
 
 const emptyAmounts = () => ({ LEK: '', EUR: '', USD: '', GBP: '', CHF: '' })
 
+const DEST_LABELS = {
+  arka:   { label: 'Arkë',   desc: 'Paratë kalojnë në sirtarin e shitjes (hyjnë te Arka Ditore)' },
+  bank:   { label: 'Bankë',  desc: 'Paratë kalojnë në llogari bankare (rrisin bilancin e bankës)' },
+  jashte: { label: 'Jashtë', desc: 'Pagesë personi / arsye tjetër jashtë sistemit' },
+}
+
 export default function TerheqjaKasaforta({ date }) {
   const isAdmin = getUser()?.role === 'admin'
   const [entryDate, setEntryDate] = useState(date)
   const [amounts, setAmounts] = useState(emptyAmounts())
+  const [destination, setDestination] = useState('jashte')
   const [person, setPerson] = useState('')
   const [note, setNote] = useState('')
   const [history, setHistory] = useState([])
@@ -72,7 +79,7 @@ export default function TerheqjaKasaforta({ date }) {
     }
     setSaving(true)
     try {
-      const payload = { date: entryDate, person: person.trim(), note: note.trim() }
+      const payload = { date: entryDate, destination, person: person.trim(), note: note.trim() }
       for (const c of CURS) payload[`amount_${c.toLowerCase()}`] = parsed[c]
       const res = await fetch('/api/safe-withdrawals', {
         method: 'POST',
@@ -81,7 +88,7 @@ export default function TerheqjaKasaforta({ date }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'gabim')
-      setAmounts(emptyAmounts()); setPerson(''); setNote('')
+      setAmounts(emptyAmounts()); setPerson(''); setNote(''); setDestination('jashte')
       setMsg('✓ Tërheqja u regjistrua')
       setTimeout(() => setMsg(''), 2500)
       loadHistory()
@@ -137,9 +144,39 @@ export default function TerheqjaKasaforta({ date }) {
               </div>
             ))}
           </div>
+          <div>
+            <label className="form-label">Destinacioni</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {Object.entries(DEST_LABELS).map(([key, { label, desc }]) => (
+                <label
+                  key={key}
+                  className={`cursor-pointer rounded-lg border-2 px-3 py-2 transition ${
+                    destination === key
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/30'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="destination"
+                      value={key}
+                      checked={destination === key}
+                      onChange={() => setDestination(key)}
+                      className="accent-amber-500"
+                    />
+                    <span className="font-semibold text-sm text-slate-800 dark:text-slate-100">{label}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 ml-6">{desc}</p>
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Personi (kush e mori)</label>
+              <label className="form-label">
+                Personi {destination === 'jashte' ? '(kush e mori)' : '(opsional)'}
+              </label>
               <input
                 type="text"
                 value={person} onChange={e => setPerson(e.target.value)}
@@ -153,7 +190,7 @@ export default function TerheqjaKasaforta({ date }) {
                 type="text"
                 value={note} onChange={e => setNote(e.target.value)}
                 className="input-field"
-                placeholder="arsyeja / destinacioni"
+                placeholder="arsyeja / detajet"
               />
             </div>
           </div>
@@ -212,6 +249,7 @@ export default function TerheqjaKasaforta({ date }) {
                   {CURS.map(c => (
                     <th key={c} className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{c}</th>
                   ))}
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Destinacioni</th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Personi</th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënim</th>
                 </tr>
@@ -226,6 +264,16 @@ export default function TerheqjaKasaforta({ date }) {
                         {fmt(r[`amount_${c.toLowerCase()}`])}
                       </td>
                     ))}
+                    <td className="px-3 py-2.5">
+                      {(() => {
+                        const dest = r.destination || 'jashte'
+                        const meta = DEST_LABELS[dest] || DEST_LABELS.jashte
+                        const cls = dest === 'arka' ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200'
+                                  : dest === 'bank' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                        return <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold ${cls}`}>{meta.label}</span>
+                      })()}
+                    </td>
                     <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">{r.person || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
                     <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300">{r.note || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
                   </tr>

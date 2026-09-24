@@ -65,7 +65,8 @@ export default function ArkaDitore({ date, onNavigate }) {
   // xhiron ose fluksin e keshit të ditës.
   useRealtimeSync(
     ['invoices', 'invoice_payments', 'expense_entries', 'purchase_invoices',
-     'hurda_purchases', 'has_purchases', 'daily_records'],
+     'hurda_purchases', 'has_purchases', 'daily_records', 'safe_withdrawals',
+     'worker_payments'],
     refreshData
   )
 
@@ -140,6 +141,8 @@ export default function ArkaDitore({ date, onNavigate }) {
     (data.xhiro_total?.[c]     || 0) ||
     (data.debt_repayments?.[c] || 0) ||
     (data.porosi_deposits?.[c] || 0) ||
+    (data.safe_to_arka?.[c]    || 0) ||
+    (data.worker_payments_cash?.[c] || 0) ||
     (data.opening_cash?.[c]    || 0) ||
     (data.expenses?.[c]        || 0) ||
     (data.purchase_cash?.[c]   || 0) ||
@@ -163,12 +166,14 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Kesh nga Shitjet',                src: 'cash_from_sales',   sign: '=', color: 'text-emerald-800 dark:text-emerald-200', bg: 'bg-emerald-50/60', detail: 'Xhiro − Bankë − POS − Borxh (përfshin parapagimin nga borxhet)' },
     { label: 'Pagesë Borxhi',                   src: 'debt_repayments',   sign: '+', color: 'text-teal-700',    bg: 'bg-teal-50',    detail: `${data.counts.debt_repayments || 0} pagesa kesh nga fatura të vjetra (jo pjesë e xhiros)` },
     { label: 'Depozita Porosi',                 src: 'porosi_deposits',   sign: '+', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50', detail: `${data.counts.porosi_deposits || 0} depozita kesh nga porositë (custom orders)` },
+    { label: 'Tërheqje nga Kasaforta',          src: 'safe_to_arka',      sign: '+', color: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-900/30', detail: `${data.counts?.safe_to_arka || 0} tërheqje me destinacion arkë` },
   ]
   const outRows = [
     { label: 'Shpenzime (Arkë)',                src: 'expenses',          sign: '−', color: 'text-orange-700 dark:text-orange-300',  bg: 'bg-orange-50 dark:bg-orange-900/30',  detail: `${data.counts.expenses} regjistrime` },
     { label: 'Fatura Blerje Kesh',              src: 'purchase_cash',     sign: '−', color: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.purchases_cash} fatura` },
     { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
     { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800 dark:text-amber-200',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },
+    { label: 'Pagesa Punëtorësh',               src: 'worker_payments_cash', sign: '−', color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/30', detail: `${data.counts?.worker_payments || 0} pagesa (pjesa kesh + shpërblim kesh)` },
   ]
 
   return (

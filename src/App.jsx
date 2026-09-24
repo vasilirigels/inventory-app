@@ -42,6 +42,7 @@ const RaportBlerjeArtikuj    = lazy(() => import('./components/RaportBlerjeArtik
 const Shpenzime              = lazy(() => import('./components/Shpenzime.jsx'))
 const ShpenziTransporti      = lazy(() => import('./components/ShpenziTransporti.jsx'))
 const RaportShpenzime        = lazy(() => import('./components/RaportShpenzime.jsx'))
+const PagesaPunetoresh       = lazy(() => import('./components/PagesaPunetoresh.jsx'))
 const DailyFieldsForm        = lazy(() => import('./components/sections/DailyFieldsForm.jsx'))
 const UnifiedReport          = lazy(() => import('./components/sections/UnifiedReport.jsx'))
 const Komentet               = lazy(() => import('./components/Komentet.jsx'))
@@ -229,6 +230,7 @@ function AppInner({ user }) {
 
       case 'komentet':       return <Komentet />
       case 'riparimet':      return <Riparimet />
+      case 'pagesa-punetoresh': return <PagesaPunetoresh />
 
       default: break
     }

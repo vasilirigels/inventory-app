@@ -91,6 +91,7 @@ const NAV_GROUPS = [
           { id: 'marketing',             label: 'Shpenzime Marketingu' },
         ],
       },
+      { id: 'pagesa-punetoresh', label: 'Pagesa Punëtorësh', icon: '👷' },
       {
         id: 'magazina', label: 'Magazina', icon: '🏬',
         children: [
@@ -155,6 +156,7 @@ const PAGE_TITLES = {
   shpenzime:    'Shpenzime',
   magazina:     'Magazina',
   arka:         'Arka',
+  'pagesa-punetoresh': 'Pagesa Punëtorësh',
 }
 
 function getChildTitle(id) {

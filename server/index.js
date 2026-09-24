@@ -113,7 +113,10 @@ function tableFromPath(p) {
     'expense-entries': 'expense_entries',
     'safe-withdrawals': 'safe_withdrawals',
     'safe-conversions': 'safe_conversions',
+    'safe-deposits': 'safe_deposits',
     'bank-movements': 'bank_movements',
+    'workers': 'workers',
+    'worker-payments': 'worker_payments',
     'kasaforta': 'daily_records',
     'flete-hyrje': 'flete_hyrje',
     'flete-dalje': 'flete_dalje',
@@ -5726,6 +5729,33 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       if (c in porosi_deposits) porosi_deposits[c] += r.amt;
     }
 
+    // Pagesat e punëtorëve (pjesa kesh + shpërblim kesh) — dalje EUR nga arka.
+    const workerCashRow = await queryOne(
+      `SELECT COALESCE(SUM(salary_cash_eur + bonus_cash_eur), 0) AS amt,
+              COUNT(*) AS cnt
+         FROM worker_payments WHERE date_paid = ?`,
+      [date]
+    ) || {};
+    const worker_payments_cash = zeroPerCur();
+    worker_payments_cash.EUR = +(workerCashRow.amt || 0).toFixed(2);
+    const worker_payments_count = workerCashRow.cnt || 0;
+
+    // Tërheqjet nga kasaforta me destinacion 'arka' — hyjnë si kesh në sirtar.
+    const safeToArkaRows = await queryAll(
+      `SELECT COALESCE(amount_lek, 0) AS LEK,
+              COALESCE(amount_eur, 0) AS EUR,
+              COALESCE(amount_usd, 0) AS USD,
+              COALESCE(amount_gbp, 0) AS GBP,
+              COALESCE(amount_chf, 0) AS CHF
+         FROM safe_withdrawals
+        WHERE date = ? AND COALESCE(destination, 'jashte') = 'arka'`,
+      [date]
+    );
+    const safe_to_arka = zeroPerCur();
+    for (const r of safeToArkaRows) {
+      for (const c of CURS) safe_to_arka[c] += (r[c] || 0);
+    }
+
     const dailyRow = await queryOne(
       `SELECT COALESCE(opening_lek, 0)              AS opening_LEK,
               COALESCE(opening_eur, 0)              AS opening_EUR,
@@ -5763,7 +5793,9 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
-                          - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
+                          + safe_to_arka[c]
+                          - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
+                          - worker_payments_cash[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
       // Për rastin normal (cash_balance >= 0): physical - teorike, si zakonisht.
       // Kur cash_balance del negative (të dhëna inkonsistente — daljet tejkalojnë
@@ -5783,6 +5815,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       cash_from_sales:   fx(cash_from_sales),
       debt_repayments:   fx(debt_repayments),
       porosi_deposits:   fx(porosi_deposits),
+      safe_to_arka:      fx(safe_to_arka),
+      worker_payments_cash: fx(worker_payments_cash),
       expenses:          fx(expenses),
       // Kosto e produkteve të dhëna si marketing "in kind" — vetëm informative,
       // s'ka lëvizje kesh (paratë u shpenzuan te blerja origjinale).
@@ -5806,6 +5840,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         porosi_deposits: porosiDepRows.length,
         debt_repayments: debtPayRows.length,
         marketing_in_kind: mktProdRows.length + mktContractProdRows.length,
+        safe_to_arka: safeToArkaRows.length,
+        worker_payments: worker_payments_count,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -6163,6 +6199,18 @@ app.get('/api/kasaforta', async (req, res) => {
     const bmByDate = {};
     for (const r of bmRows) bmByDate[r.date] = r;
 
+    // Derdhje direkte në kasafortë (safe_deposits) — agregohen për datë.
+    const sdSelect = CURS.map(c =>
+      `COALESCE(SUM(amount_${c.toLowerCase()}), 0) AS sd_${c}`
+    ).join(', ');
+    const sdRows = await queryAll(
+      `SELECT date, ${sdSelect}
+         FROM safe_deposits
+         GROUP BY date`
+    );
+    const sdByDate = {};
+    for (const r of sdRows) sdByDate[r.date] = r;
+
     // Konvertimet e monedhës brenda kasafortës — për çdo (datë, monedhë)
     // llogarit conv_in / conv_out dhe listën e ngjarjeve për tooltip / detaje.
     const convRows = await queryAll(
@@ -6200,9 +6248,10 @@ app.get('/api/kasaforta', async (req, res) => {
       }
     }
 
-    // Bashkoj datat: nga daily_records, bank_movements dhe konvertimet.
+    // Bashkoj datat: nga daily_records, bank_movements, safe_deposits dhe konvertimet.
     const allDates = new Set(rows.map(r => r.date));
     for (const d of Object.keys(bmByDate))   allDates.add(d);
+    for (const d of Object.keys(sdByDate))   allDates.add(d);
     for (const d of Object.keys(convByDate)) allDates.add(d);
     const sortedDates = [...allDates].sort();
 
@@ -6213,6 +6262,7 @@ app.get('/api/kasaforta', async (req, res) => {
     const history = sortedDates.map(date => {
       const r  = rowsByDate[date] || {};
       const bm = bmByDate[date]   || {};
+      const sd = sdByDate[date]   || {};
       const cv = convByDate[date] || {};
       const perCur = {};
       for (const c of CURS) {
@@ -6221,9 +6271,10 @@ app.get('/api/kasaforta', async (req, res) => {
         const co     = r[`co_${c}`]  || 0;
         const convIn  = cv[c]?.in  || 0;
         const convOut = cv[c]?.out || 0;
-        // "Derdhje" e pastër = bankë→kasafortë (safe_deposit ekziston vetëm nga
-        // konvertimet, ndaj e heqim conv_in që të mos dyfishohet).
-        const depositPure  = Math.max(0, rawDep - convIn) + (bm[`bm_${c}`] || 0);
+        // "Derdhje" e pastër = bankë→kasafortë + derdhje direkte (safe_deposits).
+        // safe_deposit_{cur} ekziston vetëm nga konvertimet — e heqim conv_in që
+        // të mos dyfishohet.
+        const depositPure  = Math.max(0, rawDep - convIn) + (bm[`bm_${c}`] || 0) + (sd[`sd_${c}`] || 0);
         const withdrawPure = Math.max(0, rawWd  - convOut);
         const net = (depositPure + co + convIn) - (withdrawPure + convOut);
         const balanceBefore = running[c];
@@ -6294,6 +6345,7 @@ app.get('/api/kasaforta/events/:date', async (req, res) => {
 
     const withdrawals = await queryAll(
       `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              COALESCE(destination, 'jashte') AS destination,
               person, note, created_at
          FROM safe_withdrawals
         WHERE date = ?
@@ -6319,6 +6371,15 @@ app.get('/api/kasaforta/events/:date', async (req, res) => {
       [date]
     );
 
+    const directDeposits = await queryAll(
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              note, created_at
+         FROM safe_deposits
+        WHERE date = ?
+        ORDER BY created_at ASC, id ASC`,
+      [date]
+    );
+
     const closeoutRow = await queryOne(
       `SELECT COALESCE(closeout_to_safe_lek, 0) AS lek,
               COALESCE(closeout_to_safe_eur, 0) AS eur,
@@ -6340,7 +6401,7 @@ app.get('/api/kasaforta/events/:date', async (req, res) => {
       },
     } : null;
 
-    res.json({ date, withdrawals, conversions, bank_deposits: bankDeposits, closeout });
+    res.json({ date, withdrawals, conversions, bank_deposits: bankDeposits, direct_deposits: directDeposits, closeout });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -6368,6 +6429,7 @@ app.get('/api/safe-withdrawals', async (req, res) => {
     const lim = Math.min(parseInt(limit) || 200, 500);
     const rows = await queryAll(
       `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              COALESCE(destination, 'jashte') AS destination,
               person, note, created_at
          FROM safe_withdrawals
         WHERE ${where}
@@ -6392,14 +6454,18 @@ app.post('/api/safe-withdrawals', async (req, res) => {
       if (v > 0) anyPositive = true;
     }
     if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
+    const destination = String(d.destination || 'jashte').trim().toLowerCase();
+    if (!['arka', 'bank', 'jashte'].includes(destination)) {
+      return res.status(400).json({ error: "destination duhet të jetë 'arka' | 'bank' | 'jashte'" });
+    }
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
     const cols = CURS_SW.map(c => `amount_${c}`);
     const vals = CURS_SW.map(c => amounts[c]);
     await run(
-      `INSERT INTO safe_withdrawals (date, ${cols.join(', ')}, person, note)
-       VALUES (?, ${cols.map(() => '?').join(', ')}, ?, ?)`,
-      [date, ...vals, person, note]
+      `INSERT INTO safe_withdrawals (date, ${cols.join(', ')}, destination, person, note)
+       VALUES (?, ${cols.map(() => '?').join(', ')}, ?, ?, ?)`,
+      [date, ...vals, destination, person, note]
     );
     await syncSafeWithdrawTotals(date);
     res.json({ success: true });
@@ -6413,6 +6479,250 @@ app.delete('/api/safe-withdrawals/:id', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'not found' });
     await run('DELETE FROM safe_withdrawals WHERE id = ?', [id]);
     await syncSafeWithdrawTotals(row.date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// SAFE DEPOSITS — Derdhje direkte në Kasafortë
+// ============================================================
+// Kesh që futet drejtpërdrejt në kasafortë nga jashtë sistemit (jo nga arka,
+// jo nga banka). Rrit bilancin e kasafortës; nuk prek arkën ose bankën.
+
+const CURS_SD = ['lek', 'eur', 'usd', 'gbp', 'chf'];
+
+app.get('/api/safe-deposits', async (req, res) => {
+  try {
+    const { from, to, limit } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND date >= ?'; params.push(from); }
+    if (to)   { where += ' AND date <= ?'; params.push(to); }
+    const lim = Math.min(parseInt(limit) || 200, 500);
+    const rows = await queryAll(
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
+              note, created_at
+         FROM safe_deposits
+        WHERE ${where}
+        ORDER BY date DESC, created_at DESC
+        LIMIT ${lim}`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/safe-deposits', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const date = d.date;
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const amounts = {};
+    let anyPositive = false;
+    for (const c of CURS_SD) {
+      const v = parseFloat(d[`amount_${c}`]) || 0;
+      if (v < 0) return res.status(400).json({ error: `amount_${c} duhet ≥ 0` });
+      amounts[c] = v;
+      if (v > 0) anyPositive = true;
+    }
+    if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
+    const note = String(d.note || '').trim();
+    const cols = CURS_SD.map(c => `amount_${c}`);
+    const vals = CURS_SD.map(c => amounts[c]);
+    const result = await run(
+      `INSERT INTO safe_deposits (date, ${cols.join(', ')}, note)
+       VALUES (?, ${cols.map(() => '?').join(', ')}, ?)`,
+      [date, ...vals, note]
+    );
+    const rawId = result?.lastInsertRowid ?? result?.lastID;
+    res.json({ success: true, id: typeof rawId === 'bigint' ? Number(rawId) : rawId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/safe-deposits/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await queryOne('SELECT id FROM safe_deposits WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await run('DELETE FROM safe_deposits WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// WORKERS — Punëtorët + pagesat mujore
+// ============================================================
+// Punëtorët menaxhohen si listë me pagë bazë EUR. Pagesat regjistrohen për çdo
+// muaj me 4 pjesë: paga bank/kesh, shpërblim bank/kesh (të gjitha EUR).
+// Pjesa kesh shfaqet te Arka Ditore; pjesa bank zbritet nga bilanci i bankës.
+
+app.get('/api/workers', async (req, res) => {
+  try {
+    const showAll = req.query.all === '1';
+    const rows = await queryAll(
+      `SELECT id, name, position, COALESCE(base_salary_eur, 0) AS base_salary_eur,
+              COALESCE(active, 1) AS active, created_at
+         FROM workers
+         ${showAll ? '' : 'WHERE COALESCE(active, 1) = 1'}
+         ORDER BY name ASC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/workers', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const name = String(d.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const position = String(d.position || '').trim();
+    const base = parseFloat(d.base_salary_eur) || 0;
+    if (base < 0) return res.status(400).json({ error: 'base_salary_eur duhet ≥ 0' });
+    const active = d.active === false || d.active === 0 ? 0 : 1;
+    const result = await run(
+      `INSERT INTO workers (name, position, base_salary_eur, active) VALUES (?, ?, ?, ?)`,
+      [name, position, base, active]
+    );
+    const rawId = result?.lastInsertRowid ?? result?.lastID;
+    res.json({ success: true, id: typeof rawId === 'bigint' ? Number(rawId) : rawId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/workers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await queryOne('SELECT id FROM workers WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const d = req.body || {};
+    const name = String(d.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const position = String(d.position || '').trim();
+    const base = parseFloat(d.base_salary_eur) || 0;
+    if (base < 0) return res.status(400).json({ error: 'base_salary_eur duhet ≥ 0' });
+    const active = d.active === false || d.active === 0 ? 0 : 1;
+    await run(
+      `UPDATE workers SET name = ?, position = ?, base_salary_eur = ?, active = ? WHERE id = ?`,
+      [name, position, base, active, id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/workers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await queryOne('SELECT id FROM workers WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    // Pagesat lidhen me punëtorin — parandalo fshirjen e punëtorit me pagesa
+    // ekzistuese që të mos humbet historiku. Përdor "çaktivizo" (active=0) në UI.
+    const hasPayments = await queryOne('SELECT id FROM worker_payments WHERE worker_id = ? LIMIT 1', [id]);
+    if (hasPayments) {
+      return res.status(400).json({ error: 'punëtori ka pagesa të regjistruara — çaktivizoje në vend të fshirjes' });
+    }
+    await run('DELETE FROM workers WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/worker-payments', async (req, res) => {
+  try {
+    const { worker_id, month, from, to, limit } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (worker_id) { where += ' AND wp.worker_id = ?'; params.push(worker_id); }
+    if (month)     { where += ' AND wp.month = ?'; params.push(month); }
+    if (from)      { where += ' AND wp.date_paid >= ?'; params.push(from); }
+    if (to)        { where += ' AND wp.date_paid <= ?'; params.push(to); }
+    const lim = Math.min(parseInt(limit) || 500, 2000);
+    const rows = await queryAll(
+      `SELECT wp.id, wp.worker_id, w.name AS worker_name, w.position AS worker_position,
+              wp.month, wp.date_paid,
+              COALESCE(wp.salary_bank_eur, 0) AS salary_bank_eur,
+              COALESCE(wp.salary_cash_eur, 0) AS salary_cash_eur,
+              COALESCE(wp.bonus_bank_eur, 0)  AS bonus_bank_eur,
+              COALESCE(wp.bonus_cash_eur, 0)  AS bonus_cash_eur,
+              wp.note, wp.created_at
+         FROM worker_payments wp
+         JOIN workers w ON w.id = wp.worker_id
+        WHERE ${where}
+        ORDER BY wp.date_paid DESC, wp.id DESC
+        LIMIT ${lim}`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/worker-payments', async (req, res) => {
+  try {
+    const d = req.body || {};
+    const workerId = parseInt(d.worker_id) || 0;
+    if (!workerId) return res.status(400).json({ error: 'worker_id required' });
+    const month = String(d.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month duhet formati YYYY-MM' });
+    const datePaid = String(d.date_paid || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datePaid)) return res.status(400).json({ error: 'date_paid duhet formati YYYY-MM-DD' });
+    const w = await queryOne('SELECT id FROM workers WHERE id = ?', [workerId]);
+    if (!w) return res.status(404).json({ error: 'worker not found' });
+    const sBank = parseFloat(d.salary_bank_eur) || 0;
+    const sCash = parseFloat(d.salary_cash_eur) || 0;
+    const bBank = parseFloat(d.bonus_bank_eur)  || 0;
+    const bCash = parseFloat(d.bonus_cash_eur)  || 0;
+    for (const [k, v] of [['salary_bank', sBank], ['salary_cash', sCash], ['bonus_bank', bBank], ['bonus_cash', bCash]]) {
+      if (v < 0) return res.status(400).json({ error: `${k}_eur duhet ≥ 0` });
+    }
+    if (sBank + sCash + bBank + bCash <= 0) {
+      return res.status(400).json({ error: 'shuma totale duhet > 0' });
+    }
+    const note = String(d.note || '').trim();
+    const result = await run(
+      `INSERT INTO worker_payments
+         (worker_id, month, date_paid, salary_bank_eur, salary_cash_eur, bonus_bank_eur, bonus_cash_eur, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workerId, month, datePaid, sBank, sCash, bBank, bCash, note]
+    );
+    const rawId = result?.lastInsertRowid ?? result?.lastID;
+    res.json({ success: true, id: typeof rawId === 'bigint' ? Number(rawId) : rawId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/worker-payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne('SELECT id FROM worker_payments WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const d = req.body || {};
+    const month = String(d.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month duhet formati YYYY-MM' });
+    const datePaid = String(d.date_paid || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datePaid)) return res.status(400).json({ error: 'date_paid duhet formati YYYY-MM-DD' });
+    const sBank = parseFloat(d.salary_bank_eur) || 0;
+    const sCash = parseFloat(d.salary_cash_eur) || 0;
+    const bBank = parseFloat(d.bonus_bank_eur)  || 0;
+    const bCash = parseFloat(d.bonus_cash_eur)  || 0;
+    for (const [k, v] of [['salary_bank', sBank], ['salary_cash', sCash], ['bonus_bank', bBank], ['bonus_cash', bCash]]) {
+      if (v < 0) return res.status(400).json({ error: `${k}_eur duhet ≥ 0` });
+    }
+    if (sBank + sCash + bBank + bCash <= 0) {
+      return res.status(400).json({ error: 'shuma totale duhet > 0' });
+    }
+    const note = String(d.note || '').trim();
+    await run(
+      `UPDATE worker_payments SET month = ?, date_paid = ?,
+              salary_bank_eur = ?, salary_cash_eur = ?, bonus_bank_eur = ?, bonus_cash_eur = ?, note = ?
+        WHERE id = ?`,
+      [month, datePaid, sBank, sCash, bBank, bCash, note, id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/worker-payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await queryOne('SELECT id FROM worker_payments WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await run('DELETE FROM worker_payments WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -6564,8 +6874,23 @@ app.get('/api/bank-balance', async (req, res) => {
       `COALESCE(SUM(CASE WHEN direction='to_bank' THEN amount_${c} ELSE -amount_${c} END), 0) AS bal_${c}`
     ).join(', ');
     const row = await queryOne(`SELECT ${parts} FROM bank_movements`) || {};
+    // + tërheqjet nga kasaforta me destinacion 'bank' → hyjnë në llogari
+    const swParts = CURS_BM.map(c =>
+      `COALESCE(SUM(amount_${c}), 0) AS sw_${c}`
+    ).join(', ');
+    const swRow = await queryOne(
+      `SELECT ${swParts} FROM safe_withdrawals WHERE COALESCE(destination, 'jashte') = 'bank'`
+    ) || {};
+    // − pagesa pune (bank + bonus_bank) EUR — zbresin nga bilanci EUR
+    const wpRow = await queryOne(
+      `SELECT COALESCE(SUM(salary_bank_eur + bonus_bank_eur), 0) AS wp_eur FROM worker_payments`
+    ) || {};
     const balance = {};
-    for (const c of CURS_BM) balance[c.toUpperCase()] = +((row[`bal_${c}`] || 0)).toFixed(2);
+    for (const c of CURS_BM) {
+      const bal = (row[`bal_${c}`] || 0) + (swRow[`sw_${c}`] || 0);
+      const wp  = c === 'eur' ? (wpRow.wp_eur || 0) : 0;
+      balance[c.toUpperCase()] = +((bal - wp)).toFixed(2);
+    }
     res.json({ balance });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

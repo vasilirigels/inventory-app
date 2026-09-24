@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { showConfirm } from './ConfirmDialog.jsx'
+import { getUser } from '../lib/auth.js'
 
 // Rregullat e zbritjes (tarifës) sipas ditëve nga shitja:
 //   0 ditë (të njëjtën ditë) → 0%
@@ -19,6 +20,7 @@ function fmt(n) {
 }
 
 export default function KthimShitje() {
+  const isAdmin = getUser()?.role === 'admin'
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
@@ -31,6 +33,10 @@ export default function KthimShitje() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(null)
+  // Admin-only: në modin "shumë direkte" hiqet krejt tarifa % dhe admini vendos
+  // shumën e rimbursimit drejtpërsëdrejti (default = totali i rreshtit).
+  const [adminManualMode, setAdminManualMode] = useState(false)
+  const [manualRefund, setManualRefund] = useState(null) // null = auto = lineTotal
   const timerRef = useRef()
 
   // Debounced search
@@ -54,6 +60,7 @@ export default function KthimShitje() {
     setQty(Math.min(1, it.qty_remaining))
     setFeePctOverride(null)
     setUnitPriceOverride(null)
+    setManualRefund(null)
     setError('')
     setSuccess(null)
   }
@@ -63,18 +70,23 @@ export default function KthimShitje() {
     setQty(1)
     setFeePctOverride(null)
     setUnitPriceOverride(null)
+    setManualRefund(null)
     setError('')
   }
 
   // Llogaritjet e refund-it
   const tier = selected ? computeReturnTier(selected.days_since_sale) : null
-  const effectivePct = feePctOverride != null ? feePctOverride : (tier?.pct ?? 0)
+  const useManual = isAdmin && adminManualMode
+  const effectivePct = useManual ? 0 : (feePctOverride != null ? feePctOverride : (tier?.pct ?? 0))
   const effectiveUnitPrice = unitPriceOverride != null
     ? unitPriceOverride
     : (selected?.unit_total_with_vat || 0)
   const lineTotal = selected ? +(effectiveUnitPrice * qty).toFixed(2) : 0
-  const feeKept   = +(lineTotal * (effectivePct / 100)).toFixed(2)
-  const rawRefund = +(lineTotal - feeKept).toFixed(2)
+  const feeKept   = useManual ? 0 : +(lineTotal * (effectivePct / 100)).toFixed(2)
+  // Në modin admin manual, shuma e rimbursimit vendoset direkt (default = lineTotal).
+  const rawRefund = useManual
+    ? (manualRefund != null ? manualRefund : lineTotal)
+    : +(lineTotal - feeKept).toFixed(2)
   // Serveri e klampon refund_amount te totali i rreshtit të faturës origjinale
   // (retTotal). Nëse user rrit çmimin mbi atë të faturës, rimbursimi mund të
   // tejkalojë atë kufi — e klampojmë edhe në UI që të mos ketë keqkuptim.
@@ -83,16 +95,20 @@ export default function KthimShitje() {
   const refund = Math.min(rawRefund, invoiceLineTotal)
 
   const qtyValid = selected && qty > 0 && qty <= selected.qty_remaining + 1e-6
-  const pctValid = effectivePct >= 0 && effectivePct <= 100
+  const pctValid = useManual ? true : (effectivePct >= 0 && effectivePct <= 100)
+  const manualValid = !useManual || (refund >= 0)
 
   const submit = async () => {
-    if (!selected || !qtyValid || !pctValid) return
+    if (!selected || !qtyValid || !pctValid || !manualValid) return
+    const feeLine = useManual
+      ? `Shumë manuale (admin) — pa tarifë`
+      : `Zbritje ${effectivePct}% = ${fmt(feeKept)} (${tier?.label})`
     const ok = await showConfirm({
       title: 'Konfirmo kthimin',
       message:
         `Fatura ${selected.invoice_no} — ${selected.name}\n` +
         `Sasi: ${qty} × ${fmt(effectiveUnitPrice)} = ${fmt(lineTotal)} ${selected.currency || 'LEK'}\n` +
-        `Zbritje ${effectivePct}% = ${fmt(feeKept)} (${tier?.label})\n` +
+        `${feeLine}\n` +
         `Rimbursim: ${fmt(refund)} ${selected.currency || 'LEK'} — ${refundMethod.toUpperCase()}`,
       confirmText: 'Po, kthej',
       cancelText: 'Anulo',
@@ -256,6 +272,21 @@ export default function KthimShitje() {
             </button>
           </div>
 
+          {isAdmin && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+              <input
+                id="admin-manual-mode"
+                type="checkbox"
+                checked={adminManualMode}
+                onChange={e => { setAdminManualMode(e.target.checked); setManualRefund(null) }}
+                className="accent-amber-600"
+              />
+              <label htmlFor="admin-manual-mode" className="text-sm text-amber-900 dark:text-amber-100 cursor-pointer select-none">
+                🔓 <b>Admin:</b> hiq tarifën % dhe përcakto shumën e rimbursimit direkt
+              </label>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
@@ -311,32 +342,56 @@ export default function KthimShitje() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                Zbritje % (tarifa e dyqanit)
+                {useManual ? 'Shuma e Rimbursimit (admin)' : 'Zbritje % (tarifa e dyqanit)'}
               </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="1"
-                  value={effectivePct}
-                  onChange={e => setFeePctOverride(parseFloat(e.target.value) || 0)}
-                  className="input-field w-full"
-                />
-                {feePctOverride != null && feePctOverride !== tier.pct && (
-                  <button
-                    onClick={() => setFeePctOverride(null)}
-                    title="Kthehu te tier-i default"
-                    className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  >
-                    ↺
-                  </button>
-                )}
-              </div>
-              {feePctOverride != null && feePctOverride !== tier.pct && (
-                <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                  Override manual (default: {tier.pct}%)
-                </p>
+              {useManual ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={manualRefund != null ? manualRefund : lineTotal}
+                    onChange={e => setManualRefund(parseFloat(e.target.value) || 0)}
+                    className="input-field w-full font-bold"
+                  />
+                  {manualRefund != null && manualRefund !== lineTotal && (
+                    <button
+                      onClick={() => setManualRefund(null)}
+                      title="Kthehu te shuma totale (100%)"
+                      className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                    >
+                      ↺
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="1"
+                      value={effectivePct}
+                      onChange={e => setFeePctOverride(parseFloat(e.target.value) || 0)}
+                      className="input-field w-full"
+                    />
+                    {feePctOverride != null && feePctOverride !== tier.pct && (
+                      <button
+                        onClick={() => setFeePctOverride(null)}
+                        title="Kthehu te tier-i default"
+                        className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                      >
+                        ↺
+                      </button>
+                    )}
+                  </div>
+                  {feePctOverride != null && feePctOverride !== tier.pct && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                      Override manual (default: {tier.pct}%)
+                    </p>
+                  )}
+                </>
               )}
             </div>
             <div>
@@ -371,7 +426,11 @@ export default function KthimShitje() {
           {/* Përmbledhje llogaritjeje */}
           <div className="bg-slate-50 dark:bg-slate-900/40 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
             <SummaryLine label="Vlera e artikujve" value={`${fmt(lineTotal)} ${selected.currency || 'LEK'}`} />
-            <SummaryLine label={`Tarifa (${effectivePct}%)`} value={`− ${fmt(feeKept)} ${selected.currency || 'LEK'}`} tone="red" />
+            {useManual ? (
+              <SummaryLine label="Tarifa" value="— (admin, pa %)" />
+            ) : (
+              <SummaryLine label={`Tarifa (${effectivePct}%)`} value={`− ${fmt(feeKept)} ${selected.currency || 'LEK'}`} tone="red" />
+            )}
             <SummaryLine label="Rimbursim për klientin" value={`${fmt(refund)} ${selected.currency || 'LEK'}`} tone="green" big />
           </div>
 
@@ -399,7 +458,7 @@ export default function KthimShitje() {
             </button>
             <button
               onClick={submit}
-              disabled={saving || !qtyValid || !pctValid || refund < 0}
+              disabled={saving || !qtyValid || !pctValid || !manualValid || refund < 0}
               className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold"
             >
               {saving ? 'Duke ruajtur…' : `💾 Kryej Kthimin (${fmt(refund)})`}

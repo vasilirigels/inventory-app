@@ -905,6 +905,56 @@ const MIGRATIONS = [
   // unik siguron një pagesë transporti për faturë (kërkesa e biznesit).
   "ALTER TABLE expense_entries ADD COLUMN purchase_invoice_id INTEGER",
   "CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_entries_purchase_invoice ON expense_entries(purchase_invoice_id) WHERE purchase_invoice_id IS NOT NULL",
+
+  // Tërheqjet nga kasaforta kanë destinacion: 'arka' (kthen kesh në sirtar),
+  // 'bank' (krijon automatikisht një bank_movement to_bank), ose 'jashte'
+  // (pagesë personi, si historikisht). Default 'jashte' për backward compat.
+  "ALTER TABLE safe_withdrawals ADD COLUMN destination TEXT DEFAULT 'jashte'",
+
+  // Punëtorët — listë e menaxhuar (emër, pozicion, pagë bazë mujore EUR).
+  // Pagesat mujore ruhen te worker_payments.
+  `CREATE TABLE IF NOT EXISTS workers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    position TEXT DEFAULT '',
+    base_salary_eur REAL DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  // Pagesat e punëtorëve — një regjistrim = pagesa e një muaji e një punëtori.
+  // Pagesa ndahet në 4 pjesë (paga bank/kesh, shpërblim bank/kesh) — të gjitha
+  // në EUR. Pjesa kesh shfaqet te Arka Ditore; pjesa bank zbritet nga banka.
+  `CREATE TABLE IF NOT EXISTS worker_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id INTEGER NOT NULL,
+    month TEXT NOT NULL,
+    date_paid TEXT NOT NULL,
+    salary_bank_eur REAL DEFAULT 0,
+    salary_cash_eur REAL DEFAULT 0,
+    bonus_bank_eur  REAL DEFAULT 0,
+    bonus_cash_eur  REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_worker_payments_date ON worker_payments(date_paid)",
+  "CREATE INDEX IF NOT EXISTS idx_worker_payments_worker_month ON worker_payments(worker_id, month)",
+
+  // Derdhje direkte në kasafortë — kesh që futet drejtpërdrejt nga jashtë
+  // sistemit (pa lidhje me arka/bankë). Vetëm shënim, pa burim.
+  `CREATE TABLE IF NOT EXISTS safe_deposits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    amount_lek REAL DEFAULT 0,
+    amount_eur REAL DEFAULT 0,
+    amount_usd REAL DEFAULT 0,
+    amount_gbp REAL DEFAULT 0,
+    amount_chf REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_safe_deposits_date ON safe_deposits(date)",
 ];
 
 async function initDB() {
