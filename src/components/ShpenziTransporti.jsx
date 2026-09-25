@@ -101,7 +101,7 @@ function PurchaseInvoicePicker({ value, onChange, invoices, disabled, excludeId 
 }
 
 function emptyDraft(defaultDate = '') {
-  return { date: defaultDate, purchase_invoice_id: '', description: '', currency: 'EUR', amount: '', exchange_rate: '1' }
+  return { date: defaultDate, mode: 'invoice', purchase_invoice_id: '', description: '', currency: 'EUR', amount: '', exchange_rate: '1' }
 }
 
 export default function ShpenziTransporti({ date }) {
@@ -162,7 +162,9 @@ export default function ShpenziTransporti({ date }) {
   useRealtimeSync(['expense_entries', 'purchase_invoices'], load)
 
   const addEntry = async () => {
-    if (!draft.purchase_invoice_id) { alert('Zgjidh një faturë blerje.'); return }
+    const withInvoice = draft.mode !== 'no-invoice'
+    if (withInvoice && !draft.purchase_invoice_id) { alert('Zgjidh një faturë blerje ose kalo te "Pa faturë".'); return }
+    if (!withInvoice && !draft.description.trim()) { alert('Vendos një përshkrim për transportin pa faturë.'); return }
     if (!n(draft.amount)) { alert('Vendos vlerën.'); return }
     if (!draft.date) { alert('Vendos datën.'); return }
     const cur = draft.currency || 'LEK'
@@ -175,7 +177,8 @@ export default function ShpenziTransporti({ date }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: draft.date,
-          purchase_invoice_id: parseInt(draft.purchase_invoice_id),
+          kind: 'transport',
+          purchase_invoice_id: withInvoice ? parseInt(draft.purchase_invoice_id) : null,
           description: draft.description,
           currency: cur,
           amount: n(draft.amount),
@@ -183,7 +186,7 @@ export default function ShpenziTransporti({ date }) {
         }),
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
-      setDraft({ ...emptyDraft(draft.date), currency: cur, exchange_rate: String(rate) })
+      setDraft({ ...emptyDraft(draft.date), mode: draft.mode, currency: cur, exchange_rate: String(rate) })
       load()
     } finally { setSaving(false) }
   }
@@ -192,6 +195,7 @@ export default function ShpenziTransporti({ date }) {
     setEditingId(row.id)
     setEditDraft({
       date: row.date || date,
+      mode: row.purchase_invoice_id ? 'invoice' : 'no-invoice',
       purchase_invoice_id: row.purchase_invoice_id ? String(row.purchase_invoice_id) : '',
       description: row.description || '',
       currency: row.currency || 'LEK',
@@ -203,7 +207,9 @@ export default function ShpenziTransporti({ date }) {
 
   const saveEdit = async () => {
     if (!editDraft || editingId == null) return
-    if (!editDraft.purchase_invoice_id) { alert('Zgjidh një faturë blerje.'); return }
+    const withInvoice = editDraft.mode !== 'no-invoice'
+    if (withInvoice && !editDraft.purchase_invoice_id) { alert('Zgjidh një faturë blerje ose kalo te "Pa faturë".'); return }
+    if (!withInvoice && !editDraft.description.trim()) { alert('Vendos një përshkrim për transportin pa faturë.'); return }
     const cur = editDraft.currency || 'LEK'
     const rate = cur === 'LEK' ? 1 : n(editDraft.exchange_rate)
     if (cur !== 'LEK' && rate <= 0) { alert(`Vendos kursin për 1 ${cur} (në LEK).`); return }
@@ -213,7 +219,8 @@ export default function ShpenziTransporti({ date }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         date: editDraft.date || date,
-        purchase_invoice_id: parseInt(editDraft.purchase_invoice_id),
+        kind: 'transport',
+        purchase_invoice_id: withInvoice ? parseInt(editDraft.purchase_invoice_id) : null,
         description: editDraft.description || '',
         currency: cur,
         amount: n(editDraft.amount),
@@ -256,15 +263,27 @@ export default function ShpenziTransporti({ date }) {
       <div>
         <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Shpenzime Transporti</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Regjistro pagesat e transportit për faturat e blerjes. Çdo pagesë reflektohet automatikisht si shpenzim te Arka Ditore.
+          Regjistro shpenzimet e transportit — <strong>me faturë blerje</strong> (lidhet me një faturë specifike) ose <strong>pa faturë</strong> (kosto transporti të tjera me përshkrim). Të dyja llojet reflektohen te Arka Ditore.
           {rateSource && <span className="ml-1 text-slate-400 dark:text-slate-500">(kursi: <span className="font-medium">{rateSource}</span>)</span>}
         </p>
       </div>
 
       {/* New entry */}
       <div className="card">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">+ Shto Pagesë Transporti</h3>
+          <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => setDraft(d => ({ ...d, mode: 'invoice' }))}
+              className={`px-3 py-1.5 font-semibold transition ${draft.mode !== 'no-invoice' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+            >📄 Me faturë</button>
+            <button
+              type="button"
+              onClick={() => setDraft(d => ({ ...d, mode: 'no-invoice', purchase_invoice_id: '' }))}
+              className={`px-3 py-1.5 font-semibold transition ${draft.mode === 'no-invoice' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+            >📝 Pa faturë</button>
+          </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-7 gap-2 items-end">
           <div>
@@ -276,20 +295,32 @@ export default function ShpenziTransporti({ date }) {
               className="input-field"
             />
           </div>
+          {draft.mode !== 'no-invoice' ? (
+            <div className="md:col-span-2">
+              <label className="form-label">Faturë Blerje</label>
+              <PurchaseInvoicePicker
+                value={draft.purchase_invoice_id}
+                onChange={v => setDraft(d => ({ ...d, purchase_invoice_id: v }))}
+                invoices={invoices}
+              />
+            </div>
+          ) : (
+            <div className="md:col-span-2">
+              <label className="form-label text-slate-400">Faturë Blerje</label>
+              <div className="input-field bg-slate-50 dark:bg-slate-900 text-slate-400 dark:text-slate-500 italic text-xs cursor-not-allowed flex items-center">
+                — pa faturë —
+              </div>
+            </div>
+          )}
           <div className="md:col-span-2">
-            <label className="form-label">Faturë Blerje</label>
-            <PurchaseInvoicePicker
-              value={draft.purchase_invoice_id}
-              onChange={v => setDraft(d => ({ ...d, purchase_invoice_id: v }))}
-              invoices={invoices}
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="form-label">Përshkrimi</label>
+            <label className="form-label">
+              Përshkrimi {draft.mode === 'no-invoice' && <span className="text-rose-500">*</span>}
+            </label>
             <input
               type="text" value={draft.description}
               onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
-              className="input-field" placeholder="opsional"
+              className="input-field"
+              placeholder={draft.mode === 'no-invoice' ? 'p.sh. Transport nga Tirana për Rrogozhinë' : 'opsional'}
             />
           </div>
           <div>
@@ -415,17 +446,34 @@ export default function ShpenziTransporti({ date }) {
                         </td>
                       )}
                       <td className="px-2 py-1">
-                        <PurchaseInvoicePicker
-                          value={editDraft.purchase_invoice_id}
-                          onChange={v => setEditDraft(d => ({ ...d, purchase_invoice_id: v }))}
-                          invoices={invoices}
-                          excludeId={r.purchase_invoice_id}
-                        />
+                        <div className="inline-flex rounded border border-slate-200 dark:border-slate-700 overflow-hidden text-[10px] mb-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditDraft(d => ({ ...d, mode: 'invoice' }))}
+                            className={`px-2 py-0.5 font-semibold ${editDraft.mode !== 'no-invoice' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+                          >Me faturë</button>
+                          <button
+                            type="button"
+                            onClick={() => setEditDraft(d => ({ ...d, mode: 'no-invoice', purchase_invoice_id: '' }))}
+                            className={`px-2 py-0.5 font-semibold ${editDraft.mode === 'no-invoice' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+                          >Pa faturë</button>
+                        </div>
+                        {editDraft.mode !== 'no-invoice' ? (
+                          <PurchaseInvoicePicker
+                            value={editDraft.purchase_invoice_id}
+                            onChange={v => setEditDraft(d => ({ ...d, purchase_invoice_id: v }))}
+                            invoices={invoices}
+                            excludeId={r.purchase_invoice_id}
+                          />
+                        ) : (
+                          <div className="input-field-sm bg-slate-50 dark:bg-slate-900 text-slate-400 italic text-[11px] cursor-not-allowed">— pa faturë —</div>
+                        )}
                       </td>
                       <td className="px-2 py-1">
                         <input type="text" value={editDraft.description}
                           onChange={e => setEditDraft(d => ({ ...d, description: e.target.value }))}
-                          className="input-field-sm" placeholder="opsional" />
+                          className="input-field-sm"
+                          placeholder={editDraft.mode === 'no-invoice' ? 'përshkrim (i domosdoshëm)' : 'opsional'} />
                       </td>
                       <td className="px-2 py-1">
                         <select value={eCur}
@@ -472,11 +520,17 @@ export default function ShpenziTransporti({ date }) {
                       <td className="px-3 py-2 text-slate-600 dark:text-slate-300 text-xs font-mono">{fmtDate(r.date)}</td>
                     )}
                     <td className="px-3 py-2 text-slate-800 dark:text-slate-100">
-                      <div className="font-semibold">{r.purchase_invoice_no || <span className="italic text-slate-400">(pa nr)</span>}</div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {r.purchase_supplier_name || <span className="italic">— pa furnitor —</span>}
-                        {r.purchase_invoice_date && <span className="ml-1">· {fmtDate(r.purchase_invoice_date)}</span>}
-                      </div>
+                      {r.purchase_invoice_id ? (
+                        <>
+                          <div className="font-semibold">{r.purchase_invoice_no || <span className="italic text-slate-400">(pa nr)</span>}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {r.purchase_supplier_name || <span className="italic">— pa furnitor —</span>}
+                            {r.purchase_invoice_date && <span className="ml-1">· {fmtDate(r.purchase_invoice_date)}</span>}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">— pa faturë —</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
                       {r.description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}

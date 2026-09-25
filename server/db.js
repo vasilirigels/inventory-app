@@ -906,6 +906,15 @@ const MIGRATIONS = [
   "ALTER TABLE expense_entries ADD COLUMN purchase_invoice_id INTEGER",
   "CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_entries_purchase_invoice ON expense_entries(purchase_invoice_id) WHERE purchase_invoice_id IS NOT NULL",
 
+  // Kolonë e re `kind` që lejon shpenzime transporti PA faturë (kosto transporti
+  // që nuk lidhen me asnjë faturë blerjeje). Vlera: 'daily' | 'transport'.
+  // Diskriminimi tani bëhet me kind, jo me purchase_invoice_id (që mund të jetë
+  // NULL edhe për transport). Backfill: rreshtat ekzistuese me purchase_invoice_id
+  // marrin 'transport', të tjerat 'daily'.
+  "ALTER TABLE expense_entries ADD COLUMN kind TEXT DEFAULT 'daily'",
+  "UPDATE expense_entries SET kind = 'transport' WHERE purchase_invoice_id IS NOT NULL AND (kind IS NULL OR kind = 'daily')",
+  "UPDATE expense_entries SET kind = 'daily' WHERE kind IS NULL",
+
   // Tërheqjet nga kasaforta kanë destinacion: 'arka' (kthen kesh në sirtar),
   // 'bank' (krijon automatikisht një bank_movement to_bank), ose 'jashte'
   // (pagesë personi, si historikisht). Default 'jashte' për backward compat.

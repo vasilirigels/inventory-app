@@ -7748,8 +7748,8 @@ app.get('/api/expense-entries/:date', async (req, res) => {
     // 'transport' = pagesa transporti të lidhura me fatura blerje, 'all' = të gjitha.
     const type = String(req.query.type || 'all').toLowerCase();
     let extra = '';
-    if (type === 'daily')     extra = ' AND e.purchase_invoice_id IS NULL';
-    else if (type === 'transport') extra = ' AND e.purchase_invoice_id IS NOT NULL';
+    if (type === 'daily')     extra = " AND COALESCE(e.kind, 'daily') = 'daily'";
+    else if (type === 'transport') extra = " AND COALESCE(e.kind, 'daily') = 'transport'";
     const rows = await queryAll(
       `SELECT e.*, c.name AS category_name,
               pi.invoice_no AS purchase_invoice_no,
@@ -7775,13 +7775,20 @@ app.get('/api/expense-entries/:date', async (req, res) => {
 
 app.post('/api/expense-entries', async (req, res) => {
   try {
-    const { date, category_id, description, currency, amount, exchange_rate, purchase_invoice_id } = req.body || {};
+    const { date, category_id, description, currency, amount, exchange_rate, purchase_invoice_id, kind } = req.body || {};
     if (!date) return res.status(400).json({ error: 'date required' });
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
     const rate = cur === 'LEK' ? 1 : (parseFloat(exchange_rate) || 0);
     if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
     const invId = purchase_invoice_id ? parseInt(purchase_invoice_id) || null : null;
+    // Backward-compat: nëse `kind` s'kalohet, e nxjerrim nga prania e faturës
+    // (rreshti i vjetër: purchase_invoice_id => transport; ndryshe => daily).
+    const rawKind = String(kind || (invId ? 'transport' : 'daily')).toLowerCase();
+    const rowKind = rawKind === 'transport' ? 'transport' : 'daily';
+    if (rowKind === 'transport' && !invId && !String(description || '').trim()) {
+      return res.status(400).json({ error: 'për transport pa faturë duhet një përshkrim' });
+    }
     if (invId) {
       // Validime për pagesat e transportit: fatura duhet të ekzistojë, dhe një
       // faturë mund të ketë vetëm një pagesë transporti (indeksi unik e mbron
@@ -7793,8 +7800,8 @@ app.post('/api/expense-entries', async (req, res) => {
     }
     await run(
       `INSERT INTO expense_entries (date, category_id, description, currency, amount, exchange_rate,
-         amount_lek, amount_eur, amount_usd, purchase_invoice_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         amount_lek, amount_eur, amount_usd, purchase_invoice_id, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date,
         category_id || null,
@@ -7805,6 +7812,7 @@ app.post('/api/expense-entries', async (req, res) => {
         cur === 'EUR' ? amt : 0,
         cur === 'USD' ? amt : 0,
         invId,
+        rowKind,
       ]
     );
     await syncExpenseTotals(date);
@@ -7826,8 +7834,8 @@ app.post('/api/expense-entries', async (req, res) => {
 app.put('/api/expense-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, category_id, description, currency, amount, exchange_rate, purchase_invoice_id } = req.body || {};
-    const existing = await queryOne('SELECT date, purchase_invoice_id FROM expense_entries WHERE id = ?', [id]);
+    const { date, category_id, description, currency, amount, exchange_rate, purchase_invoice_id, kind } = req.body || {};
+    const existing = await queryOne('SELECT date, purchase_invoice_id, kind FROM expense_entries WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
     const cur = pickCurrency(currency);
     const amt = parseFloat(amount) || 0;
@@ -7838,6 +7846,14 @@ app.put('/api/expense-entries/:id', async (req, res) => {
     const invId = purchase_invoice_id === undefined
       ? (existing.purchase_invoice_id || null)
       : (purchase_invoice_id ? parseInt(purchase_invoice_id) || null : null);
+    // Ruaj kind-in ekzistues nëse s'kalohet; ndryshe validojë.
+    const existingKind = existing.kind || (existing.purchase_invoice_id ? 'transport' : 'daily');
+    const rowKind = kind === undefined
+      ? existingKind
+      : (String(kind).toLowerCase() === 'transport' ? 'transport' : 'daily');
+    if (rowKind === 'transport' && !invId && !String(description || '').trim()) {
+      return res.status(400).json({ error: 'për transport pa faturë duhet një përshkrim' });
+    }
     if (invId && invId !== existing.purchase_invoice_id) {
       const exists = await queryOne('SELECT id FROM purchase_invoices WHERE id = ?', [invId]);
       if (!exists) return res.status(400).json({ error: 'fatura e blerjes nuk u gjet' });
@@ -7848,7 +7864,7 @@ app.put('/api/expense-entries/:id', async (req, res) => {
       `UPDATE expense_entries SET date = ?, category_id = ?, description = ?,
          currency = ?, amount = ?, exchange_rate = ?,
          amount_lek = ?, amount_eur = ?, amount_usd = ?,
-         purchase_invoice_id = ?
+         purchase_invoice_id = ?, kind = ?
        WHERE id = ?`,
       [
         date || existing.date,
@@ -7859,6 +7875,7 @@ app.put('/api/expense-entries/:id', async (req, res) => {
         cur === 'EUR' ? amt : 0,
         cur === 'USD' ? amt : 0,
         invId,
+        rowKind,
         id,
       ]
     );
@@ -7905,8 +7922,8 @@ app.get('/api/reports/expenses', async (req, res) => {
       params.push(String(currency).toUpperCase());
     }
     const t = String(type || 'all').toLowerCase();
-    if (t === 'daily')     where += ' AND e.purchase_invoice_id IS NULL';
-    else if (t === 'transport') where += ' AND e.purchase_invoice_id IS NOT NULL';
+    if (t === 'daily')     where += " AND COALESCE(e.kind, 'daily') = 'daily'";
+    else if (t === 'transport') where += " AND COALESCE(e.kind, 'daily') = 'transport'";
 
     const entries = await queryAll(
       `SELECT e.*, c.name AS category_name,
