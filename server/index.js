@@ -5782,10 +5782,12 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const r of mktProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
-    // marketing_in_kind_eur kthehet si fushë e veçantë dhe shfaqet ndarë te UI
-    // si "Marketingu Shitje" — NUK përfshihet te xhiro_total (që të jetë e
-    // dallueshme nga shitjet e vërteta). Sidoqoftë hyn te cash_from_sales më
-    // poshtë që arka ta ketë efektin pozitiv sikur të kishte qenë shitje kesh.
+    // marketing_in_kind_eur shfaqet DUAL në UI:
+    //   1) Si rresht "Marketingu Shitje" te "Të Ardhura" (+ vlera e kostos)
+    //   2) Si pjesë e "Shpenzime Marketingu" te "Dalje" (− vlera e kostos)
+    // Efekti neto në arkë = 0 (paratë s'lëvizën, produkti u dhurua).
+    // Prandaj e shtojmë edhe te expenses_marketing.EUR që ta zbresë poshtë.
+    expenses_marketing.EUR += marketing_in_kind_eur;
 
     // Agregat për cash_balance calc dhe backward-compat (fusha `expenses`).
     const expenses = zeroPerCur();
@@ -6163,8 +6165,8 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     for (const r of mktProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
-    // marketing_in_kind_eur mbahet i ndarë nga xhiro; shtohet te cash_from_sales
-    // më poshtë (efekti pozitiv në arkë, si shitje kesh).
+    // marketing_in_kind_eur: +cash_from_sales dhe +expenses_marketing (net = 0).
+    expenses_marketing.EUR += marketing_in_kind_eur;
 
     // Agregat për backward-compat dhe cash_balance calc në range endpoint.
     const expenses = zeroPerCur();
