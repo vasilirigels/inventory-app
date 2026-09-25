@@ -585,7 +585,9 @@ app.post('/api/repairs', async (req, res) => {
     const date_received = String(d.date_received || '').trim();
     const customer_name = String(d.customer_name || '').trim();
     const item_description = String(d.item_description || '').trim();
-    if (!date_received || !customer_name || !item_description) {
+    // customer_name & item_description janë opsionale: lejohen riparime pa
+    // emër/faturë (p.sh. punë të shpejta pa regjistrim klienti).
+    if (!date_received) {
       return res.status(400).json({ error: 'missing_fields' });
     }
     const result = await run(

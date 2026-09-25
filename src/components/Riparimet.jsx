@@ -43,8 +43,8 @@ function RepairModal({ repair, onClose, onSave }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const submit = (e) => {
     e.preventDefault()
-    if (!form.customer_name.trim() || !form.item_description.trim() || !form.date_received) {
-      alert('Plotësoni Datën, Emrin e klientit dhe Përshkrimin e sendit.')
+    if (!form.date_received) {
+      alert('Plotësoni Datën e marrjes.')
       return
     }
     onSave(form)
@@ -77,10 +77,10 @@ function RepairModal({ repair, onClose, onSave }) {
               </div>
 
               <div className="md:col-span-2">
-                <label className="form-label">Emri i Klientit *</label>
+                <label className="form-label">Emri i Klientit</label>
                 <input type="text" value={form.customer_name}
                   onChange={e => set('customer_name', e.target.value)}
-                  className="input-field" placeholder="p.sh. Anila Doda" autoFocus required />
+                  className="input-field" placeholder="opsional — p.sh. Anila Doda" autoFocus />
               </div>
               <div className="md:col-span-2">
                 <label className="form-label">Telefoni</label>
@@ -90,10 +90,10 @@ function RepairModal({ repair, onClose, onSave }) {
               </div>
 
               <div className="md:col-span-2">
-                <label className="form-label">Sendi për Riparim *</label>
+                <label className="form-label">Sendi për Riparim</label>
                 <input type="text" value={form.item_description}
                   onChange={e => set('item_description', e.target.value)}
-                  className="input-field" placeholder="p.sh. Unazë ari 18k me diamant" required />
+                  className="input-field" placeholder="opsional — p.sh. Unazë ari 18k me diamant" />
               </div>
 
               <div className="md:col-span-2">
@@ -319,10 +319,14 @@ export default function Riparimet() {
                     <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs whitespace-nowrap">{r.date_received}</td>
                       <td className="px-3 py-3">
-                        <div className="font-semibold text-slate-800 dark:text-slate-100">{r.customer_name}</div>
+                        <div className="font-semibold text-slate-800 dark:text-slate-100">
+                          {r.customer_name || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
+                        </div>
                         {r.customer_phone && <div className="text-[11px] text-slate-500 dark:text-slate-400">{r.customer_phone}</div>}
                       </td>
-                      <td className="px-3 py-3 text-slate-700 dark:text-slate-200">{r.item_description}</td>
+                      <td className="px-3 py-3 text-slate-700 dark:text-slate-200">
+                        {r.item_description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
+                      </td>
                       <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs max-w-xs">
                         {r.issue_description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
                       </td>
@@ -460,8 +464,8 @@ export default function Riparimet() {
             <div className="modal-header"><h3 className="font-bold text-slate-800 dark:text-slate-100">Konfirmo fshirjen</h3></div>
             <div className="modal-body">
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                Fshi riparimin e <span className="font-semibold">{confirmDel.customer_name}</span>
-                {' '}— {confirmDel.item_description}?
+                Fshi riparimin{confirmDel.customer_name ? <> e <span className="font-semibold">{confirmDel.customer_name}</span></> : ` #${confirmDel.id}`}
+                {confirmDel.item_description ? ` — ${confirmDel.item_description}` : ''}?
               </p>
             </div>
             <div className="modal-footer">
