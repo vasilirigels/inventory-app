@@ -6607,6 +6607,36 @@ app.post('/api/safe-withdrawals', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.put('/api/safe-withdrawals/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne('SELECT date FROM safe_withdrawals WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const d = req.body || {};
+    const date = d.date || existing.date;
+    const amounts = {};
+    let anyPositive = false;
+    for (const c of CURS_SW) {
+      const v = parseFloat(d[`amount_${c}`]) || 0;
+      amounts[c] = v;
+      if (v > 0) anyPositive = true;
+    }
+    if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
+    const destination = String(d.destination || 'jashte').trim().toLowerCase();
+    if (!['arka', 'bank', 'jashte'].includes(destination)) {
+      return res.status(400).json({ error: "destination duhet të jetë 'arka' | 'bank' | 'jashte'" });
+    }
+    const person = String(d.person || '').trim();
+    const note   = String(d.note   || '').trim();
+    const setParts = ['date = ?', ...CURS_SW.map(c => `amount_${c} = ?`), 'destination = ?', 'person = ?', 'note = ?'];
+    const params = [date, ...CURS_SW.map(c => amounts[c]), destination, person, note, id];
+    await run(`UPDATE safe_withdrawals SET ${setParts.join(', ')} WHERE id = ?`, params);
+    await syncSafeWithdrawTotals(existing.date);
+    if (date !== existing.date) await syncSafeWithdrawTotals(date);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/safe-withdrawals/:id', async (req, res) => {
   try {
     const { id } = req.params;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 import { getUser } from '../lib/auth.js'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
@@ -40,6 +41,8 @@ export default function TerheqjaKasaforta({ date }) {
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [deletingId, setDeletingId] = useState(null)
+  const [editingId, setEditingId] = useState(null)
 
   useEffect(() => { setEntryDate(date) }, [date])
 
@@ -81,15 +84,20 @@ export default function TerheqjaKasaforta({ date }) {
     try {
       const payload = { date: entryDate, destination, person: person.trim(), note: note.trim() }
       for (const c of CURS) payload[`amount_${c.toLowerCase()}`] = parsed[c]
-      const res = await fetch('/api/safe-withdrawals', {
-        method: 'POST',
+      const url = editingId ? `/api/safe-withdrawals/${editingId}` : '/api/safe-withdrawals'
+      const method = editingId ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'gabim')
       setAmounts(emptyAmounts()); setPerson(''); setNote(''); setDestination('jashte')
-      setMsg('✓ Tërheqja u regjistrua')
+      setEntryDate(date)
+      const wasEditing = !!editingId
+      setEditingId(null)
+      setMsg(wasEditing ? '✓ Tërheqja u përditësua' : '✓ Tërheqja u regjistrua')
       setTimeout(() => setMsg(''), 2500)
       loadHistory()
     } catch (err) {
@@ -100,18 +108,73 @@ export default function TerheqjaKasaforta({ date }) {
     }
   }
 
+  const startEdit = (row) => {
+    setEditingId(row.id)
+    setEntryDate(row.date)
+    setDestination(row.destination || 'jashte')
+    setPerson(row.person || '')
+    setNote(row.note || '')
+    const a = emptyAmounts()
+    for (const c of CURS) {
+      const v = row[`amount_${c.toLowerCase()}`] || 0
+      a[c] = v ? String(v) : ''
+    }
+    setAmounts(a)
+    setMsg('')
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setAmounts(emptyAmounts()); setPerson(''); setNote(''); setDestination('jashte')
+    setEntryDate(date)
+    setMsg('')
+  }
+
   const totals = {}
   for (const c of CURS) {
     totals[c] = history.reduce((s, r) => s + (r[`amount_${c.toLowerCase()}`] || 0), 0)
   }
 
+  const doDelete = async (row) => {
+    const parts = []
+    for (const c of CURS) {
+      const v = row[`amount_${c.toLowerCase()}`] || 0
+      if (v > 0) parts.push(`${fmt(v)} ${c}`)
+    }
+    const amountStr = parts.join(' · ') || '—'
+    const destLabel = DEST_LABELS[row.destination || 'jashte']?.label || 'Jashtë'
+    const ok = await showConfirm(
+      `Data: ${row.date}\nShuma: ${amountStr}\nDestinacioni: ${destLabel}${row.person ? `\nPersoni: ${row.person}` : ''}${row.note ? `\nShënim: ${row.note}` : ''}\n\nKy veprim është i pakthyeshëm. Bilanci i kasafortës dhe arka do të rikllogariten automatikisht.`,
+      { title: 'Fshi këtë tërheqje?', confirmLabel: 'Po, fshi', danger: true },
+    )
+    if (!ok) return
+    setDeletingId(row.id); setMsg('')
+    try {
+      const res = await fetch(`/api/safe-withdrawals/${row.id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Gabim gjatë fshirjes')
+      setMsg('✓ Tërheqja u fshi')
+      setTimeout(() => setMsg(''), 2500)
+      loadHistory()
+    } catch (err) {
+      setMsg('⚠ ' + err.message)
+      setTimeout(() => setMsg(''), 3500)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Tërheqje nga Kasaforta</h3>
+      <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border p-6 ${editingId ? 'border-amber-400 dark:border-amber-500 ring-2 ring-amber-200 dark:ring-amber-900/40' : 'border-slate-200 dark:border-slate-700'}`}>
+        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">
+          {editingId ? `✏️ Edito Tërheqjen #${editingId}` : 'Tërheqje nga Kasaforta'}
+        </h3>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Regjistro çdo tërheqje me shumat për çdo monedhë, personin që i mori dhe një shënim opsional.
-          Klik butonin "Regjistro Tërheqjen" për ta ruajtur.
+          {editingId
+            ? 'Ndrysho të dhënat më poshtë dhe kliko "Përditëso" për të ruajtur. Bilanci i kasafortës dhe arka rikllogariten automatikisht.'
+            : 'Regjistro çdo tërheqje me shumat për çdo monedhë, personin që i mori dhe një shënim opsional. Klik butonin "Regjistro Tërheqjen" për ta ruajtur.'}
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-3">
@@ -200,8 +263,18 @@ export default function TerheqjaKasaforta({ date }) {
               disabled={saving}
               className="btn-primary disabled:opacity-50"
             >
-              {saving ? '⏳ Duke ruajtur...' : '💾 Regjistro Tërheqjen'}
+              {saving ? '⏳ Duke ruajtur...' : editingId ? '💾 Përditëso' : '💾 Regjistro Tërheqjen'}
             </button>
+            {editingId && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={saving}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Anulo
+              </button>
+            )}
             {msg && (
               <span className={`text-sm font-medium ${msg.startsWith('⚠') ? 'text-rose-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                 {msg}
@@ -252,6 +325,9 @@ export default function TerheqjaKasaforta({ date }) {
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Destinacioni</th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Personi</th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënim</th>
+                  {isAdmin && (
+                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprim</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -276,6 +352,28 @@ export default function TerheqjaKasaforta({ date }) {
                     </td>
                     <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">{r.person || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
                     <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300">{r.note || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}</td>
+                    {isAdmin && (
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(r)}
+                          disabled={deletingId === r.id || editingId === r.id}
+                          className="text-xs font-semibold text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 disabled:opacity-50 mr-3"
+                          title="Edito këtë tërheqje"
+                        >
+                          {editingId === r.id ? '✏️ Duke edituar…' : '✏️ Edito'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => doDelete(r)}
+                          disabled={deletingId === r.id || editingId === r.id}
+                          className="text-xs font-semibold text-rose-600 hover:text-rose-800 dark:text-rose-400 dark:hover:text-rose-300 disabled:opacity-50"
+                          title="Fshi këtë tërheqje"
+                        >
+                          {deletingId === r.id ? '⏳...' : '🗑 Fshi'}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
