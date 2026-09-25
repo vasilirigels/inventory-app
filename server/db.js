@@ -964,6 +964,16 @@ const MIGRATIONS = [
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
   "CREATE INDEX IF NOT EXISTS idx_safe_deposits_date ON safe_deposits(date)",
+
+  // Lidhja e riparimit me një produkt inventari + kapari (deposit) + fatura e
+  // krijuar kur statusi kalon në 'dorezuar'. product_id është opsional; kur i
+  // vendosur, produkti "rezervohet" (fshihet nga /products/search) derisa
+  // riparimi të dorëzohet ose të fshihet. converted_invoice_id ruan lidhjen
+  // e njëkohshme një-me-një me faturën automatike të shitjes.
+  "ALTER TABLE repairs ADD COLUMN product_id INTEGER",
+  "ALTER TABLE repairs ADD COLUMN deposit REAL DEFAULT 0",
+  "ALTER TABLE repairs ADD COLUMN converted_invoice_id INTEGER",
+  "CREATE INDEX IF NOT EXISTS idx_repairs_product ON repairs(product_id)",
 ];
 
 async function initDB() {

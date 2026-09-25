@@ -561,23 +561,124 @@ app.delete('/api/comments/:id', async (req, res) => {
 // I regjistruar këtu (para gate-it të shitësit) që të dy rolet të mund të
 // krijojnë dhe editojnë. Fshirja lejohet vetëm për admin.
 
+// Kolona konvenience për RepairModal: JOIN me produktin e lidhur që frontend-i
+// të mos bëjë kërkim shtesë (produkti i lidhur është i rezervuar dhe nuk del
+// tek /products/search). SELECT list vazhdon të përfshijë r.* → të gjitha
+// fushat e riparimit.
+const REPAIR_SELECT = `
+  SELECT r.*,
+         p.name       AS product_name,
+         p.barcode    AS product_barcode,
+         p.sku        AS product_sku,
+         p.serial_no  AS product_serial_no,
+         p.stock      AS product_stock,
+         p.vat_rate   AS product_vat_rate,
+         p.sell_price AS product_sell_price
+    FROM repairs r
+    LEFT JOIN products p ON p.id = r.product_id`;
+
 app.get('/api/repairs', async (req, res) => {
   try {
     const { status, q } = req.query;
     const args = []; const where = [];
-    if (status && status !== 'all') { where.push('status = ?'); args.push(status); }
+    if (status && status !== 'all') { where.push('r.status = ?'); args.push(status); }
     if (q) {
-      where.push(`(customer_name LIKE ? OR customer_phone LIKE ? OR item_description LIKE ?)`);
+      where.push(`(r.customer_name LIKE ? OR r.customer_phone LIKE ? OR r.item_description LIKE ?)`);
       const like = `%${q}%`;
       args.push(like, like, like);
     }
-    const sql = `SELECT * FROM repairs
+    const sql = `${REPAIR_SELECT}
                  ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-                 ORDER BY id DESC LIMIT 500`;
+                 ORDER BY r.id DESC LIMIT 500`;
     const rows = await queryAll(sql, args);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// Konverton një riparim (me product_id) në faturë shitjeje. Përdor çmimin që
+// përdoruesi vendosi te riparimi (jo sell_price të produktit), sepse mund të
+// përfshijë koston e ndërhyrjes/gurit të ri. Kapari bëhet amount_paid; balanca
+// e mbetur regjistrohet si borxh. Stoku zbritet me adjustStock().
+async function convertRepairToInvoice(repair) {
+  if (!repair.product_id) return null;
+  if (repair.converted_invoice_id) return repair.converted_invoice_id;
+  const product = await queryOne('SELECT * FROM products WHERE id = ?', [repair.product_id]);
+  if (!product) throw new Error('product_not_found');
+  const price = Number(repair.price) || 0;
+  if (price <= 0) throw new Error('price_required_for_conversion');
+  const vat_rate = Number(product.vat_rate) || 0;
+  const unit_price_no_vat = +(price / (1 + vat_rate / 100)).toFixed(6);
+  const item = {
+    product_id: product.id,
+    serial_no: product.serial_no || '',
+    barcode: product.barcode || '',
+    name: repair.item_description || product.name,
+    qty: 1,
+    gram: 0,
+    unit_price_no_vat,
+    discount_percent: 0,
+    vat_rate,
+    on_promotion: 0,
+    promo_discount_pct: 0,
+    sell_rate: 0,
+    has_gram: 0,
+    multiplier: 0,
+    is_gift: 0,
+  };
+  const items = [{ ...item, ...computeLineTotals(item) }];
+  const totals = recomputeInvoiceTotals(items);
+  const deposit = Math.max(0, Number(repair.deposit) || 0);
+  const total = totals.total_with_vat;
+  const amountPaid = Math.min(deposit, total);
+  const amountDue = Math.max(0, +(total - amountPaid).toFixed(2));
+  let payment_method, paid_cash, paid_bank, paid_pos;
+  if (amountPaid <= 0) {
+    payment_method = 'debt'; paid_cash = 0; paid_bank = 0; paid_pos = 0;
+  } else if (amountPaid >= total - 0.005) {
+    payment_method = 'cash'; paid_cash = 0; paid_bank = 0; paid_pos = 0;
+  } else {
+    payment_method = 'mikse'; paid_cash = amountPaid; paid_bank = 0; paid_pos = 0;
+  }
+  const date = repair.date_delivered || new Date().toISOString().slice(0, 10);
+  const currency = repair.currency || 'LEK';
+  await ensureClientExists(repair.customer_name, '');
+  const doInsertInvoice = (invNo) => run(
+    `INSERT INTO invoices (date, invoice_no, customer_name, customer_nipt, currency, exchange_rate,
+       subtotal_no_vat, total_discount, total_vat, total_with_vat, payment_method, amount_paid, amount_due,
+       paid_cash, paid_pos, paid_bank, notes,
+       is_online, channel, shipping_address, order_status, tracking_no)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      date, invNo, repair.customer_name || '', '',
+      currency, 1,
+      totals.subtotal_no_vat, 0,
+      totals.total_vat, total,
+      payment_method, amountPaid, amountDue,
+      paid_cash, paid_pos, paid_bank,
+      `Auto nga Riparimi #${repair.id}`,
+      0, '', '', '', '',
+    ]
+  );
+  const invoice_no = await retryOnUniqueNo(() => nextInvoiceNo(date), doInsertInvoice, 5, null);
+  const inv = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
+  const invoiceId = inv?.id;
+  for (const it of items) {
+    await run(
+      `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
+        discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
+        on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceId, it.product_id || null, it.serial_no, it.barcode, it.name,
+        it.qty, it.gram, it.unit_price_no_vat, it.discount_percent,
+        it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
+        0, 0, 0, 0, 0, 0,
+      ]
+    );
+  }
+  await adjustStock(items, -1);
+  return invoiceId;
+}
 
 app.post('/api/repairs', async (req, res) => {
   try {
@@ -590,11 +691,23 @@ app.post('/api/repairs', async (req, res) => {
     if (!date_received) {
       return res.status(400).json({ error: 'missing_fields' });
     }
+    const product_id = d.product_id ? Number(d.product_id) : null;
+    if (product_id) {
+      // Rezervimi: mos lejo lidhjen me një produkt që është tashmë i zënë nga
+      // një riparim tjetër aktiv (jo 'dorezuar', pa faturë të krijuar).
+      const clash = await queryOne(
+        `SELECT id FROM repairs
+          WHERE product_id = ? AND status <> 'dorezuar' AND converted_invoice_id IS NULL`,
+        [product_id]
+      );
+      if (clash) return res.status(409).json({ error: 'product_reserved' });
+    }
     const result = await run(
       `INSERT INTO repairs
        (date_received, customer_name, customer_phone, item_description,
-        issue_description, notes, price, currency, status, paid, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        issue_description, notes, price, currency, status, paid, created_by,
+        product_id, deposit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date_received,
         customer_name,
@@ -607,9 +720,11 @@ app.post('/api/repairs', async (req, res) => {
         d.status && ['pranuar','ne_pune','gati','dorezuar'].includes(d.status) ? d.status : 'pranuar',
         d.paid ? 1 : 0,
         req.user.username,
+        product_id,
+        Math.max(0, Number(d.deposit) || 0),
       ],
     );
-    const row = await queryOne('SELECT * FROM repairs WHERE id = ?', [Number(result.lastInsertRowid)]);
+    const row = await queryOne(`${REPAIR_SELECT} WHERE r.id = ?`, [Number(result.lastInsertRowid)]);
     res.json(row);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -617,15 +732,40 @@ app.post('/api/repairs', async (req, res) => {
 app.put('/api/repairs/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const existing = await queryOne('SELECT id FROM repairs WHERE id = ?', [id]);
+    const existing = await queryOne('SELECT * FROM repairs WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not_found' });
     const d = req.body || {};
     const status = d.status && ['pranuar','ne_pune','gati','dorezuar'].includes(d.status) ? d.status : 'pranuar';
+    const product_id = d.product_id ? Number(d.product_id) : null;
+    if (product_id && product_id !== existing.product_id) {
+      // Ndryshim i produktit të lidhur — verifiko që i riu nuk është i rezervuar.
+      const clash = await queryOne(
+        `SELECT id FROM repairs
+          WHERE product_id = ? AND status <> 'dorezuar' AND converted_invoice_id IS NULL AND id <> ?`,
+        [product_id, id]
+      );
+      if (clash) return res.status(409).json({ error: 'product_reserved' });
+    }
+    // Nëse riparimi është konvertuar tashmë në faturë (converted_invoice_id != NULL),
+    // bllokoji ndryshimet e product_id/price/deposit/status (fatura duhet
+    // menaxhuar veç). Sales-i mund të ndryshojë vetëm shënime/telefon.
+    if (existing.converted_invoice_id) {
+      if (
+        product_id !== existing.product_id ||
+        (Number(d.price) || 0) !== (Number(existing.price) || 0) ||
+        (Number(d.deposit) || 0) !== (Number(existing.deposit) || 0) ||
+        status !== existing.status
+      ) {
+        return res.status(409).json({ error: 'already_converted' });
+      }
+    }
+    const date_delivered = String(d.date_delivered || '');
     await run(
       `UPDATE repairs SET
          date_received = ?, customer_name = ?, customer_phone = ?,
          item_description = ?, issue_description = ?, notes = ?,
          price = ?, currency = ?, status = ?, date_delivered = ?, paid = ?,
+         product_id = ?, deposit = ?,
          updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
@@ -638,12 +778,31 @@ app.put('/api/repairs/:id', async (req, res) => {
         Number(d.price) || 0,
         String(d.currency || 'LEK'),
         status,
-        String(d.date_delivered || ''),
+        date_delivered,
         d.paid ? 1 : 0,
+        product_id,
+        Math.max(0, Number(d.deposit) || 0),
         id,
       ],
     );
-    const row = await queryOne('SELECT * FROM repairs WHERE id = ?', [id]);
+    // Trigger i konvertimit në faturë: statusi u vendos në 'dorezuar', ekziston
+    // product_id i vlefshëm, dhe ende s'ka faturë të lidhur. Konvertohet një herë
+    // e vetme — status i mëpasëm mbetet i njëjtë; për re-konvertim duhet fshirë
+    // fatura dhe converted_invoice_id manualisht nga admin.
+    if (status === 'dorezuar' && product_id && !existing.converted_invoice_id) {
+      const fresh = await queryOne('SELECT * FROM repairs WHERE id = ?', [id]);
+      try {
+        const invoiceId = await convertRepairToInvoice(fresh);
+        if (invoiceId) {
+          await run('UPDATE repairs SET converted_invoice_id = ? WHERE id = ?', [invoiceId, id]);
+        }
+      } catch (convErr) {
+        // Rikthe statusin te i mëparshëm që të mos mbetet 'dorezuar' pa faturë.
+        await run('UPDATE repairs SET status = ? WHERE id = ?', [existing.status || 'pranuar', id]);
+        return res.status(400).json({ error: 'conversion_failed', detail: convErr.message });
+      }
+    }
+    const row = await queryOne(`${REPAIR_SELECT} WHERE r.id = ?`, [id]);
     res.json(row);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -652,6 +811,13 @@ app.delete('/api/repairs/:id', async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
     const id = Number(req.params.id);
+    // Nëse riparimi është konvertuar në faturë, s'e fshijmë auto — admin duhet
+    // ta trajtojë faturën (anulim/kthim) veç, që stoku dhe historia e faturave
+    // të mbeten të pastra.
+    const existing = await queryOne('SELECT converted_invoice_id FROM repairs WHERE id = ?', [id]);
+    if (existing?.converted_invoice_id) {
+      return res.status(409).json({ error: 'has_invoice' });
+    }
     await run('DELETE FROM repairs WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1408,9 +1574,22 @@ app.get('/api/products/search', async (req, res) => {
     const orderClause = q
       ? 'ORDER BY (CASE WHEN barcode = ? THEN 0 WHEN sku = ? THEN 1 WHEN serial_no = ? THEN 2 ELSE 3 END), name'
       : 'ORDER BY name';
+    // Rezervimi: fshih nga rezultatet çdo produkt të lidhur me një riparim
+    // aktiv (jo 'dorezuar' dhe pa converted_invoice_id). Rasti i editimit të
+    // riparimit ekzistues: `except_repair_id` lejon rikthimin e vetë atij
+    // produkti (që të mos "zhduket" kur hap modalin edit).
+    const exceptRepairId = Number(req.query.except_repair_id) || 0;
+    const reservationClause = ` AND NOT EXISTS (
+      SELECT 1 FROM repairs r
+       WHERE r.product_id = products.id
+         AND r.status <> 'dorezuar'
+         AND r.converted_invoice_id IS NULL
+         ${exceptRepairId ? 'AND r.id <> ?' : ''}
+    )`;
     const params = [];
     if (q) params.push(like, like, like, like);
     if (q) params.push(q, q, q);
+    if (exceptRepairId) params.push(exceptRepairId);
     const rows = await queryAll(
       `SELECT id, name, sku, barcode, category, sell_price, cost_price, vat_rate, stock, image_path, gram,
               is_promotion, promo_discount_pct, serial_no, purchase_price_no_vat,
@@ -1418,7 +1597,7 @@ app.get('/api/products/search', async (req, res) => {
               kodi, koeficent_pune, multiplier, sell_rate,
               is_gift
          FROM products
-        WHERE active = 1${giftClause}${searchClause}
+        WHERE active = 1${giftClause}${searchClause}${reservationClause}
         ${orderClause}
         LIMIT 30`,
       params
@@ -1426,6 +1605,7 @@ app.get('/api/products/search', async (req, res) => {
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
 
 app.patch('/api/products/:id/stock', async (req, res) => {
   try {

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getUser } from '../lib/auth.js'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import MoneyInput from './MoneyInput.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const STATUS_META = {
   pranuar:  { label: 'Pranuar',     cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200',    dot: 'bg-slate-400' },
@@ -30,6 +31,8 @@ function EMPTY() {
     status: 'pranuar',
     date_delivered: '',
     paid: 0,
+    product_id: null,
+    deposit: '',
   }
 }
 
@@ -38,13 +41,131 @@ function fmtNum(v) {
   return n.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Zgjedhës produkti — kërkim me debounce; kur zgjedh, form mbush automatikisht
+// item_description (emri i produktit + serial_no nëse ka). `except_repair_id`
+// lejon që produkti i lidhur me riparimin që po editohet të mos filtrohet nga
+// rezervimi. Kur ka `product` të vendosur, tregon "chip" me x për ta hequr.
+function ProductPicker({ product, exceptRepairId, onPick, onClear }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const timerRef = useRef(null)
+  const boxRef = useRef(null)
+
+  useEffect(() => {
+    function onDoc(e) { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const search = (q) => {
+    clearTimeout(timerRef.current)
+    if (!q.trim()) { setResults([]); return }
+    timerRef.current = setTimeout(async () => {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams({ q })
+        if (exceptRepairId) params.set('except_repair_id', String(exceptRepairId))
+        const data = await fetch(`/api/products/search?${params}`).then(r => r.json())
+        setResults(Array.isArray(data) ? data : [])
+      } catch { setResults([]) }
+      setLoading(false)
+    }, 200)
+  }
+
+  const pick = (p) => { onPick(p); setOpen(false); setQuery(''); setResults([]) }
+
+  if (product) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-blue-900 dark:text-blue-100 truncate">
+            🔗 {product.name || `Produkt #${product.id}`}
+          </div>
+          <div className="text-[11px] text-blue-700 dark:text-blue-300 flex gap-2 flex-wrap">
+            {product.barcode && <span className="font-mono">{product.barcode}</span>}
+            {product.serial_no && <span>SN: {product.serial_no}</span>}
+            {product.stock != null && <span>stok: {product.stock}</span>}
+          </div>
+        </div>
+        <button type="button" onClick={onClear}
+          className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 text-lg"
+          title="Hiq lidhjen">×</button>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <input type="text" value={query}
+        placeholder="Kërko produkt në inventar (barkod ose emër)..."
+        onChange={e => { setQuery(e.target.value); search(e.target.value); setOpen(true) }}
+        onFocus={() => query && setOpen(true)}
+        className="input-field" />
+      {open && (results.length > 0 || loading) && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+          {loading && <div className="p-2 text-[11px] text-slate-400 dark:text-slate-500">Duke kërkuar...</div>}
+          {results.map(p => (
+            <button key={p.id} type="button" onClick={() => pick(p)}
+              className="w-full text-left px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-blue-50 dark:hover:bg-blue-900/30">
+              <div className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                <span className="font-mono">{p.barcode || p.sku || '—'}</span>
+                <span>stok: {p.stock}{p.serial_no ? ` · SN: ${p.serial_no}` : ''}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RepairModal({ repair, onClose, onSave }) {
   const [form, setForm] = useState(() => repair ? { ...EMPTY(), ...repair } : EMPTY())
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  // Riparimi ka product_id → JOIN te backend-i mbush product_* → reflekto si objekt
+  // për ProductPicker (mos e ri-fetcho, i kemi tashmë brenda rreshtit të riparimit).
+  const linkedProduct = form.product_id
+    ? {
+        id: form.product_id,
+        name: form.product_name,
+        barcode: form.product_barcode,
+        serial_no: form.product_serial_no,
+        stock: form.product_stock,
+      }
+    : null
+  const isConverted = !!form.converted_invoice_id
+  const pickProduct = (p) => {
+    setForm(prev => ({
+      ...prev,
+      product_id: p.id,
+      product_name: p.name,
+      product_barcode: p.barcode,
+      product_serial_no: p.serial_no,
+      product_stock: p.stock,
+      item_description: prev.item_description?.trim() ? prev.item_description : `${p.name}${p.serial_no ? ` (SN: ${p.serial_no})` : ''}`,
+    }))
+  }
+  const clearProduct = () => {
+    setForm(prev => ({
+      ...prev,
+      product_id: null, product_name: undefined, product_barcode: undefined,
+      product_serial_no: undefined, product_stock: undefined,
+    }))
+  }
+  const priceNum = parseFloat(form.price) || 0
+  const depositNum = parseFloat(form.deposit) || 0
+  const balance = Math.max(0, priceNum - depositNum)
   const submit = (e) => {
     e.preventDefault()
     if (!form.date_received) {
       alert('Plotësoni Datën e marrjes.')
+      return
+    }
+    if (form.product_id && priceNum <= 0) {
+      alert('Për një riparim të lidhur me produkt duhet të vendosësh Çmimin (do të bëhet fatura e shitjes në momentin e dorëzimit).')
       return
     }
     onSave(form)
@@ -90,6 +211,21 @@ function RepairModal({ repair, onClose, onSave }) {
               </div>
 
               <div className="md:col-span-2">
+                <label className="form-label">Produkti nga Inventari (opsional)</label>
+                <ProductPicker
+                  product={linkedProduct}
+                  exceptRepairId={repair?.id || 0}
+                  onPick={pickProduct}
+                  onClear={clearProduct}
+                />
+                {linkedProduct && (
+                  <p className="text-[11px] text-blue-700 dark:text-blue-300 mt-1">
+                    ℹ️ Në momentin që statusi kalon në "Dorëzuar", do të krijohet automatikisht fatura e shitjes dhe produkti do të zbritet nga stoku.
+                  </p>
+                )}
+              </div>
+
+              <div className="md:col-span-2">
                 <label className="form-label">Sendi për Riparim</label>
                 <input type="text" value={form.item_description}
                   onChange={e => set('item_description', e.target.value)}
@@ -105,7 +241,7 @@ function RepairModal({ repair, onClose, onSave }) {
               </div>
 
               <div>
-                <label className="form-label">Çmimi</label>
+                <label className="form-label">Çmimi {linkedProduct && <span className="text-red-500">*</span>}</label>
                 <MoneyInput value={form.price}
                   onChange={v => set('price', String(v))}
                   className="input-field text-right tabular-nums" placeholder="0.00" />
@@ -115,6 +251,21 @@ function RepairModal({ repair, onClose, onSave }) {
                 <select value={form.currency} onChange={e => set('currency', e.target.value)} className="input-field">
                   {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
+              </div>
+
+              <div>
+                <label className="form-label">Kapari (paguar në fillim)</label>
+                <MoneyInput value={form.deposit}
+                  onChange={v => set('deposit', String(v))}
+                  className="input-field text-right tabular-nums" placeholder="0.00" />
+              </div>
+              <div className="flex items-end pb-2">
+                <div className="w-full">
+                  <label className="form-label">Për të paguar</label>
+                  <div className={`input-field text-right tabular-nums font-bold ${balance > 0.005 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                    {fmtNum(balance)} {form.currency}
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -128,7 +279,7 @@ function RepairModal({ repair, onClose, onSave }) {
                   <input type="checkbox" checked={!!form.paid}
                     onChange={e => set('paid', e.target.checked ? 1 : 0)}
                     className="w-4 h-4" />
-                  <span>I paguar</span>
+                  <span>I paguar plotësisht</span>
                 </label>
               </div>
 
@@ -139,6 +290,12 @@ function RepairModal({ repair, onClose, onSave }) {
                   className="input-field resize-none" rows={2}
                   placeholder="opsional" />
               </div>
+
+              {isConverted && (
+                <div className="md:col-span-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 p-3 text-sm text-emerald-800 dark:text-emerald-200">
+                  ✓ Ky riparim është konvertuar në faturë shitjeje #{form.converted_invoice_id}. Ndryshimet e produktit/çmimit/kaparit/statusit janë të bllokuara.
+                </div>
+              )}
             </div>
           </div>
           <div className="modal-footer">
@@ -179,6 +336,17 @@ export default function Riparimet() {
   useEffect(() => { load() }, [load])
   useRealtimeSync('repairs', load)
 
+  // Mesazhet e API-t për users — përkthim i kodeve nga backend-i.
+  const ERR_LABEL = {
+    product_reserved: 'Produkti është rezervuar tashmë nga një riparim tjetër aktiv.',
+    already_converted: 'Ky riparim është konvertuar në faturë; ndryshimet janë të bllokuara.',
+    has_invoice: 'Fshirja nuk lejohet: riparimi është konvertuar në faturë. Anulo faturën fillimisht.',
+    conversion_failed: 'Konvertimi në faturë dështoi. Kontrollo çmimin dhe stokun e produktit.',
+    price_required_for_conversion: 'Vendos çmimin para se ta dorëzosh një riparim të lidhur me produkt.',
+    product_not_found: 'Produkti i lidhur nuk u gjet në inventar.',
+  }
+  const apiError = (e) => ERR_LABEL[e?.error] || e?.detail || e?.error || 'Gabim'
+
   const save = async (data) => {
     const isEdit = !!data.id
     const url = isEdit ? `/api/repairs/${data.id}` : '/api/repairs'
@@ -188,19 +356,31 @@ export default function Riparimet() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-    if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); alert(apiError(e)); return false }
     setModal(null)
     load()
+    return true
   }
 
   const remove = async (id) => {
     const res = await fetch(`/api/repairs/${id}`, { method: 'DELETE' })
-    if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); alert(apiError(e)); return }
     setConfirmDel(null)
     load()
   }
 
   const quickStatus = async (row, status) => {
+    // Konfirmimi para konvertimit në faturë — vendim i pakthyeshëm i zbret stokut.
+    if (status === 'dorezuar' && row.product_id && !row.converted_invoice_id) {
+      const price = parseFloat(row.price) || 0
+      const dep = parseFloat(row.deposit) || 0
+      const bal = Math.max(0, price - dep)
+      const ok = await showConfirm(
+        `Dorëzimi i këtij riparimi do të krijojë automatikisht faturën e shitjes për produktin "${row.product_name || `#${row.product_id}`}".\n\nÇmimi: ${fmtNum(price)} ${row.currency}\nKapari: ${fmtNum(dep)} ${row.currency}\nMbetur për të paguar: ${fmtNum(bal)} ${row.currency}\n\nStoku do të zbritet. Vazhdo?`,
+        { confirmLabel: 'Dorëzo dhe krijo faturën' }
+      )
+      if (!ok) return
+    }
     const payload = { ...row, status }
     if (status === 'dorezuar' && !row.date_delivered) {
       payload.date_delivered = today()
@@ -325,19 +505,40 @@ export default function Riparimet() {
                         {r.customer_phone && <div className="text-[11px] text-slate-500 dark:text-slate-400">{r.customer_phone}</div>}
                       </td>
                       <td className="px-3 py-3 text-slate-700 dark:text-slate-200">
-                        {r.item_description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
+                        <div>
+                          {r.item_description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
+                        </div>
+                        {r.product_id && (
+                          <div className="text-[10px] text-blue-700 dark:text-blue-300 mt-0.5">
+                            🔗 {r.product_barcode || r.product_sku || `#${r.product_id}`}
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs max-w-xs">
                         {r.issue_description || <span className="italic text-slate-400 dark:text-slate-500">—</span>}
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">
-                        {r.price > 0 ? `${fmtNum(r.price)} ${r.currency}` : <span className="text-slate-400 dark:text-slate-500">—</span>}
+                        {r.price > 0 ? (
+                          <div>
+                            <div>{fmtNum(r.price)} {r.currency}</div>
+                            {(parseFloat(r.deposit) || 0) > 0 && !r.converted_invoice_id && (
+                              <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                                Kapar: {fmtNum(r.deposit)} · Mbetur: <span className={(parseFloat(r.price) - parseFloat(r.deposit)) > 0.005 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-emerald-600 dark:text-emerald-400'}>{fmtNum(Math.max(0, (parseFloat(r.price) || 0) - (parseFloat(r.deposit) || 0)))}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : <span className="text-slate-400 dark:text-slate-500">—</span>}
                       </td>
                       <td className="px-3 py-3 text-center">
                         <span className={`badge inline-flex items-center gap-1.5 ${meta.cls}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
                           {meta.label}
                         </span>
+                        {r.converted_invoice_id && (
+                          <div className="mt-1 text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold">
+                            🧾 Fatura #{r.converted_invoice_id}
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-3 text-center">
                         {r.paid
