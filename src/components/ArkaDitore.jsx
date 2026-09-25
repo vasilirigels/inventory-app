@@ -146,6 +146,9 @@ export default function ArkaDitore({ date, onNavigate }) {
     (data.returns_gross?.[c]   || 0) ||
     (data.opening_cash?.[c]    || 0) ||
     (data.expenses?.[c]        || 0) ||
+    (data.expenses_daily?.[c]     || 0) ||
+    (data.expenses_transport?.[c] || 0) ||
+    (data.expenses_marketing?.[c] || 0) ||
     (data.purchase_cash?.[c]   || 0) ||
     (data.hurda_cash?.[c]      || 0) ||
     (data.physical_cash?.[c]   || 0) ||
@@ -160,7 +163,7 @@ export default function ArkaDitore({ date, onNavigate }) {
 
   const rows = [
     { label: 'Gjendje Fillestare (mbartje)',   src: 'opening_cash',      sign: '+', color: 'text-slate-700 dark:text-slate-200',   bg: 'bg-slate-50 dark:bg-slate-900',   detail: 'nga dita e mëparshme' },
-    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura` },
+    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura${(data.marketing_in_kind_eur || 0) > 0 ? ` · përfshin ${(data.marketing_in_kind_eur).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR marketing in-kind (me vlerën e kostos)` : ''}` },
     { label: 'Pagesa me Bankë',                 src: 'paid_bank',         sign: '−', color: 'text-blue-700 dark:text-blue-300',    bg: 'bg-blue-50 dark:bg-blue-900/30',    detail: 'paid_bank' },
     { label: 'Pagesa me POS',                   src: 'paid_pos',          sign: '−', color: 'text-indigo-700',  bg: 'bg-indigo-50 dark:bg-indigo-900/30',  detail: 'paid_pos' },
     { label: 'Borxh i Papaguar',                src: 'amount_due',        sign: '−', color: 'text-rose-700',    bg: 'bg-rose-50',    detail: 'mbetja e papaguar' },
@@ -171,7 +174,9 @@ export default function ArkaDitore({ date, onNavigate }) {
   ]
   const outRows = [
     { label: 'Kthime Shitjesh (Kesh)',          src: 'returns_cash',      sign: '−', color: 'text-red-700 dark:text-red-300',      bg: 'bg-red-50 dark:bg-red-900/30',       detail: `${data.counts?.credit_notes || 0} kreditore · rimbursim kesh (dalje nga sirtari)` },
-    { label: 'Shpenzime (Arkë)',                src: 'expenses',          sign: '−', color: 'text-orange-700 dark:text-orange-300',  bg: 'bg-orange-50 dark:bg-orange-900/30',  detail: `${data.counts.expenses} regjistrime` },
+    { label: 'Shpenzime Ditore',                src: 'expenses_daily',    sign: '−', color: 'text-orange-700 dark:text-orange-300',  bg: 'bg-orange-50 dark:bg-orange-900/30',  detail: `${data.counts?.expenses_daily || 0} regjistrime` },
+    { label: 'Shpenzime Transporti',            src: 'expenses_transport', sign: '−', color: 'text-cyan-700 dark:text-cyan-300',     bg: 'bg-cyan-50 dark:bg-cyan-900/30',       detail: `${data.counts?.expenses_transport || 0} pagesa (me/pa faturë)` },
+    { label: 'Shpenzime Marketingu',            src: 'expenses_marketing', sign: '−', color: 'text-pink-700 dark:text-pink-300',     bg: 'bg-pink-50 dark:bg-pink-900/30',       detail: `${data.counts?.expenses_marketing || 0} zëra cash${(data.marketing_in_kind_eur || 0) > 0 ? ' (in-kind del si shitje me vlerën e kostos)' : ''}` },
     { label: 'Fatura Blerje Kesh',              src: 'purchase_cash',     sign: '−', color: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.purchases_cash} fatura` },
     { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
     { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800 dark:text-amber-200',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },

@@ -5712,29 +5712,40 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       }
     }
 
+    // Shpenzimet ndahen në 3 kategori te Arka Ditore që të jenë të dallueshme:
+    //   - daily     (Shpenzime Ditore)  — kolona `kind='daily'`
+    //   - transport (Shpenzime Transporti) — kolona `kind='transport'`
+    //   - marketing (Shpenzime Marketingu) — cash direkt + kontratë cash
+    //     (in-kind trajtohet si shitje me vlerën e kostos, jo si shpenzim)
     const expRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
-              COALESCE(amount, 0)       AS amt
+              COALESCE(amount, 0)       AS amt,
+              COALESCE(kind, 'daily')   AS kind
          FROM expense_entries WHERE date = ?`,
       [date]
     );
-    const expenses = zeroPerCur();
+    const expenses_daily     = zeroPerCur();
+    const expenses_transport = zeroPerCur();
+    const expenses_marketing = zeroPerCur();
+    let daily_count = 0, transport_count = 0;
     for (const r of expRows) {
       const c = (r.cur || 'LEK').toUpperCase();
-      if (c in expenses) expenses[c] += r.amt;
+      if (!(c in expenses_daily)) continue;
+      if (r.kind === 'transport') { expenses_transport[c] += r.amt; transport_count++; }
+      else                         { expenses_daily[c]     += r.amt; daily_count++; }
     }
-    // Marketing contract cash EUR entries — shpenzime EUR në arkë.
+    // Marketing contract cash EUR entries — shpenzime marketingu EUR në arkë.
     const mktCashRows = await queryAll(
       `SELECT COALESCE(amount_eur, 0) AS amt
          FROM marketing_contract_entries
         WHERE date = ? AND type = 'cash'`,
       [date]
     );
-    for (const r of mktCashRows) expenses.EUR += r.amt;
+    for (const r of mktCashRows) expenses_marketing.EUR += r.amt;
 
     // Zërat direkt cash të Marketingut (jo nga kontratë, pa produkt) → shpenzim
-    // në arkë me monedhën përkatëse. Rreshtat me product_id janë in-kind dhe
-    // trajtohen veças si `marketing_in_kind_eur` më poshtë (nuk zbriten nga arka).
+    // marketingu në arkë me monedhën përkatëse. Rreshtat me product_id janë
+    // in-kind dhe trajtohen si shitje më poshtë (jo si shpenzim).
     const mktDirectCashRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
               COALESCE(amount, 0)       AS amt
@@ -5744,12 +5755,13 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     );
     for (const r of mktDirectCashRows) {
       const c = (r.cur || 'LEK').toUpperCase();
-      if (c in expenses) expenses[c] += r.amt;
+      if (c in expenses_marketing) expenses_marketing[c] += r.amt;
     }
 
-    // Marketing "in kind" (produkt si formë pagese) — regjistrohet me KOSTON e
-    // produktit (qty × cost_price) si shpenzim EUR në arkë. Njëkohësisht kthehet
-    // te `marketing_in_kind_eur` që UI ta shfaqë ndarë si zbërthim (P&L breakdown).
+    // Marketing "in kind" (produkt si formë pagese/dhurate) — trajtohet SI SHITJE
+    // me VLERËN E KOSTOS së produktit (qty × cost_price). Shtohet te xhiro_total.EUR,
+    // që të dalë si "shitje" në Arka Ditore me 0 fitim (revenue = kosto). NUK
+    // zbritet më si shpenzim (paratë u shpenzuan te blerja origjinale).
     const mktProdRows = await queryAll(
       `SELECT COALESCE(m.product_qty, 0)  AS qty,
               COALESCE(p.cost_price, 0)   AS cost
@@ -5770,7 +5782,13 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const r of mktProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
-    expenses.EUR += marketing_in_kind_eur;
+    xhiro_total.EUR += marketing_in_kind_eur;
+
+    // Agregat për cash_balance calc dhe backward-compat (fusha `expenses`).
+    const expenses = zeroPerCur();
+    for (const c of CURS) {
+      expenses[c] = expenses_daily[c] + expenses_transport[c] + expenses_marketing[c];
+    }
 
     // Fatura Blerje kesh (payment_method='cash') → amount_paid në monedhën origjinale.
     // Kthimet (type='return') me pm='cash' kontribuojnë me shenjë negative:
@@ -5952,8 +5970,12 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       returns_pos:       fx(returns_pos),
       returns_debt:      fx(returns_debt),
       expenses:          fx(expenses),
-      // Kosto e produkteve të dhëna si marketing "in kind" — vetëm informative,
-      // s'ka lëvizje kesh (paratë u shpenzuan te blerja origjinale).
+      expenses_daily:     fx(expenses_daily),
+      expenses_transport: fx(expenses_transport),
+      expenses_marketing: fx(expenses_marketing),
+      // Kosto e produkteve të dhëna si marketing "in kind" — tashmë shtohet te
+      // xhiro_total.EUR si "shitje me vlerën e kostos". Kthehet edhe këtu për
+      // shfaqje ndarë në UI si zbërthim informativ.
       marketing_in_kind_eur,
       purchase_cash:     fx(purchase_cash),
       hurda_cash:        fx(hurda_cash),
@@ -5969,6 +5991,9 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         invoices: salesRows.length - credit_note_count,
         credit_notes: credit_note_count,
         expenses: expRows.length,
+        expenses_daily: daily_count,
+        expenses_transport: transport_count,
+        expenses_marketing: mktCashRows.length + mktDirectCashRows.length,
         purchases_cash: purRows.length,
         hurda_purchases: hurdaRows.length,
         has_purchases: hasRows.length,
@@ -6071,14 +6096,21 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     }
 
     const expRows = await queryAll(
-      `SELECT COALESCE(currency, 'LEK') AS cur, COALESCE(amount, 0) AS amt
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount, 0)       AS amt,
+              COALESCE(kind, 'daily')   AS kind
          FROM expense_entries WHERE date BETWEEN ? AND ?`,
       [from, to]
     );
-    const expenses = zeroPerCur();
+    const expenses_daily     = zeroPerCur();
+    const expenses_transport = zeroPerCur();
+    const expenses_marketing = zeroPerCur();
+    let daily_count = 0, transport_count = 0;
     for (const r of expRows) {
       const c = (r.cur || 'LEK').toUpperCase();
-      if (c in expenses) expenses[c] += r.amt;
+      if (!(c in expenses_daily)) continue;
+      if (r.kind === 'transport') { expenses_transport[c] += r.amt; transport_count++; }
+      else                         { expenses_daily[c]     += r.amt; daily_count++; }
     }
     const mktCashRangeRows = await queryAll(
       `SELECT COALESCE(amount_eur, 0) AS amt
@@ -6086,9 +6118,9 @@ app.get('/api/arka-ditore-range', async (req, res) => {
         WHERE date BETWEEN ? AND ? AND type = 'cash'`,
       [from, to]
     );
-    for (const r of mktCashRangeRows) expenses.EUR += r.amt;
+    for (const r of mktCashRangeRows) expenses_marketing.EUR += r.amt;
 
-    // Zërat direkt cash të Marketingut për periudhën — shpenzime në arkë sipas monedhës.
+    // Zërat direkt cash të Marketingut për periudhën — shpenzime marketingu në arkë sipas monedhës.
     const mktDirectCashRangeRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
               COALESCE(amount, 0)       AS amt
@@ -6098,11 +6130,11 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     );
     for (const r of mktDirectCashRangeRows) {
       const c = (r.cur || 'LEK').toUpperCase();
-      if (c in expenses) expenses[c] += r.amt;
+      if (c in expenses_marketing) expenses_marketing[c] += r.amt;
     }
 
-    // Marketing "in kind" për periudhën — regjistrohet me kostoń e produktit si
-    // shpenzim EUR në arkë (dhe kthehet edhe si zbërthim informativ).
+    // Marketing "in kind" për periudhën — trajtohet si shitje me vlerën e kostos
+    // (shtohet te xhiro_total.EUR, jo si shpenzim).
     const mktProdRangeRows = await queryAll(
       `SELECT COALESCE(m.product_qty, 0) AS qty,
               COALESCE(p.cost_price, 0)  AS cost
@@ -6123,7 +6155,13 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     for (const r of mktProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
-    expenses.EUR += marketing_in_kind_eur;
+    xhiro_total.EUR += marketing_in_kind_eur;
+
+    // Agregat për backward-compat dhe cash_balance calc në range endpoint.
+    const expenses = zeroPerCur();
+    for (const c of CURS) {
+      expenses[c] = expenses_daily[c] + expenses_transport[c] + expenses_marketing[c];
+    }
 
     const purRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
@@ -6209,6 +6247,9 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       debt_repayments: fx(debt_repayments),
       porosi_deposits: fx(porosi_deposits),
       expenses:        fx(expenses),
+      expenses_daily:     fx(expenses_daily),
+      expenses_transport: fx(expenses_transport),
+      expenses_marketing: fx(expenses_marketing),
       marketing_in_kind_eur,
       purchase_cash:   fx(purchase_cash),
       hurda_cash:      fx(hurda_cash),
@@ -6217,6 +6258,9 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       counts: {
         invoices: salesRows.length,
         expenses: expRows.length,
+        expenses_daily: daily_count,
+        expenses_transport: transport_count,
+        expenses_marketing: mktCashRangeRows.length + mktDirectCashRangeRows.length,
         purchases_cash: purRows.length,
         hurda_purchases: hurdaRows.length,
         has_purchases: hasRows.length,
