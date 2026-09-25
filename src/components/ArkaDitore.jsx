@@ -149,6 +149,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     (data.expenses_daily?.[c]     || 0) ||
     (data.expenses_transport?.[c] || 0) ||
     (data.expenses_marketing?.[c] || 0) ||
+    (data.marketing_in_kind?.[c]  || 0) ||
     (data.purchase_cash?.[c]   || 0) ||
     (data.hurda_cash?.[c]      || 0) ||
     (data.physical_cash?.[c]   || 0) ||
@@ -163,7 +164,8 @@ export default function ArkaDitore({ date, onNavigate }) {
 
   const rows = [
     { label: 'Gjendje Fillestare (mbartje)',   src: 'opening_cash',      sign: '+', color: 'text-slate-700 dark:text-slate-200',   bg: 'bg-slate-50 dark:bg-slate-900',   detail: 'nga dita e mëparshme' },
-    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura${(data.marketing_in_kind_eur || 0) > 0 ? ` · përfshin ${(data.marketing_in_kind_eur).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR marketing in-kind (me vlerën e kostos)` : ''}` },
+    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura` },
+    { label: 'Marketingu Shitje',              src: 'marketing_in_kind',  sign: '+', color: 'text-pink-700 dark:text-pink-300', bg: 'bg-pink-50 dark:bg-pink-900/30', detail: `${data.counts?.marketing_in_kind || 0} produkte dhënë si marketing in-kind (vlera = kostoja për ditën)` },
     { label: 'Pagesa me Bankë',                 src: 'paid_bank',         sign: '−', color: 'text-blue-700 dark:text-blue-300',    bg: 'bg-blue-50 dark:bg-blue-900/30',    detail: 'paid_bank' },
     { label: 'Pagesa me POS',                   src: 'paid_pos',          sign: '−', color: 'text-indigo-700',  bg: 'bg-indigo-50 dark:bg-indigo-900/30',  detail: 'paid_pos' },
     { label: 'Borxh i Papaguar',                src: 'amount_due',        sign: '−', color: 'text-rose-700',    bg: 'bg-rose-50',    detail: 'mbetja e papaguar' },
@@ -325,30 +327,6 @@ export default function ArkaDitore({ date, onNavigate }) {
           )
         })()}
       </div>
-
-      {(data.marketing_in_kind_eur || 0) > 0.005 && (
-        <div className="card border border-fuchsia-200 bg-fuchsia-50/60 dark:bg-fuchsia-900/20 dark:border-fuchsia-800">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-fuchsia-700 dark:text-fuchsia-300">
-                🎁 Shpenzime Marketingu
-              </p>
-              <p className="text-[11px] text-fuchsia-600 dark:text-fuchsia-400 mt-0.5">
-                Kosto e produkteve të dhëna si dhuratë/mostër/promo · {data.counts?.marketing_in_kind || 0} zëra
-              </p>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 italic">
-                Përfshihet te "Shpenzime (Arkë)" më sipër — me kostoń e produktit.
-              </p>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] text-fuchsia-600 dark:text-fuchsia-400 uppercase font-semibold">Kosto Totale</div>
-              <div className="text-lg font-extrabold tabular-nums text-fuchsia-700 dark:text-fuchsia-300">
-                {fmt(data.marketing_in_kind_eur)} <span className="text-xs">EUR</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="card border-2 border-amber-200 bg-amber-50 dark:bg-amber-900/30">
         <div className="mb-3">

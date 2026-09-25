@@ -50,13 +50,32 @@ export default function Kasaforta() {
   if (error)   return <div className="card p-8 text-center text-red-500 text-sm">⚠ {error}</div>
   if (!data)   return null
 
-  const { balance = {}, history: rawHistory = [] } = data
+  const { balance: currentBalance = {}, history: rawHistory = [] } = data
 
   const history = rawHistory.filter(r => {
     if (dateRange.from && r.date < dateRange.from) return false
     if (dateRange.to   && r.date > dateRange.to)   return false
     return true
   })
+
+  // Bilanci "deri në datën e zgjedhur": nëse ka `to`, marrim gjendjen si në
+  // fund të asaj date; përndryshe shfaqim gjendjen aktuale.
+  // rawHistory është desc (i freskët i pari), pra kërkojmë rreshtin e parë me
+  // date <= to. Çdo rresht ka balance për të 5 monedhat (running total).
+  let balance = currentBalance
+  let asOfDate = null
+  if (dateRange.to) {
+    asOfDate = dateRange.to
+    const cutoffRow = rawHistory.find(r => r.date <= dateRange.to)
+    if (cutoffRow) {
+      const b = {}
+      for (const c of CURS) b[c] = cutoffRow[c]?.balance || 0
+      balance = b
+    } else {
+      // Data "deri më" është më e hershme se çdo aktivitet → bilanci ishte 0
+      balance = { LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 }
+    }
+  }
 
   const activeCurs = CURS.filter(c =>
     (balance[c] || 0) !== 0 ||
@@ -69,7 +88,14 @@ export default function Kasaforta() {
       <div className="card bg-gradient-to-r from-slate-900 to-slate-800 text-white">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold">Gjendja e Kasafortës</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold">
+              Gjendja e Kasafortës
+              {asOfDate && (
+                <span className="ml-2 inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500 text-slate-900 tracking-normal normal-case">
+                  deri më {asOfDate.split('-').reverse().join('.')}
+                </span>
+              )}
+            </p>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
               Derdhje + Mbyllje Ditore − Tërheqje ± Konvertime (kumulative)
             </p>
@@ -104,7 +130,7 @@ export default function Kasaforta() {
 
       {showConvert && (
         <ConvertModal
-          balance={balance}
+          balance={currentBalance}
           onClose={() => setShowConvert(false)}
           onSaved={() => { setShowConvert(false); setRefreshKey(k => k + 1) }}
         />

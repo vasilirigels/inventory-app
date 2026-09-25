@@ -5782,7 +5782,10 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const r of mktProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
-    xhiro_total.EUR += marketing_in_kind_eur;
+    // marketing_in_kind_eur kthehet si fushë e veçantë dhe shfaqet ndarë te UI
+    // si "Marketingu Shitje" — NUK përfshihet te xhiro_total (që të jetë e
+    // dallueshme nga shitjet e vërteta). Sidoqoftë hyn te cash_from_sales më
+    // poshtë që arka ta ketë efektin pozitiv sikur të kishte qenë shitje kesh.
 
     // Agregat për cash_balance calc dhe backward-compat (fusha `expenses`).
     const expenses = zeroPerCur();
@@ -5938,6 +5941,10 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const difference = zeroPerCur();
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
+      // Marketing "in kind" trajtohet si shitje me vlerën e kostos — shtohet
+      // te cash_from_sales.EUR (jo te xhiro_total, që aty të tregohen vetëm
+      // shitjet reale). Për UI shfaqet si rresht i veçantë "Marketingu Shitje".
+      if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           + safe_to_arka[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
@@ -5973,10 +5980,11 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       expenses_daily:     fx(expenses_daily),
       expenses_transport: fx(expenses_transport),
       expenses_marketing: fx(expenses_marketing),
-      // Kosto e produkteve të dhëna si marketing "in kind" — tashmë shtohet te
-      // xhiro_total.EUR si "shitje me vlerën e kostos". Kthehet edhe këtu për
-      // shfaqje ndarë në UI si zbërthim informativ.
+      // Kosto e produkteve të dhëna si marketing "in kind" — trajtohet si shitje
+      // me vlerën e kostos (shtohet te cash_from_sales.EUR, jo te xhiro_total).
+      // Shfaqet si rresht i veçantë "Marketingu Shitje" te UI.
       marketing_in_kind_eur,
+      marketing_in_kind: { LEK: 0, EUR: marketing_in_kind_eur, USD: 0, GBP: 0, CHF: 0 },
       purchase_cash:     fx(purchase_cash),
       hurda_cash:        fx(hurda_cash),
       hurda_gram_total,
@@ -6155,7 +6163,8 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     for (const r of mktProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     for (const r of mktContractProdRangeRows) marketing_in_kind_eur += (r.qty * r.cost) || 0;
     marketing_in_kind_eur = +marketing_in_kind_eur.toFixed(2);
-    xhiro_total.EUR += marketing_in_kind_eur;
+    // marketing_in_kind_eur mbahet i ndarë nga xhiro; shtohet te cash_from_sales
+    // më poshtë (efekti pozitiv në arkë, si shitje kesh).
 
     // Agregat për backward-compat dhe cash_balance calc në range endpoint.
     const expenses = zeroPerCur();
@@ -6232,6 +6241,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     const cash_balance    = zeroPerCur();
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
+      if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
     }
@@ -6251,6 +6261,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       expenses_transport: fx(expenses_transport),
       expenses_marketing: fx(expenses_marketing),
       marketing_in_kind_eur,
+      marketing_in_kind: { LEK: 0, EUR: marketing_in_kind_eur, USD: 0, GBP: 0, CHF: 0 },
       purchase_cash:   fx(purchase_cash),
       hurda_cash:      fx(hurda_cash),
       has_cash:        fx(has_cash),
@@ -8153,7 +8164,8 @@ app.get('/api/marketing-entries/:date', async (req, res) => {
       a.by_currency[cur] = (a.by_currency[cur] || 0) + (r.amount || 0);
       return a;
     }, { total_lek: 0, by_currency: {} });
-    res.json({ rows, totals });
+    const breakdown = await computeMarketingBreakdown(date, date);
+    res.json({ rows, totals, breakdown });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -8919,9 +8931,70 @@ app.get('/api/reports/marketing', async (req, res) => {
     }, { total_lek: 0, by_currency: {} });
     totals.total_lek = +totals.total_lek.toFixed(2);
 
-    res.json({ rows, totals });
+    // Breakdown për periudhën — 3 totale që të ndihmojnë të kuptohet ku
+    // shpenzohet buxheti i marketingut: kontratat (cash + produkte), cash direkt
+    // dhe produktet direkte. Produktet vlerësohen edhe me çmim (amount_eur) edhe
+    // me kosto (qty × cost_price) — shpesh të dyja janë të dobishme.
+    const breakdown = await computeMarketingBreakdown(from, to);
+    res.json({ rows, totals, breakdown });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+async function computeMarketingBreakdown(from, to) {
+  const [contractCash, contractProd, directCash, directProd] = await Promise.all([
+    queryOne(
+      `SELECT COALESCE(SUM(amount_eur), 0) AS total, COUNT(*) AS cnt
+         FROM marketing_contract_entries
+        WHERE date BETWEEN ? AND ? AND type = 'cash'`,
+      [from, to]
+    ),
+    queryAll(
+      `SELECT COALESCE(mce.amount_eur, 0) AS amt,
+              COALESCE(mce.product_qty, 0) AS qty,
+              COALESCE(p.cost_price, 0) AS cost
+         FROM marketing_contract_entries mce
+         LEFT JOIN products p ON p.id = mce.product_id
+        WHERE mce.date BETWEEN ? AND ? AND mce.type = 'product'`,
+      [from, to]
+    ),
+    queryOne(
+      `SELECT COALESCE(SUM(amount_eur), 0) AS total, COUNT(*) AS cnt
+         FROM marketing_expenses
+        WHERE date BETWEEN ? AND ? AND product_id IS NULL`,
+      [from, to]
+    ),
+    queryAll(
+      `SELECT COALESCE(m.amount_eur, 0) AS amt,
+              COALESCE(m.product_qty, 0) AS qty,
+              COALESCE(p.cost_price, 0) AS cost
+         FROM marketing_expenses m
+         LEFT JOIN products p ON p.id = m.product_id
+        WHERE m.date BETWEEN ? AND ? AND m.product_id IS NOT NULL`,
+      [from, to]
+    ),
+  ]);
+  const contractProdSell = contractProd.reduce((s, r) => s + (r.amt || 0), 0);
+  const contractProdCost = contractProd.reduce((s, r) => s + (r.qty * r.cost || 0), 0);
+  const contractProdQty  = contractProd.reduce((s, r) => s + (r.qty || 0), 0);
+  const directProdSell   = directProd.reduce((s, r) => s + (r.amt || 0), 0);
+  const directProdCost   = directProd.reduce((s, r) => s + (r.qty * r.cost || 0), 0);
+  const directProdQty    = directProd.reduce((s, r) => s + (r.qty || 0), 0);
+  return {
+    contracts_cash_eur:          +(contractCash?.total || 0).toFixed(2),
+    contracts_products_eur:      +contractProdSell.toFixed(2),
+    contracts_products_cost_eur: +contractProdCost.toFixed(2),
+    contracts_products_qty:      contractProdQty,
+    contracts_total_eur:         +((contractCash?.total || 0) + contractProdSell).toFixed(2),
+    contracts_count_cash:        contractCash?.cnt || 0,
+    contracts_count_products:    contractProd.length,
+    direct_cash_eur:             +(directCash?.total || 0).toFixed(2),
+    direct_products_eur:         +directProdSell.toFixed(2),
+    direct_products_cost_eur:    +directProdCost.toFixed(2),
+    direct_products_qty:         directProdQty,
+    direct_count_cash:           directCash?.cnt || 0,
+    direct_count_products:       directProd.length,
+  };
+}
 
 // ── Raport Xhiro Ditore (nga Faturat e Shitjes) ──────────────
 app.get('/api/reports/daily-turnover', async (req, res) => {

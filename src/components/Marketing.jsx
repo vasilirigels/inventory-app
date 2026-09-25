@@ -725,6 +725,7 @@ function ContractsSection({ date }) {
 export default function Marketing({ date }) {
   const [categories, setCategories] = useState([])
   const [rows, setRows] = useState([])
+  const [breakdown, setBreakdown] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState(() => emptyDraft(date))
@@ -752,6 +753,7 @@ export default function Marketing({ date }) {
       ])
       setCategories(Array.isArray(cats) ? cats : [])
       setRows(Array.isArray(entries?.rows) ? entries.rows : [])
+      setBreakdown(entries?.breakdown || null)
       const r = ratesRes?.rates || { LEK: 1 }
       setRates(r)
       setRateSource(ratesRes?.source || '')
@@ -765,7 +767,7 @@ export default function Marketing({ date }) {
       })
     } catch (e) {
       console.error(e)
-      setCategories([]); setRows([])
+      setCategories([]); setRows([]); setBreakdown(null)
     } finally {
       setLoading(false)
     }
@@ -999,6 +1001,70 @@ export default function Marketing({ date }) {
       </div>
 
       <ContractsSection date={date} />
+
+      {/* Përmbledhje për periudhën — 3 totale (respekton filtrin e datave më poshtë) */}
+      {breakdown && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="card border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide font-bold text-emerald-700 dark:text-emerald-300">📄 Kontratat</p>
+                <p className="text-[10px] text-emerald-700/70 dark:text-emerald-400/70 mt-0.5">
+                  {breakdown.contracts_count_cash || 0} pagesa cash · {breakdown.contracts_products_qty || 0} produkte ({breakdown.contracts_count_products || 0} zëra)
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-xl font-extrabold tabular-nums text-emerald-800 dark:text-emerald-200">
+                  €{(breakdown.contracts_total_eur || 0).toFixed(2)}
+                </div>
+                <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">
+                  cash €{(breakdown.contracts_cash_eur || 0).toFixed(2)} · prod €{(breakdown.contracts_products_eur || 0).toFixed(2)}
+                </div>
+                {(breakdown.contracts_products_cost_eur || 0) > 0 && (
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums italic">
+                    kosto prod: €{breakdown.contracts_products_cost_eur.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="card border-2 border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-900/20">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide font-bold text-amber-700 dark:text-amber-300">💵 Cash Direkt</p>
+                <p className="text-[10px] text-amber-700/70 dark:text-amber-400/70 mt-0.5">
+                  {breakdown.direct_count_cash || 0} zëra (jashtë kontratave)
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-xl font-extrabold tabular-nums text-amber-800 dark:text-amber-200">
+                  €{(breakdown.direct_cash_eur || 0).toFixed(2)}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="card border-2 border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-50/60 dark:bg-fuchsia-900/20">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide font-bold text-fuchsia-700 dark:text-fuchsia-300">🎁 Produkte Direkte</p>
+                <p className="text-[10px] text-fuchsia-700/70 dark:text-fuchsia-400/70 mt-0.5">
+                  {breakdown.direct_products_qty || 0} produkte ({breakdown.direct_count_products || 0} zëra, jashtë kontratave)
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-xl font-extrabold tabular-nums text-fuchsia-800 dark:text-fuchsia-200">
+                  €{(breakdown.direct_products_eur || 0).toFixed(2)}
+                </div>
+                {(breakdown.direct_products_cost_eur || 0) > 0 && (
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums italic">
+                    kosto: €{breakdown.direct_products_cost_eur.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* New entry row */}
       <div className="card">
