@@ -5880,11 +5880,17 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       if (c in porosi_deposits) porosi_deposits[c] += r.amt;
     }
 
-    // Pagesat e punëtorëve (pjesa kesh + shpërblim kesh) — dalje EUR nga arka.
+    // Pagesat e punëtorëve — VETËM pjesa kesh (salary_cash + bonus_cash) zbret
+    // nga arka. Pjesa me bankë (salary_bank + bonus_bank) NUK preket këtu; ajo
+    // shfaqet vetëm te faqja "Pagesa Punëtoresh" dhe zbret nga bilanci i bankës.
+    // Numërojmë vetëm pagesat që kanë të paktën një zë cash > 0 (që count-i të
+    // reflektojë saktë sa pagesa preken efektivisht nga arka).
     const workerCashRow = await queryOne(
       `SELECT COALESCE(SUM(salary_cash_eur + bonus_cash_eur), 0) AS amt,
               COUNT(*) AS cnt
-         FROM worker_payments WHERE date_paid = ?`,
+         FROM worker_payments
+        WHERE date_paid = ?
+          AND (COALESCE(salary_cash_eur, 0) + COALESCE(bonus_cash_eur, 0)) > 0`,
       [date]
     ) || {};
     const worker_payments_cash = zeroPerCur();

@@ -182,7 +182,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Fatura Blerje Kesh',              src: 'purchase_cash',     sign: '−', color: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.purchases_cash} fatura` },
     { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
     { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800 dark:text-amber-200',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },
-    { label: 'Pagesa Punëtorësh',               src: 'worker_payments_cash', sign: '−', color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/30', detail: `${data.counts?.worker_payments || 0} pagesa (pjesa kesh + shpërblim kesh)` },
+    { label: 'Pagesa Punëtorësh',               src: 'worker_payments_cash', sign: '−', color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/30', detail: `${data.counts?.worker_payments || 0} pagesa · vetëm pjesa kesh (pjesa me bankë zbret nga banka, jo nga arka)` },
   ]
 
   return (
