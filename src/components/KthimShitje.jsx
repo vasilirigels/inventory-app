@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { showConfirm } from './ConfirmDialog.jsx'
 import { getUser } from '../lib/auth.js'
 
@@ -153,7 +153,7 @@ export default function KthimShitje() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-4 space-y-4">
+    <div className="w-full mx-auto p-4 space-y-4">
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
         <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-1">
           🔄 Kthim Produkt (Shitje)
@@ -524,6 +524,8 @@ function ReturnsHistory() {
   const [loading, setLoad]  = useState(false)
   const [busyId, setBusy]   = useState(null)
   const [editDate, setEditDate] = useState(null) // { id, currentDate, newDate }
+  // Modifiko-form state: { id, method, amount, notes, canEditMoney }
+  const [editEntry, setEditEntry] = useState(null)
   const [msg, setMsg]       = useState('')
 
   const load = async () => {
@@ -559,6 +561,30 @@ function ReturnsHistory() {
       if (!res.ok) throw new Error(data.error || 'Gabim')
       setMsg(`✓ Data u ndryshua: ${data.old_date || '?'} → ${data.new_date || editDate.newDate}`)
       setEditDate(null)
+      load()
+    } catch (ex) {
+      setMsg(`Gabim: ${ex.message}`)
+    } finally { setBusy(null) }
+  }
+
+  const doSaveEdit = async () => {
+    if (!editEntry) return
+    setBusy(editEntry.id); setMsg('')
+    try {
+      const body = { notes: editEntry.notes }
+      if (editEntry.canEditMoney) {
+        body.refund_method = editEntry.method
+        body.refund_amount = parseFloat(editEntry.amount) || 0
+      }
+      const res = await fetch(`/api/credit-notes/${editEntry.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Gabim')
+      setMsg('✓ Kthimi u modifikua')
+      setEditEntry(null)
       load()
     } catch (ex) {
       setMsg(`Gabim: ${ex.message}`)
@@ -644,14 +670,17 @@ function ReturnsHistory() {
             <p className="text-center text-slate-400 text-sm py-6">Asnjë kthim s'u gjet për këtë filtër.</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[1500px] text-sm">
                 <thead className="bg-slate-50 dark:bg-slate-900">
                   <tr>
-                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data kthimit</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data shitjes</th>
                     <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Kreditore</th>
                     <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Origjinali</th>
                     <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Produkti</th>
                     <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Copë</th>
+                    <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Gram</th>
                     <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Rimbursim</th>
                     <th className="px-3 py-2 text-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Metoda</th>
                     <th className="px-3 py-2 text-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Veprime</th>
@@ -659,13 +688,18 @@ function ReturnsHistory() {
                 </thead>
                 <tbody>
                   {rows.map(r => {
-                    const isEditing = editDate?.id === r.id
+                    const isEditingDate  = editDate?.id  === r.id
+                    const isEditingEntry = editEntry?.id === r.id
                     const busy = busyId === r.id
                     const refundAbs = Math.abs(r.amount_paid || r.total_with_vat || 0)
+                    const canEditMoney = ['cash', 'bank', 'pos'].includes(r.payment_method)
+                    const productLabel = r.first_item_name || '—'
+                    const extraItems = (r.items_count || 0) - 1
                     return (
-                      <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                      <Fragment key={r.id}>
+                      <tr className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30">
                         <td className="px-3 py-2 text-xs whitespace-nowrap">
-                          {isEditing ? (
+                          {isEditingDate ? (
                             <input type="date" value={editDate.newDate}
                               onChange={e => setEditDate({ ...editDate, newDate: e.target.value })}
                               className="input-field !py-1 !text-xs" />
@@ -673,20 +707,32 @@ function ReturnsHistory() {
                             <span className="text-slate-700 dark:text-slate-200">{r.date}</span>
                           )}
                         </td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap text-slate-600 dark:text-slate-400">
+                          {r.parent_invoice_date || <span className="italic text-slate-400">—</span>}
+                        </td>
                         <td className="px-3 py-2 font-mono text-xs whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">
                           {r.invoice_no}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs whitespace-nowrap text-slate-600 dark:text-slate-400">
                           {r.parent_invoice_no || '—'}
-                          {r.parent_invoice_date && (
-                            <div className="text-[10px] text-slate-400">{r.parent_invoice_date}</div>
-                          )}
                         </td>
-                        <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200 max-w-[10rem] truncate">
+                        <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200 max-w-[14rem] truncate">
                           {r.customer_name || <span className="italic text-slate-400">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200 max-w-[20rem]">
+                          <div className="truncate" title={productLabel}>{productLabel}</div>
+                          {r.first_item_barcode && (
+                            <div className="text-[10px] font-mono text-slate-400">{r.first_item_barcode}</div>
+                          )}
+                          {extraItems > 0 && (
+                            <div className="text-[10px] text-amber-700 dark:text-amber-400">+ {extraItems} artikuj të tjerë</div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-xs text-slate-700 dark:text-slate-200">
                           {r.qty_total}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-xs text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                          {r.gram_total > 0 ? fmt(r.gram_total) : '—'}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-xs font-bold text-green-700 dark:text-green-400 whitespace-nowrap">
                           {fmt(refundAbs)} {r.currency || 'LEK'}
@@ -698,7 +744,7 @@ function ReturnsHistory() {
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
-                            {isEditing ? (
+                            {isEditingDate ? (
                               <>
                                 <button
                                   onClick={doChangeDate}
@@ -713,7 +759,22 @@ function ReturnsHistory() {
                             ) : (
                               <>
                                 <button
-                                  onClick={() => setEditDate({ id: r.id, newDate: r.date })}
+                                  onClick={() => {
+                                    setEditEntry({
+                                      id: r.id,
+                                      method: r.payment_method,
+                                      amount: refundAbs,
+                                      notes: r.notes || '',
+                                      canEditMoney,
+                                    })
+                                    setEditDate(null)
+                                  }}
+                                  disabled={busy}
+                                  className="px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 text-amber-700 dark:text-amber-300 text-[10px] font-semibold"
+                                  title="Modifiko metodën / shumën / shënimet"
+                                >✏️ Modifiko</button>
+                                <button
+                                  onClick={() => { setEditDate({ id: r.id, newDate: r.date }); setEditEntry(null) }}
                                   disabled={busy}
                                   className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-[10px] font-semibold"
                                   title="Ndrysho datën e këtij kthimi"
@@ -729,6 +790,74 @@ function ReturnsHistory() {
                           </div>
                         </td>
                       </tr>
+                      {isEditingEntry && (
+                        <tr className="bg-amber-50/60 dark:bg-amber-900/10 border-t border-amber-200 dark:border-amber-800">
+                          <td colSpan={11} className="px-3 py-3">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-300 uppercase mb-1">
+                                  Metoda
+                                </label>
+                                <select
+                                  value={editEntry.method}
+                                  onChange={e => setEditEntry({ ...editEntry, method: e.target.value })}
+                                  disabled={!canEditMoney}
+                                  className="input-field !py-1 !text-xs w-full"
+                                >
+                                  <option value="cash">💵 Cash</option>
+                                  <option value="bank">🏦 Bankë</option>
+                                  <option value="pos">💳 POS</option>
+                                  {!canEditMoney && (
+                                    <option value={editEntry.method}>{editEntry.method}</option>
+                                  )}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-300 uppercase mb-1">
+                                  Rimbursim
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  value={editEntry.amount}
+                                  onChange={e => setEditEntry({ ...editEntry, amount: e.target.value })}
+                                  disabled={!canEditMoney}
+                                  className="input-field !py-1 !text-xs w-full"
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-300 uppercase mb-1">
+                                  Shënime
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editEntry.notes}
+                                  onChange={e => setEditEntry({ ...editEntry, notes: e.target.value })}
+                                  className="input-field !py-1 !text-xs w-full"
+                                />
+                              </div>
+                            </div>
+                            {!canEditMoney && (
+                              <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-200">
+                                ⚠️ Kjo kreditore është me metodë <b>{r.payment_method}</b> — mund të modifikohen vetëm shënimet. Për ndryshim metode/shume, fshi kthimin dhe ripërsërite.
+                              </p>
+                            )}
+                            <div className="mt-3 flex justify-end gap-2">
+                              <button
+                                onClick={() => setEditEntry(null)}
+                                className="px-3 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold"
+                              >Anulo</button>
+                              <button
+                                onClick={doSaveEdit}
+                                disabled={busy}
+                                className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white text-xs font-semibold"
+                              >{busy ? '…' : '✓ Ruaj ndryshimet'}</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     )
                   })}
                 </tbody>

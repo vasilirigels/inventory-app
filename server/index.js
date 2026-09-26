@@ -2605,7 +2605,11 @@ app.get('/api/credit-notes', async (req, res) => {
               orig.invoice_no AS parent_invoice_no,
               orig.date       AS parent_invoice_date,
               (SELECT COUNT(*) FROM invoice_items ii WHERE ii.invoice_id = cn.id) AS items_count,
-              (SELECT COALESCE(SUM(ABS(ii.qty)), 0) FROM invoice_items ii WHERE ii.invoice_id = cn.id) AS qty_total
+              (SELECT COALESCE(SUM(ABS(ii.qty)), 0) FROM invoice_items ii WHERE ii.invoice_id = cn.id) AS qty_total,
+              (SELECT ii.name FROM invoice_items ii WHERE ii.invoice_id = cn.id ORDER BY ii.id LIMIT 1) AS first_item_name,
+              (SELECT ii.gram FROM invoice_items ii WHERE ii.invoice_id = cn.id ORDER BY ii.id LIMIT 1) AS first_item_gram,
+              (SELECT ii.barcode FROM invoice_items ii WHERE ii.invoice_id = cn.id ORDER BY ii.id LIMIT 1) AS first_item_barcode,
+              (SELECT COALESCE(SUM(ABS(ii.gram) * ABS(ii.qty)), 0) FROM invoice_items ii WHERE ii.invoice_id = cn.id) AS gram_total
          FROM invoices cn
          LEFT JOIN invoices orig ON orig.id = cn.parent_invoice_id
         WHERE ${where}
@@ -2650,6 +2654,99 @@ app.patch('/api/invoices/:id/date', async (req, res) => {
     if (inv.date === newDate) return res.json({ success: true, unchanged: true });
     await run('UPDATE invoices SET date = ? WHERE id = ?', [newDate, id]);
     res.json({ success: true, old_date: inv.date, new_date: newDate });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin-only: modifiko një kreditore (fature kthimi) në rast gabimi.
+// Lejohen vetëm ndryshimet e metadata-s që NUK prekin stokun apo artikujt:
+//  - refund_method (cash/bank/pos) — për kreditore me metodë të thjeshtë
+//  - refund_amount — shuma e rimbursuar (klampohet me totalin e rreshtit)
+//  - notes         — shënime
+// Për kreditore me 'debt' ose 'mikse' lejohet vetëm ndryshimi i notes-it
+// (metoda dhe shumat kanë kuptim proporcional dhe s'duhet të prishen këtu).
+app.patch('/api/credit-notes/:id', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const { id } = req.params;
+    const cn = await queryOne(
+      'SELECT * FROM invoices WHERE id = ? AND is_credit_note = 1',
+      [id]
+    );
+    if (!cn) return res.status(404).json({ error: 'kreditore nuk u gjet' });
+
+    const updates = [];
+    const values  = [];
+
+    // Notes — gjithmonë të lejueshme
+    if (req.body?.notes != null) {
+      updates.push('notes = ?');
+      values.push(String(req.body.notes || ''));
+    }
+
+    const canEditMoney = ['cash', 'bank', 'pos'].includes(cn.payment_method);
+
+    // Refund method — vetëm nëse kreditorja aktualisht është single-method
+    let newMethod = null;
+    if (req.body?.refund_method != null) {
+      const m = String(req.body.refund_method).toLowerCase();
+      if (!['cash', 'bank', 'pos'].includes(m)) {
+        return res.status(400).json({ error: "refund_method duhet 'cash' | 'bank' | 'pos'" });
+      }
+      if (!canEditMoney) {
+        return res.status(400).json({
+          error: `Kjo kreditore është me metodë '${cn.payment_method}' — metoda s'ndryshohet nga këtu; fshije dhe ripërsërite kthimin.`,
+        });
+      }
+      newMethod = m;
+    }
+
+    // Refund amount — pozitiv nga user-i; te DB ruhet negativ (amount_paid < 0)
+    let newRefund = null;
+    if (req.body?.refund_amount != null && req.body.refund_amount !== '') {
+      const r = parseFloat(req.body.refund_amount);
+      if (!Number.isFinite(r) || r < 0) {
+        return res.status(400).json({ error: 'refund_amount duhet numër >= 0' });
+      }
+      if (!canEditMoney) {
+        return res.status(400).json({
+          error: `Kjo kreditore është me metodë '${cn.payment_method}' — shuma s'ndryshohet nga këtu; fshije dhe ripërsërite kthimin.`,
+        });
+      }
+      // Klampojmë me totalin e rreshtave (vlerën absolute) — s'lejohet të kalojë atë
+      // që faktikisht është kthyer si mall (retTotal-i i original-it).
+      const lineTot = Math.abs(cn.total_with_vat || 0);
+      if (r > lineTot + 0.005) {
+        return res.status(400).json({
+          error: `refund_amount nuk mund të kalojë ${lineTot.toFixed(2)} (totali i rreshtave)`,
+        });
+      }
+      newRefund = r;
+    }
+
+    if (newMethod != null || newRefund != null) {
+      const method = newMethod || cn.payment_method;
+      const refund = newRefund != null ? newRefund : Math.abs(cn.amount_paid || 0);
+      const negRefund = -refund;
+      updates.push('payment_method = ?');
+      values.push(method);
+      updates.push('paid_cash = ?', 'paid_pos = ?', 'paid_bank = ?');
+      values.push(
+        method === 'cash' ? negRefund : 0,
+        method === 'pos'  ? negRefund : 0,
+        method === 'bank' ? negRefund : 0,
+      );
+      updates.push('amount_paid = ?', 'amount_due = ?');
+      values.push(negRefund, 0);
+      // Pastro çdo split ekzistues (nga 'mikse' i mëparshëm, nëse do të kishte).
+      await run('DELETE FROM invoice_payment_splits WHERE invoice_id = ?', [id]);
+    }
+
+    if (updates.length === 0) {
+      return res.json({ success: true, unchanged: true });
+    }
+    values.push(id);
+    await run(`UPDATE invoices SET ${updates.join(', ')} WHERE id = ?`, values);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -6079,6 +6176,34 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     worker_payments_cash.EUR = +(workerCashRow.amt || 0).toFixed(2);
     const worker_payments_count = workerCashRow.cnt || 0;
 
+    // Riparimet me pagesë — cash që ka hyrë në sirtar ditën që u regjistrua
+    // riparimi. `paid=1` do të thotë çmimi i plotë; `deposit>0` do të thotë
+    // kapari (parapagesë). Përjashtojmë riparimet e konvertuara në faturë
+    // (converted_invoice_id NOT NULL) sepse fatura tashmë e mban këtë cash
+    // te data e dorëzimit — do të llogaritej dy herë ndryshe.
+    const repairsRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(price, 0)        AS price,
+              COALESCE(deposit, 0)      AS deposit,
+              COALESCE(paid, 0)         AS paid
+         FROM repairs
+        WHERE date_received = ?
+          AND converted_invoice_id IS NULL
+          AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
+      [date]
+    );
+    const repairs_cash = zeroPerCur();
+    let repairs_count = 0;
+    for (const r of repairsRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in repairs_cash)) continue;
+      const amt = r.paid ? r.price : r.deposit;
+      if (amt > 0.005) {
+        repairs_cash[c] += amt;
+        repairs_count += 1;
+      }
+    }
+
     // Tërheqjet nga kasaforta me destinacion 'arka' — hyjnë si kesh në sirtar.
     const safeToArkaRows = await queryAll(
       `SELECT COALESCE(amount_lek, 0) AS LEK,
@@ -6136,6 +6261,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       // shitjet reale). Për UI shfaqet si rresht i veçantë "Marketingu Shitje".
       if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
+                          + repairs_cash[c]
                           + safe_to_arka[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
                           - worker_payments_cash[c]
@@ -6159,6 +6285,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       cash_from_sales:   fx(cash_from_sales),
       debt_repayments:   fx(debt_repayments),
       porosi_deposits:   fx(porosi_deposits),
+      repairs_cash:      fx(repairs_cash),
       safe_to_arka:      fx(safe_to_arka),
       worker_payments_cash: fx(worker_payments_cash),
       returns_gross:     fx(returns_gross),
@@ -6200,6 +6327,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         marketing_in_kind: mktProdRows.length + mktContractProdRows.length,
         safe_to_arka: safeToArkaRows.length,
         worker_payments: worker_payments_count,
+        repairs: repairs_count,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -6427,12 +6555,38 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       if (c in porosi_deposits) porosi_deposits[c] += r.amt;
     }
 
+    // Riparimet me pagesë (paid=1 → price; deposit>0 → kapari). Përjashto ato
+    // që janë konvertuar në faturë sepse cashi shfaqet te fatura.
+    const repairsRangeRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(price, 0)        AS price,
+              COALESCE(deposit, 0)      AS deposit,
+              COALESCE(paid, 0)         AS paid
+         FROM repairs
+        WHERE date_received BETWEEN ? AND ?
+          AND converted_invoice_id IS NULL
+          AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
+      [from, to]
+    );
+    const repairs_cash = zeroPerCur();
+    let repairs_count_range = 0;
+    for (const r of repairsRangeRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in repairs_cash)) continue;
+      const amt = r.paid ? r.price : r.deposit;
+      if (amt > 0.005) {
+        repairs_cash[c] += amt;
+        repairs_count_range += 1;
+      }
+    }
+
     const cash_from_sales = zeroPerCur();
     const cash_balance    = zeroPerCur();
     for (const c of CURS) {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
       if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
+                          + repairs_cash[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
     }
 
@@ -6446,6 +6600,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       cash_from_sales: fx(cash_from_sales),
       debt_repayments: fx(debt_repayments),
       porosi_deposits: fx(porosi_deposits),
+      repairs_cash:    fx(repairs_cash),
       expenses:        fx(expenses),
       expenses_daily:     fx(expenses_daily),
       expenses_transport: fx(expenses_transport),
@@ -6468,6 +6623,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
         porosi_deposits: porosiDepRows.length,
         debt_repayments: debtPayRows.length,
         marketing_in_kind: mktProdRangeRows.length + mktContractProdRangeRows.length,
+        repairs: repairs_count_range,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }

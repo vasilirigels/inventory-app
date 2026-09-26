@@ -141,6 +141,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     (data.xhiro_total?.[c]     || 0) ||
     (data.debt_repayments?.[c] || 0) ||
     (data.porosi_deposits?.[c] || 0) ||
+    (data.repairs_cash?.[c]    || 0) ||
     (data.safe_to_arka?.[c]    || 0) ||
     (data.worker_payments_cash?.[c] || 0) ||
     (data.returns_gross?.[c]   || 0) ||
@@ -172,6 +173,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Kesh nga Shitjet',                src: 'cash_from_sales',   sign: '=', color: 'text-emerald-800 dark:text-emerald-200', bg: 'bg-emerald-50/60', detail: 'Xhiro − Bankë − POS − Borxh (përfshin parapagimin nga borxhet)' },
     { label: 'Pagesë Borxhi',                   src: 'debt_repayments',   sign: '+', color: 'text-teal-700',    bg: 'bg-teal-50',    detail: `${data.counts.debt_repayments || 0} pagesa kesh nga fatura të vjetra (jo pjesë e xhiros)` },
     { label: 'Depozita Porosi',                 src: 'porosi_deposits',   sign: '+', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50', detail: `${data.counts.porosi_deposits || 0} depozita kesh nga porositë (custom orders)` },
+    { label: 'Riparimet',                        src: 'repairs_cash',      sign: '+', color: 'text-lime-700 dark:text-lime-300', bg: 'bg-lime-50 dark:bg-lime-900/30', detail: `${data.counts?.repairs || 0} riparime me pagesë (të paguara ose me kapar) — para se të konvertohen në faturë` },
     { label: 'Tërheqje nga Kasaforta',          src: 'safe_to_arka',      sign: '+', color: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-900/30', detail: `${data.counts?.safe_to_arka || 0} tërheqje me destinacion arkë` },
   ]
   const outRows = [
