@@ -6177,17 +6177,19 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     const worker_payments_count = workerCashRow.cnt || 0;
 
     // Riparimet me pagesë — cash që ka hyrë në sirtar ditën që u regjistrua
-    // riparimi. `paid=1` do të thotë çmimi i plotë; `deposit>0` do të thotë
-    // kapari (parapagesë). Përjashtojmë riparimet e konvertuara në faturë
-    // (converted_invoice_id NOT NULL) sepse fatura tashmë e mban këtë cash
-    // te data e dorëzimit — do të llogaritej dy herë ndryshe.
+    // riparimi NË SISTEM (bazuar në created_at, jo në date_received). Kjo
+    // sepse `date_received` mund të vendoset në një ditë të kaluar (kur u
+    // marr artikulli), por cash-i fizik hyri në sirtar sot. `paid=1` do të
+    // thotë çmimi i plotë; `deposit>0` do të thotë kapari (parapagesë).
+    // Përjashtojmë riparimet e konvertuara në faturë sepse fatura tashmë e
+    // mban këtë cash te data e dorëzimit.
     const repairsRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
               COALESCE(price, 0)        AS price,
               COALESCE(deposit, 0)      AS deposit,
               COALESCE(paid, 0)         AS paid
          FROM repairs
-        WHERE date_received = ?
+        WHERE DATE(created_at) = ?
           AND converted_invoice_id IS NULL
           AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
       [date]
@@ -6555,15 +6557,16 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       if (c in porosi_deposits) porosi_deposits[c] += r.amt;
     }
 
-    // Riparimet me pagesë (paid=1 → price; deposit>0 → kapari). Përjashto ato
-    // që janë konvertuar në faturë sepse cashi shfaqet te fatura.
+    // Riparimet me pagesë (paid=1 → price; deposit>0 → kapari). Përdor ditën
+    // e krijimit (created_at) sepse aty hyri fizikisht cash-i në sirtar.
+    // Përjashto ato që janë konvertuar në faturë sepse cashi shfaqet te fatura.
     const repairsRangeRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
               COALESCE(price, 0)        AS price,
               COALESCE(deposit, 0)      AS deposit,
               COALESCE(paid, 0)         AS paid
          FROM repairs
-        WHERE date_received BETWEEN ? AND ?
+        WHERE DATE(created_at) BETWEEN ? AND ?
           AND converted_invoice_id IS NULL
           AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
       [from, to]
