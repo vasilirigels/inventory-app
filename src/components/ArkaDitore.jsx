@@ -66,7 +66,7 @@ export default function ArkaDitore({ date, onNavigate }) {
   useRealtimeSync(
     ['invoices', 'invoice_payments', 'expense_entries', 'purchase_invoices',
      'hurda_purchases', 'has_purchases', 'daily_records', 'safe_withdrawals',
-     'worker_payments'],
+     'worker_payments', 'bank_movements'],
     refreshData
   )
 
@@ -142,6 +142,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     (data.debt_repayments?.[c] || 0) ||
     (data.porosi_deposits?.[c] || 0) ||
     (data.repairs_cash?.[c]    || 0) ||
+    (data.arka_to_bank?.[c]    || 0) ||
     (data.safe_to_arka?.[c]    || 0) ||
     (data.worker_payments_cash?.[c] || 0) ||
     (data.returns_gross?.[c]   || 0) ||
@@ -185,6 +186,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
     { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800 dark:text-amber-200',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },
     { label: 'Pagesa Punëtorësh',               src: 'worker_payments_cash', sign: '−', color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/30', detail: `${data.counts?.worker_payments || 0} pagesa · vetëm pjesa kesh (pjesa me bankë zbret nga banka, jo nga arka)` },
+    { label: 'Lëvizje në Bankë',                src: 'arka_to_bank',      sign: '−', color: 'text-blue-800 dark:text-blue-200', bg: 'bg-blue-50 dark:bg-blue-900/30', detail: `${data.counts?.arka_to_bank || 0} depozita nga arka → bankë (regjistrohen te faqja "Lëvizje e Re Banke")` },
   ]
 
   return (

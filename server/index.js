@@ -6214,6 +6214,24 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       }
     }
 
+    // Lëvizje kesh nga Arka drejtpërdrejt në Bankë — zbresin nga sirtari.
+    // Përdor tabelën bank_movements me direction='to_bank' (të njëjtat regjistrime
+    // që krijohen nga faqja "Lëvizje e Re Banke").
+    const arkaBankRows = await queryAll(
+      `SELECT COALESCE(amount_lek, 0) AS LEK,
+              COALESCE(amount_eur, 0) AS EUR,
+              COALESCE(amount_usd, 0) AS USD,
+              COALESCE(amount_gbp, 0) AS GBP,
+              COALESCE(amount_chf, 0) AS CHF
+         FROM bank_movements
+        WHERE date = ? AND direction = 'to_bank'`,
+      [date]
+    );
+    const arka_to_bank = zeroPerCur();
+    for (const r of arkaBankRows) {
+      for (const c of CURS) arka_to_bank[c] += (r[c] || 0);
+    }
+
     // Tërheqjet nga kasaforta me destinacion 'arka' — hyjnë si kesh në sirtar.
     const safeToArkaRows = await queryAll(
       `SELECT COALESCE(amount_lek, 0) AS LEK,
@@ -6275,7 +6293,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
                           + safe_to_arka[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
                           - worker_payments_cash[c]
-                          - returns_cash[c];
+                          - returns_cash[c]
+                          - arka_to_bank[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
       // Për rastin normal (cash_balance >= 0): physical - teorike, si zakonisht.
       // Kur cash_balance del negative (të dhëna inkonsistente — daljet tejkalojnë
@@ -6296,6 +6315,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       debt_repayments:   fx(debt_repayments),
       porosi_deposits:   fx(porosi_deposits),
       repairs_cash:      fx(repairs_cash),
+      arka_to_bank:      fx(arka_to_bank),
       safe_to_arka:      fx(safe_to_arka),
       worker_payments_cash: fx(worker_payments_cash),
       returns_gross:     fx(returns_gross),
@@ -6338,6 +6358,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         safe_to_arka: safeToArkaRows.length,
         worker_payments: worker_payments_count,
         repairs: repairs_count,
+        arka_to_bank: arkaBankRows.length,
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
