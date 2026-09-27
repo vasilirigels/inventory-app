@@ -6186,20 +6186,18 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     worker_payments_cash.EUR = +(workerCashRow.amt || 0).toFixed(2);
     const worker_payments_count = workerCashRow.cnt || 0;
 
-    // Riparimet me pagesë — cash që ka hyrë në sirtar ditën që u regjistrua
-    // riparimi NË SISTEM (bazuar në created_at, jo në date_received). Kjo
-    // sepse `date_received` mund të vendoset në një ditë të kaluar (kur u
-    // marr artikulli), por cash-i fizik hyri në sirtar sot. `paid=1` do të
-    // thotë çmimi i plotë; `deposit>0` do të thotë kapari (parapagesë).
-    // Përjashtojmë riparimet e konvertuara në faturë sepse fatura tashmë e
-    // mban këtë cash te data e dorëzimit.
+    // Riparimet me pagesë — cash që ka hyrë në sirtar në datën që ka shënuar
+    // user-i te formulari (date_received). `paid=1` do të thotë çmimi i
+    // plotë; `deposit>0` do të thotë kapari (parapagesë). Përjashtojmë ato
+    // të konvertuara në faturë sepse fatura tashmë e mban këtë cash te data
+    // e dorëzimit.
     const repairsRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
               COALESCE(price, 0)        AS price,
               COALESCE(deposit, 0)      AS deposit,
               COALESCE(paid, 0)         AS paid
          FROM repairs
-        WHERE DATE(created_at) = ?
+        WHERE date_received = ?
           AND converted_invoice_id IS NULL
           AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
       [date]
@@ -6567,16 +6565,16 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       if (c in porosi_deposits) porosi_deposits[c] += r.amt;
     }
 
-    // Riparimet me pagesë (paid=1 → price; deposit>0 → kapari). Përdor ditën
-    // e krijimit (created_at) sepse aty hyri fizikisht cash-i në sirtar.
-    // Përjashto ato që janë konvertuar në faturë sepse cashi shfaqet te fatura.
+    // Riparimet me pagesë (paid=1 → price; deposit>0 → kapari) sipas datës
+    // që ka vendosur user-i te formulari (date_received). Përjashto ato që
+    // janë konvertuar në faturë sepse cashi shfaqet te fatura.
     const repairsRangeRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
               COALESCE(price, 0)        AS price,
               COALESCE(deposit, 0)      AS deposit,
               COALESCE(paid, 0)         AS paid
          FROM repairs
-        WHERE DATE(created_at) BETWEEN ? AND ?
+        WHERE date_received BETWEEN ? AND ?
           AND converted_invoice_id IS NULL
           AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
       [from, to]
