@@ -5942,12 +5942,22 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
 
       // ── Shitjet e zakonshme (pozitive) ───────────────────────────────────
       if (r.pm === 'bank') {
+        // Fatura pm='bank' zakonisht paguhet plotësisht, por user mund të
+        // ketë vendosur amount_paid < total (pjesë borxh). Trajto pjesën
+        // e papaguar si borxh që s'preku bankën.
         xhiro_total[c] += r.total;
-        paid_bank[c] += r.total;
+        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const due     = Math.max(0, r.total - paidNow);
+        paid_bank[c] += paidNow;
+        if (due > 0.005) amount_due[c] += due;
       }
       else if (r.pm === 'pos') {
+        // I njëjti trajtim si pm='bank' për fatura POS të paguara pjesërisht.
         xhiro_total[c] += r.total;
-        paid_pos[c] += r.total;
+        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const due     = Math.max(0, r.total - paidNow);
+        paid_pos[c] += paidNow;
+        if (due > 0.005) amount_due[c] += due;
       }
       else if (r.pm === 'debt') {
         xhiro_total[c] += r.total;
