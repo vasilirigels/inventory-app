@@ -1,7 +1,7 @@
 {
   "name": "inventory-app",
   "productName": "Cham Shop",
-  "version": "1.2.40",
+  "version": "1.2.41",
   "description": "Albanian Jewelry Store Inventory Management",
   "main": "electron/main.cjs",
   "author": "Rigels Vasili",

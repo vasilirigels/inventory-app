@@ -3117,16 +3117,23 @@ app.delete('/api/invoice-payments/:id', async (req, res) => {
 app.get('/api/client-debts', async (req, res) => {
   try {
     const { q, nipt, name, from, to } = req.query;
+    const onlyPaid = req.query.onlyPaid === '1' || req.query.onlyPaid === 'true';
     // Any invoice with unpaid balance counts as debt — pavarësisht payment_method.
     // Tolerance 0.005 to guard against float residuals leaving 0.00... amount_due behind.
+    // onlyPaid=1 → shfaq VETËM faturat e paguara plotësisht (historik).
     let sql = `
       SELECT i.*,
         (SELECT date   FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
         (SELECT amount FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
         (SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = i.id) AS payment_count
       FROM invoices i
-      WHERE COALESCE(i.cancelled, 0) = 0
-        AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005`;
+      WHERE COALESCE(i.cancelled, 0) = 0`;
+    if (onlyPaid) {
+      sql += ` AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) <= 0.005
+               AND COALESCE(i.total_with_vat, 0) > 0.005`;
+    } else {
+      sql += ` AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005`;
+    }
     const params = [];
     if (nipt) {
       sql += ' AND i.customer_nipt = ?';
@@ -5333,9 +5340,12 @@ app.post('/api/purchase-invoices/:id/payments', async (req, res) => {
     const due = Math.max(0, (inv.total_with_vat || 0) - (inv.amount_paid || 0));
     if (amount > due + 0.005) return res.status(400).json({ error: `max ${due.toFixed(2)}` });
     const pm = ['cash','bank','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+    const payDate = d.date || new Date().toISOString().slice(0, 10);
+    // arka_date = payDate që Arka Ditore ta reflektojë pagesën te data e pagesës,
+    // jo te data e faturës. Vlen për të gjitha pagesat e reja (cash/bank/pos).
     await run(
-      `INSERT INTO purchase_payments (purchase_id, date, amount, payment_method, notes) VALUES (?, ?, ?, ?, ?)`,
-      [id, d.date || new Date().toISOString().slice(0, 10), amount, pm, d.notes || '']
+      `INSERT INTO purchase_payments (purchase_id, date, amount, payment_method, notes, arka_date) VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, payDate, amount, pm, d.notes || '', payDate]
     );
     const newPaid = +((inv.amount_paid || 0) + amount).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
@@ -5356,6 +5366,128 @@ app.delete('/api/purchase-payments/:id', async (req, res) => {
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
     await run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.purchase_id]);
     res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Modifiko pagesë të pjesshme furnitor. Rifreskon amount_paid/due te fatura.
+// Nëse data e pagesës ndryshon (pay.date != new date), vendos arka_date = new date
+// që Arka Ditore ta reflektojë pagesën te data e re (jo te data e faturës).
+app.put('/api/purchase-payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = req.body || {};
+    const pay = await queryOne('SELECT * FROM purchase_payments WHERE id = ?', [id]);
+    if (!pay) return res.status(404).json({ error: 'not found' });
+    const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [pay.purchase_id]);
+    if (!inv) return res.status(404).json({ error: 'invoice missing' });
+    const newAmount = d.amount != null ? parseFloat(d.amount) : pay.amount;
+    if (!(newAmount > 0)) return res.status(400).json({ error: 'invalid amount' });
+    // Kufizim: shuma e re + (amount_paid pa këtë pagesë) <= total_with_vat
+    const paidWithoutThis = (inv.amount_paid || 0) - (pay.amount || 0);
+    const maxAllowed = (inv.total_with_vat || 0) - paidWithoutThis;
+    if (newAmount > maxAllowed + 0.005) {
+      return res.status(400).json({ error: `max ${maxAllowed.toFixed(2)}` });
+    }
+    const newDate = d.date || pay.date;
+    const newPm   = ['cash','bank','pos'].includes(d.payment_method) ? d.payment_method : pay.payment_method;
+    const newNotes = d.notes != null ? d.notes : pay.notes;
+    // arka_date: vetëm kur data e pagesës ndryshon, opt-in te sjellja e re
+    // (pagesa reflektohet te arka_date në vend të datës së faturës).
+    // Nëse arka_date ishte set më parë dhe user rikthen datën origjinale, ruajmë vlerën e re.
+    const dateChanged = newDate !== pay.date;
+    const newArkaDate = dateChanged ? newDate : pay.arka_date;
+    await run(
+      `UPDATE purchase_payments SET date = ?, amount = ?, payment_method = ?, notes = ?, arka_date = ? WHERE id = ?`,
+      [newDate, newAmount, newPm, newNotes, newArkaDate, id]
+    );
+    const newPaid = +(paidWithoutThis + newAmount).toFixed(2);
+    const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
+    await run('UPDATE purchase_invoices SET amount_paid = ?, amount_due = ? WHERE id = ?', [newPaid, newDue, pay.purchase_id]);
+    res.json({ success: true, amount_paid: newPaid, amount_due: newDue });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Historik i unifikuar i pagesave furnitor:
+//  · pagesa fillestare = amount_paid në krijim të faturës (pa purchase_payments)
+//  · pagesa të pjesshme = rreshtat te purchase_payments
+// Filtrat: from, to (data pagesës), q (emri/NIPT furnitor), method (cash/bank/pos)
+app.get('/api/supplier-payments/history', async (req, res) => {
+  try {
+    const { from, to, q, method } = req.query;
+    const conds = [];
+    const params = [];
+    if (from) { conds.push('p.date >= ?'); params.push(from); }
+    if (to)   { conds.push('p.date <= ?'); params.push(to); }
+    if (method && ['cash','bank','pos'].includes(method)) {
+      conds.push('p.payment_method = ?'); params.push(method);
+    }
+    if (q && q.trim()) {
+      conds.push('(pi.supplier_name LIKE ? OR pi.supplier_nipt LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    const whereP = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const partial = await queryAll(`
+      SELECT
+        'partial' AS kind,
+        p.id AS id,
+        p.purchase_id AS invoice_id,
+        p.date AS date,
+        p.amount AS amount,
+        p.payment_method AS payment_method,
+        p.notes AS notes,
+        pi.invoice_no AS invoice_no,
+        pi.date AS invoice_date,
+        pi.currency AS currency,
+        pi.exchange_rate AS exchange_rate,
+        pi.supplier_name AS supplier_name,
+        pi.supplier_nipt AS supplier_nipt,
+        pi.total_with_vat AS invoice_total,
+        pi.amount_paid AS invoice_paid
+      FROM purchase_payments p
+      LEFT JOIN purchase_invoices pi ON pi.id = p.purchase_id
+      ${whereP}
+    `, params);
+
+    // Pagesa fillestare = amount_paid - SUM(purchase_payments) për atë faturë.
+    const condsI = ["COALESCE(pi.type, 'purchase') = 'purchase'"];
+    const paramsI = [];
+    if (from) { condsI.push('pi.date >= ?'); paramsI.push(from); }
+    if (to)   { condsI.push('pi.date <= ?'); paramsI.push(to); }
+    if (method && ['cash','bank','pos'].includes(method)) {
+      condsI.push('pi.payment_method = ?'); paramsI.push(method);
+    }
+    if (q && q.trim()) {
+      condsI.push('(pi.supplier_name LIKE ? OR pi.supplier_nipt LIKE ?)');
+      paramsI.push(`%${q}%`, `%${q}%`);
+    }
+    const initial = await queryAll(`
+      SELECT
+        'initial' AS kind,
+        pi.id AS id,
+        pi.id AS invoice_id,
+        pi.date AS date,
+        (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS amount,
+        pi.payment_method AS payment_method,
+        '' AS notes,
+        pi.invoice_no AS invoice_no,
+        pi.date AS invoice_date,
+        pi.currency AS currency,
+        pi.exchange_rate AS exchange_rate,
+        pi.supplier_name AS supplier_name,
+        pi.supplier_nipt AS supplier_nipt,
+        pi.total_with_vat AS invoice_total,
+        pi.amount_paid AS invoice_paid
+      FROM purchase_invoices pi
+      WHERE ${condsI.join(' AND ')}
+        AND (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) > 0.005
+    `, paramsI);
+
+    const all = [...partial, ...initial].sort((a, b) => {
+      const d = (b.date || '').localeCompare(a.date || '');
+      if (d !== 0) return d;
+      return (b.id || 0) - (a.id || 0);
+    });
+    res.json(all);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -6084,21 +6216,38 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       expenses[c] = expenses_daily[c] + expenses_transport[c] + expenses_marketing[c];
     }
 
-    // Fatura Blerje kesh (payment_method='cash') → amount_paid në monedhën origjinale.
-    // Kthimet (type='return') me pm='cash' kontribuojnë me shenjë negative:
-    // paratë hynë mbrapsht në arkë, pra zbresin nga shpenzimi neto i ditës.
+    // Fatura Blerje kesh:
+    //  Default (pagesa e pa-edituar): amount_paid attribuohet te data e faturës (sjellja historike).
+    //  Kur user-i edito datën e një pagese të pjesshme, kolona arka_date te purchase_payments
+    //  regjistron datën e re — kjo pagesë shpërngulet nga data e faturës te arka_date.
+    //  Kthimet (type='return') me pm='cash' kontribuojnë me shenjë negative.
     const purRows = await queryAll(
-      `SELECT COALESCE(currency, 'LEK') AS cur,
-              CASE WHEN COALESCE(type, 'purchase') = 'return'
-                   THEN -COALESCE(amount_paid, 0)
-                   ELSE  COALESCE(amount_paid, 0)
-              END AS amt
-         FROM purchase_invoices
-         WHERE date = ? AND payment_method = 'cash'`,
+      `SELECT COALESCE(pi.currency, 'LEK') AS cur,
+              COALESCE(pi.type, 'purchase') AS tp,
+              (COALESCE(pi.amount_paid, 0)
+                - COALESCE((SELECT SUM(amount) FROM purchase_payments
+                             WHERE purchase_id = pi.id AND arka_date IS NOT NULL), 0)
+              ) AS invoice_date_amt
+         FROM purchase_invoices pi
+         WHERE pi.date = ? AND pi.payment_method = 'cash'`,
+      [date]
+    );
+    const purShiftedRows = await queryAll(
+      `SELECT COALESCE(pi.currency, 'LEK') AS cur,
+              COALESCE(p.amount, 0) AS amt
+         FROM purchase_payments p
+         JOIN purchase_invoices pi ON pi.id = p.purchase_id
+        WHERE p.arka_date = ? AND p.payment_method = 'cash'`,
       [date]
     );
     const purchase_cash = zeroPerCur();
     for (const r of purRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in purchase_cash)) continue;
+      const amt = r.tp === 'return' ? -r.invoice_date_amt : r.invoice_date_amt;
+      purchase_cash[c] += amt;
+    }
+    for (const r of purShiftedRows) {
       const c = (r.cur || 'LEK').toUpperCase();
       if (c in purchase_cash) purchase_cash[c] += r.amt;
     }

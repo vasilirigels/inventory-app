@@ -513,6 +513,11 @@ const MIGRATIONS = [
   "ALTER TABLE purchase_invoices ADD COLUMN type TEXT DEFAULT 'purchase'",
   "ALTER TABLE purchase_invoices ADD COLUMN original_purchase_id INTEGER",
   "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_original ON purchase_invoices(original_purchase_id)",
+  // arka_date: kur user-i modifikon datën e një pagese të pjesshme, kjo mban
+  // datën e re. Arka Ditore e trajton pagesën në arka_date (jo në datën e faturës).
+  // NULL = pagesa nuk është edituar → sjellja historike (attribuohet te data e faturës).
+  "ALTER TABLE purchase_payments ADD COLUMN arka_date TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_payments_arka_date ON purchase_payments(arka_date)",
   "ALTER TABLE expense_entries ADD COLUMN currency TEXT DEFAULT 'LEK'",
   "ALTER TABLE expense_entries ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE expense_entries ADD COLUMN exchange_rate REAL DEFAULT 1",

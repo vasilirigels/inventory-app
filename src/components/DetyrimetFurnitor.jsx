@@ -709,29 +709,277 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
 }
 
 
+// ── Modal për modifikim të pagesës të pjesshme ─────────────────────────────
+function EditPaymentModal({ payment, onClose, onSaved }) {
+  const [amount, setAmount] = useState(String(n(payment.amount)))
+  const [date, setDate]     = useState(payment.date || today())
+  const [method, setMethod] = useState(payment.payment_method || 'cash')
+  const [notes, setNotes]   = useState(payment.notes || '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr]       = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setErr('Vendos shumë më të madhe se 0.'); return }
+    setErr(''); setSaving(true)
+    try {
+      const res = await fetch(`/api/purchase-payments/${payment.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amt, date, payment_method: method, notes }),
+      })
+      const r = await res.json()
+      if (!res.ok) throw new Error(r.error || 'Gabim')
+      onSaved?.()
+      onClose()
+    } catch (e) { setErr(e.message) }
+    setSaving(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="modal-header">
+          <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">✏️ Modifiko Pagesën</h3>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
+        </div>
+        <form onSubmit={submit} className="p-6 space-y-3">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Faturë {payment.invoice_no} · Furnitor: {payment.supplier_name || '—'}
+          </div>
+          <div>
+            <label className="form-label">Data</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-field" required />
+          </div>
+          <div>
+            <label className="form-label">Shuma ({payment.currency || 'LEK'})</label>
+            <MoneyInput value={amount} onChange={v => setAmount(String(v))} className="input-field tabular-nums" />
+          </div>
+          <div>
+            <label className="form-label">Mënyra</label>
+            <select value={method} onChange={e => setMethod(e.target.value)} className="input-field">
+              <option value="cash">💵 Cash</option>
+              <option value="bank">🏦 Bankë</option>
+              <option value="pos">💳 POS</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Shënime (opsional)</label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)} className="input-field" />
+          </div>
+          {err && <p className="text-sm text-red-600">{err}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary">Anulo</button>
+            <button type="submit" disabled={saving} className="btn-primary disabled:opacity-50">
+              {saving ? '⏳ Duke ruajtur...' : '💾 Ruaj'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Historik i pagesave (fillestare + të pjesshme) ─────────────────────────
+function SupplierPaymentsHistoryPanel({ supplier, onNavigate, refreshKey, dateRange, onChanged }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [method, setMethod] = useState('') // '' = të gjitha
+  const [editRow, setEditRow] = useState(null)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    if (dateRange?.from) params.set('from', dateRange.from)
+    if (dateRange?.to)   params.set('to', dateRange.to)
+    if (supplier?.nipt)      params.set('q', supplier.nipt)
+    else if (supplier?.name) params.set('q', supplier.name)
+    if (method) params.set('method', method)
+    const qs = params.toString()
+    fetch(`/api/supplier-payments/history${qs ? '?' + qs : ''}`)
+      .then(r => r.json())
+      .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false) })
+      .catch(() => { setRows([]); setLoading(false) })
+  }, [dateRange?.from, dateRange?.to, supplier?.nipt, supplier?.name, method])
+
+  useEffect(() => { load() }, [load, refreshKey])
+
+  const removePartial = async (row) => {
+    if (!(await showConfirm(
+      `Fshi këtë pagesë prej ${fmt(row.amount)} ${row.currency || ''} datë ${row.date}?`,
+      { title: 'Fshi pagesën', confirmLabel: 'Fshi', danger: true }
+    ))) return
+    const res = await fetch(`/api/purchase-payments/${row.id}`, { method: 'DELETE' })
+    if (res.ok) { load(); onChanged?.() }
+  }
+
+  const totalsByCur = rows.reduce((acc, r) => {
+    const c = r.currency || 'LEK'
+    if (!acc[c]) acc[c] = 0
+    acc[c] += n(r.amount)
+    return acc
+  }, {})
+  const currenciesInList = Object.keys(totalsByCur).sort()
+
+  const methodBadge = (pm) => pm === 'bank'
+    ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
+    : pm === 'pos'
+    ? <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
+    : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
+
+  return (
+    <div className="card p-0 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            Historik Pagesash Furnitor ({rows.length})
+          </h3>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+            Përfshin pagesat fillestare (në krijim të faturës) dhe të pjesshme
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-slate-600 dark:text-slate-300 font-medium">Mënyra:</label>
+          <select value={method} onChange={e => setMethod(e.target.value)} className="input-field text-xs py-1.5 pr-7">
+            <option value="">Të gjitha</option>
+            <option value="cash">💵 Cash</option>
+            <option value="bank">🏦 Bankë</option>
+            <option value="pos">💳 POS</option>
+          </select>
+        </div>
+      </div>
+      {loading ? (
+        <div className="p-8 text-center text-slate-400 dark:text-slate-500">Duke ngarkuar...</div>
+      ) : rows.length === 0 ? (
+        <div className="p-10 text-center">
+          <div className="text-5xl mb-3">📭</div>
+          <p className="text-slate-500 dark:text-slate-400">Asnjë pagesë e regjistruar për filtrat e zgjedhur.</p>
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data e Faturës</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitor</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data e Pagesës</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shuma</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Mënyra</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënime</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vepro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.kind}-${r.id}-${i}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <td className="px-4 py-2 text-slate-700 dark:text-slate-200 tabular-nums">
+                  {r.invoice_date}
+                  {r.kind === 'initial' && <div className="text-[10px] text-amber-600 dark:text-amber-400 italic">fillestare</div>}
+                </td>
+                <td className="px-4 py-2 font-medium text-slate-800 dark:text-slate-100">
+                  {r.supplier_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
+                  {r.supplier_nipt && <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{r.supplier_nipt}</div>}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs">
+                  <div className="tabular-nums text-slate-700 dark:text-slate-200 font-semibold">{r.date}</div>
+                  <button
+                    onClick={() => onNavigate?.('artikuj-te-tjere', { date: r.invoice_date, invoiceId: r.invoice_id })}
+                    className="text-blue-600 hover:text-blue-800 hover:underline text-[10px]"
+                    title="Hap faturën"
+                  >{r.invoice_no || '—'}</button>
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums font-bold text-emerald-700 dark:text-emerald-300">{fmt(r.amount)}</td>
+                <td className="px-4 py-2 text-center">
+                  <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{r.currency || 'LEK'}</span>
+                </td>
+                <td className="px-4 py-2 text-center">{methodBadge(r.payment_method)}</td>
+                <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate" title={r.notes || ''}>{r.notes || '—'}</td>
+                <td className="px-4 py-2 text-center whitespace-nowrap">
+                  {r.kind === 'partial' ? (
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => setEditRow(r)}
+                        className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs" title="Modifiko">✏️</button>
+                      <button onClick={() => removePartial(r)}
+                        className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs" title="Fshi">🗑️</button>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 italic" title="Modifiko nga fatura">në faturë</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-700">
+            {currenciesInList.map((cur, idx) => (
+              <tr key={cur} className={`bg-blue-50 dark:bg-blue-900/30 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
+                <td colSpan={3} className="px-4 py-3 text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
+                  💱 TOTAL ({cur})
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(totalsByCur[cur])}</td>
+                <td colSpan={4}></td>
+              </tr>
+            ))}
+          </tfoot>
+        </table>
+      )}
+      {editRow && (
+        <EditPaymentModal
+          payment={editRow}
+          onClose={() => setEditRow(null)}
+          onSaved={() => { load(); onChanged?.() }}
+        />
+      )}
+    </div>
+  )
+}
+
+
 export default function DetyrimetFurnitor({ onNavigate }) {
   const [selected, setSelected] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [paymentInvoiceId, setPaymentInvoiceId] = useState(null)
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [tab, setTab] = useState('debts') // 'debts' | 'history'
 
   const onPaymentSaved = () => setRefreshKey(k => k + 1)
 
   return (
     <div className="space-y-4">
+      <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 w-fit">
+        {[
+          { id: 'debts',   label: '⚠️ Detyrime' },
+          { id: 'history', label: '📜 Historik Pagesash' },
+        ].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t.id ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
       <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} emptyForAll hint="Boshi = i gjithë historiku" />
       <SupplierSearchBox
         value={selected}
         onPick={setSelected}
         onClear={() => setSelected(null)}
       />
-      <SupplierInvoicesPanel
-        supplier={selected}
-        onNavigate={onNavigate}
-        refreshKey={refreshKey}
-        onOpenPayment={setPaymentInvoiceId}
-        dateRange={dateRange}
-      />
+      {tab === 'debts' ? (
+        <SupplierInvoicesPanel
+          supplier={selected}
+          onNavigate={onNavigate}
+          refreshKey={refreshKey}
+          onOpenPayment={setPaymentInvoiceId}
+          dateRange={dateRange}
+        />
+      ) : (
+        <SupplierPaymentsHistoryPanel
+          supplier={selected}
+          onNavigate={onNavigate}
+          refreshKey={refreshKey}
+          dateRange={dateRange}
+          onChanged={onPaymentSaved}
+        />
+      )}
       {paymentInvoiceId && (
         <PaymentModal
           invoiceId={paymentInvoiceId}

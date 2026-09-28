@@ -719,7 +719,7 @@ function AllClientsSummary({ onPick, dateRange, refreshKey }) {
 }
 
 // ── Invoices panel: all unpaid (when no client selected) OR for one client ──
-function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, dateRange }) {
+function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, dateRange, onlyPaid, onToggleOnlyPaid }) {
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
   // date-asc: më e vjetra e para · date-desc: më e reja e para · name: alfabet
@@ -732,12 +732,13 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
     else if (client?.name) params.set('q', client.name)
     if (dateRange?.from) params.set('from', dateRange.from)
     if (dateRange?.to)   params.set('to', dateRange.to)
+    if (onlyPaid) params.set('onlyPaid', '1')
     const qs = params.toString()
     fetch(`/api/client-debts${qs ? '?' + qs : ''}`)
       .then(r => r.json())
       .then(d => { setInvoices(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => { setInvoices([]); setLoading(false) })
-  }, [client?.nipt, client?.name, refreshKey, dateRange?.from, dateRange?.to])
+  }, [client?.nipt, client?.name, refreshKey, dateRange?.from, dateRange?.to, onlyPaid])
 
   const totals = invoices.reduce((acc, inv) => {
     const due  = n(inv.amount_due != null ? inv.amount_due : (inv.total_with_vat - inv.amount_paid))
@@ -825,7 +826,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
           <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate">
             {client
               ? (client.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>)
-              : `${groupArr.length} klientë me borxh`}
+              : `${groupArr.length} klientë${onlyPaid ? ' (faturat e paguara)' : ' me borxh'}`}
           </h2>
           {client?.nipt && <p className="text-sm font-mono text-slate-500 dark:text-slate-400">NIPT: {client.nipt}</p>}
         </div>
@@ -835,9 +836,18 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between flex-wrap gap-3">
           <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-            Faturat e Papaguara ({invoices.length})
+            {onlyPaid ? 'Faturat e Paguara (Historik)' : 'Faturat e Papaguara'} ({invoices.length})
           </h3>
           <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={onlyPaid}
+                onChange={e => onToggleOnlyPaid?.(e.target.checked)}
+                className="rounded"
+              />
+              Historik — vetëm të paguarat
+            </label>
             <label className="text-xs text-slate-600 dark:text-slate-300 font-medium">Rendit:</label>
             <select
               value={sortBy}
@@ -868,7 +878,9 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">✓</div>
             <p className="text-slate-500 dark:text-slate-400">
-              {client ? 'Asnjë borxh i hapur për këtë klient.' : 'Asnjë borxh i hapur në sistem.'}
+              {onlyPaid
+                ? (client ? 'Asnjë faturë e paguar për këtë klient.' : 'Asnjë faturë e paguar plotësisht.')
+                : (client ? 'Asnjë borxh i hapur për këtë klient.' : 'Asnjë borxh i hapur në sistem.')}
             </p>
           </div>
         ) : (
@@ -994,6 +1006,7 @@ export default function DetyrimetKlienti({ onNavigate }) {
   const [refreshKey, setRefreshKey] = useState(0)
   const [paymentInvoiceId, setPaymentInvoiceId] = useState(null)
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [onlyPaid, setOnlyPaid] = useState(false)
 
   const onPaymentSaved = () => setRefreshKey(k => k + 1)
 
@@ -1011,6 +1024,8 @@ export default function DetyrimetKlienti({ onNavigate }) {
         refreshKey={refreshKey}
         onOpenPayment={setPaymentInvoiceId}
         dateRange={dateRange}
+        onlyPaid={onlyPaid}
+        onToggleOnlyPaid={setOnlyPaid}
       />
       {paymentInvoiceId && (
         <PaymentModal

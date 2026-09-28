@@ -787,7 +787,6 @@ const QUICK_ACTIONS = [
   { icon: '📦', label: 'Produktet',              page: 'products',                salesOk: false },
   { icon: '👤', label: 'Klienti',                page: 'klienti',                 salesOk: false },
   { icon: '🏭', label: 'Furnitor',               page: 'furnitor',                salesOk: false },
-  { icon: '👥', label: 'Klientët (Borxhe)',      page: 'customers',               salesOk: false },
   { icon: '🏬', label: 'Regjistri Magazinash',   page: 'magazinat',               salesOk: false },
   { icon: '⬇️', label: 'Fletë Hyrje',            page: 'magazina-hyrje',          salesOk: false },
   { icon: '⬆️', label: 'Fletë Dalje',            page: 'magazina-dalje',          salesOk: false },

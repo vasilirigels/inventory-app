@@ -11,8 +11,6 @@ import { initRealtime } from './utils/realtime.js'
 const Dashboard              = lazy(() => import('./components/Dashboard.jsx'))
 const Products               = lazy(() => import('./components/Products.jsx'))
 const ProduktePromocion      = lazy(() => import('./components/ProduktePromocion.jsx'))
-const Customers              = lazy(() => import('./components/Customers.jsx'))
-const CustomersLedger        = lazy(() => import('./components/CustomersLedger.jsx'))
 const Marketing              = lazy(() => import('./components/Marketing.jsx'))
 const CashRegister           = lazy(() => import('./components/CashRegister.jsx'))
 const ArkaDitore             = lazy(() => import('./components/ArkaDitore.jsx'))
@@ -179,7 +177,6 @@ function AppInner({ user }) {
       case 'dashboard': return <Dashboard date={currentDate} onNavigate={navigateTo} />
       case 'products':  return <Products />
       case 'produkte-promocion': return <ProduktePromocion onNavigate={navigateTo} />
-      case 'customers': return <CustomersLedger onNavigate={navigateTo} />
       case 'klienti':   return <Klienti />
       case 'furnitor':  return <Furnitor />
       case 'detyrime':  return <DetyrimetKlienti onNavigate={navigateTo} />
