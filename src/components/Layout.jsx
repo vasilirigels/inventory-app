@@ -341,10 +341,10 @@ export default function Layout({
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold truncate">
-                  {user.role === 'admin' ? '🔐' : '🧾'} {user.username}
+                  {user.role === 'admin' ? '🔐' : user.role === 'viewer' ? '👁️' : '🧾'} {user.username}
                 </p>
                 <p className="text-[10px] text-slate-500 uppercase">
-                  {user.role === 'admin' ? 'Admin' : 'Shitës'}
+                  {user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Vetëm shikim' : 'Shitës'}
                 </p>
               </div>
               <button

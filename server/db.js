@@ -604,7 +604,7 @@ const MIGRATIONS = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('admin', 'sales')),
+    role TEXT NOT NULL CHECK(role IN ('admin', 'sales', 'viewer')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
 

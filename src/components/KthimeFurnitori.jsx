@@ -1,12 +1,10 @@
 import { useState, useRef } from 'react'
 import { showConfirm } from './ConfirmDialog.jsx'
 
-// Detekton kolonat e Excel-it për kthime nga blerjet. Kërkohen:
-//   - purchase_date  (Data e Blerjes së produktit)
-//   - barcode        (Barkod)
-//   - name           (Përshkrim) — për referencë vizuale, nuk përdoret në ruajtje
-//   - qty            (Sasi)
-//   - purchase_price (Çmim Blerje) — referencë; ruhet çmimi i faturës origjinale
+// Detekton kolonat e Excel-it — të njëjtat pattern-e me FaturaBlerje që user-i
+// të përdorë të njëjtin Excel edhe për Blerje edhe për Kthime Furnitori.
+// Kërkohen minimalisht: barcode + stock (sasia). Fushat e tjera janë opsionale
+// referencë vizuale; backend-i përdor barcode + qty + (purchase_date opsional).
 function detectMapping(headers) {
   const norm = h => String(h ?? '')
     .toLowerCase()
@@ -15,6 +13,7 @@ function detectMapping(headers) {
     .replace(/\s+/g, '_')
   const normalized = headers.map(norm)
   const used = new Set()
+
   const findFirst = patterns => {
     for (const p of patterns) {
       for (let i = 0; i < normalized.length; i++) {
@@ -24,14 +23,38 @@ function detectMapping(headers) {
     }
     return -1
   }
-  const purchase_date  = findFirst(['data_bler', 'data_e_bler', 'dt_bler', 'data'])
-  const barcode        = findFirst(['barkod', 'barcode'])
-  const name           = findFirst(['pershkrim', 'emri', 'name', 'produkt', 'artikull'])
-  const qty            = findFirst(['sasia', 'sasi', 'qty', 'quantity', 'cope'])
-  const purchase_price = findFirst([
-    'cmim_bler', 'cm_bler', 'cmimi_bler', 'blerje', 'kosto', 'cost', 'cmim',
+
+  // Renditja e prioritetit e njëjtë me FaturaBlerje.jsx:203: specifike para
+  // përgjithësisë (has_gram para cost_price, kodi_flori para kodi generik, etj).
+  const purchase_date = findFirst(['data_bler', 'data_e_bler', 'dt_bler', 'data'])
+  const barcode    = findFirst(['barkod', 'barcode'])
+  const name       = findFirst(['pershkrim', 'emri', 'name', 'produkt', 'article', 'description', 'artikull'])
+  const stock      = findFirst(['sasia', 'sasi', 'stoku', 'stock', 'qty', 'quantity', 'gjendje', 'cope'])
+  const gram       = findFirst(['gram', 'peshe', 'weight', 'pesha'])
+  const kodi       = findFirst(['kodi_flori', 'kodi'])
+  const has_gram   = findFirst(['cmim_blerje_has', 'blerje_has', 'has_gram'])
+  const has_rate   = findFirst(['kursi_blerje', 'kursi', 'has_rate'])
+  const sku        = findFirst([
+    'sku', 'numer_serial', 'nr_serial', 'numer_seri', 'nr_seri', 'nr._seri',
+    'seri', 'kodi_art', 'code', 'ref_no', 'ref',
   ])
-  return { purchase_date, barcode, name, qty, purchase_price }
+  const cost_price = findFirst([
+    'cmimi_pa_tvsh', 'cmimi_bler', 'cm_bler', 'cmim_bler',
+    'pa_tvsh', 'blerje', 'kosto', 'cost', 'cmimi_k',
+  ])
+  const sell_price = findFirst([
+    'cmimi_shitj', 'cm_shitj', 'shitje_pa', 'shit_pa_tvsh',
+    'sell_price', 'sell', 'price', 'cmimi_sh',
+  ])
+  const min_stock  = findFirst(['stok_min', 'min_stock', 'minim', 'alarm'])
+  const category   = findFirst(['kategori', 'category', 'tip', 'lloj'])
+  const brand      = findFirst(['brendi', 'brand', 'prodhu'])
+
+  return {
+    purchase_date, name, category, brand, sku, barcode,
+    cost_price, sell_price, stock, min_stock,
+    gram, kodi, has_gram, has_rate,
+  }
 }
 
 function normalizeDate(v) {
@@ -60,12 +83,15 @@ function normalizeDate(v) {
 function rowToPayload(row, m) {
   const get = (idx, def = '') => idx >= 0 ? (row[idx] ?? def) : def
   const num = (idx) => parseFloat(String(get(idx, 0)).replace(',', '.')) || 0
+  // Backend-i pret: barcode + qty (+ opsional purchase_date/name/purchase_price).
+  // Fushat e tjera nga Blerje (category/brand/sku/gram/kodi/…) janë opsionale
+  // për preview; nuk përdoren në ruajtjen e kthimit.
   return {
     purchase_date:  normalizeDate(get(m.purchase_date, '')),
     barcode:        String(get(m.barcode, '')).trim(),
     name:           String(get(m.name, '')).trim(),
-    qty:            num(m.qty),
-    purchase_price: num(m.purchase_price),
+    qty:            num(m.stock),
+    purchase_price: num(m.cost_price),
   }
 }
 
@@ -147,12 +173,24 @@ export default function KthimeFurnitori() {
     }
   }
 
+  // Të njëjtat fusha si te FaturaBlerje.jsx (ALL_COL_FIELDS) — që user të mund
+  // të përdorë të njëjtin Excel. Fusha specifike për kthimin: purchase_date.
+  // Fushat e detyrueshme për ruajtje: barcode + stock (=sasia për kthim).
   const COL_FIELDS = [
     { key: 'purchase_date',  label: 'Data e Blerjes' },
+    { key: 'name',           label: 'Pershkrimi' },
+    { key: 'category',       label: 'Kategoria' },
+    { key: 'brand',          label: 'Brendi' },
+    { key: 'sku',            label: 'Kodi SKU' },
     { key: 'barcode',        label: 'Barkodi *' },
-    { key: 'name',           label: 'Përshkrimi' },
-    { key: 'qty',            label: 'Sasi *' },
-    { key: 'purchase_price', label: 'Çmim Blerje' },
+    { key: 'stock',          label: 'Sasi / Sasia *' },
+    { key: 'gram',           label: 'Gram' },
+    { key: 'kodi',           label: 'Kodi (585/750...)' },
+    { key: 'has_gram',       label: 'Cmim Blerje Has' },
+    { key: 'has_rate',       label: 'Kursi Blerje' },
+    { key: 'cost_price',     label: 'Cmim Blerje (€)' },
+    { key: 'sell_price',     label: 'Çm. Shitje (€)' },
+    { key: 'min_stock',      label: 'Stok Minimal' },
   ]
 
   return (
@@ -201,7 +239,8 @@ export default function KthimeFurnitori() {
             Ngarko skedarin Excel (.xlsx)
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-            Kolonat: <b>Data e Blerjes</b>, <b>Barkod</b>, <b>Përshkrim</b>, <b>Sasi</b>, <b>Çmim Blerje</b>
+            Të njëjtat kolona si te <b>Blerje</b> (Përshkrim, Barkod, Sasi, Çm. Blerje, Gram, etj.).
+            <br />Të detyrueshme: <b>Barkod</b> + <b>Sasi</b>. Data e Blerjes opsionale (ndihmon dallim mes faturave).
           </p>
           <input
             ref={fileRef}
@@ -241,7 +280,7 @@ export default function KthimeFurnitori() {
             </div>
 
             {/* Mapping kolonash */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4">
               {COL_FIELDS.map(f => (
                 <div key={f.key}>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">

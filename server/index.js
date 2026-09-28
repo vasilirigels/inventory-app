@@ -427,6 +427,16 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 // Endpoint-et e mësipërme (/api/auth/*) mbeten publike.
 app.use('/api', requireAuth);
 
+// Roli 'viewer' — read-only global. Bllokohet cdo write metode para se të
+// arrijë endpoint-in (përfshirë comments POST/DELETE që janë të regjistruar
+// para sales-gate-it të mëposhtëm).
+app.use('/api', (req, res, next) => {
+  if (req.user?.role === 'viewer' && req.method !== 'GET' && req.method !== 'OPTIONS') {
+    return res.status(403).json({ error: 'readonly' });
+  }
+  next();
+});
+
 // Rregullat për rolin 'sales':
 // - GET lejohet për shumicën e endpoint-eve, përveç atyre admin-only më poshtë.
 // - POST lejohet vetëm për fatura shitje dhe shpenzime (të cilat janë pjesë e
@@ -826,6 +836,13 @@ app.delete('/api/repairs/:id', async (req, res) => {
 app.use('/api', (req, res, next) => {
   const role = req.user?.role;
   if (role === 'admin') return next();
+  // Rol 'viewer' (read-only): sheh gjithçka që sheh admin-i, por s'mund të bëjë
+  // asnjë shkrim. Krahasuar me 'sales' që ka gate-in me ADMIN_ONLY_PATH_REGEX +
+  // SALES_WRITE_ALLOW, viewer-i ka thjesht GET/OPTIONS për çdo endpoint.
+  if (role === 'viewer') {
+    if (req.method === 'GET' || req.method === 'OPTIONS') return next();
+    return res.status(403).json({ error: 'readonly' });
+  }
   if (role !== 'sales') return res.status(403).json({ error: 'forbidden' });
 
   // Skip preflight and auth status/login/me (këto s'kalojnë kurrë nga këtu)
