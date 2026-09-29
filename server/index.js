@@ -51,6 +51,22 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Kufi 30 ditë për shitësin. Kthen datën e sotshme minus 29 ditë (YYYY-MM-DD),
+// ose null nëse user-i s'është shitës. Endpoint-et e thërrasin që të klampojnë
+// query-string `date`, `from` para se të kërkojnë DB — mbrojtje server-side.
+const SALES_DAYS_BACK = 30;
+function salesMinDate(req) {
+  if (req.user?.role !== 'sales') return null;
+  const d = new Date();
+  d.setDate(d.getDate() - (SALES_DAYS_BACK - 1));
+  return d.toISOString().split('T')[0];
+}
+function clampSalesDate(req, dateStr) {
+  const min = salesMinDate(req);
+  if (!min) return dateStr;
+  return (!dateStr || dateStr < min) ? min : dateStr;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Në production paketimi vendos server-in brenda app.asar (read-only). Përdor
@@ -589,17 +605,58 @@ const REPAIR_SELECT = `
 
 app.get('/api/repairs', async (req, res) => {
   try {
-    const { status, q } = req.query;
+    const { status, q, argjendar } = req.query;
     const args = []; const where = [];
     if (status && status !== 'all') { where.push('r.status = ?'); args.push(status); }
+    if (argjendar) { where.push('r.argjendar_name = ?'); args.push(String(argjendar)); }
     if (q) {
-      where.push(`(r.customer_name LIKE ? OR r.customer_phone LIKE ? OR r.item_description LIKE ?)`);
+      where.push(`(r.customer_name LIKE ? OR r.customer_phone LIKE ? OR r.item_description LIKE ? OR r.argjendar_name LIKE ?)`);
       const like = `%${q}%`;
-      args.push(like, like, like);
+      args.push(like, like, like, like);
     }
     const sql = `${REPAIR_SELECT}
                  ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
                  ORDER BY r.id DESC LIMIT 500`;
+    const rows = await queryAll(sql, args);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Listë distinct e argjendarëve — për autocomplete te formulari i riparimit.
+app.get('/api/repairs/argjendars', async (req, res) => {
+  try {
+    const rows = await queryAll(
+      `SELECT DISTINCT argjendar_name AS name
+         FROM repairs
+        WHERE COALESCE(argjendar_name, '') <> ''
+        ORDER BY argjendar_name ASC`
+    );
+    res.json(rows.map(r => r.name));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Përmbledhje sipas argjendari — për tabelën e historikut. Për çdo argjendar
+// kthen: numrin total të riparimeve, të paguara, të papaguara (borxh), plus
+// totalet e shumave për monedhë. Filtri opsional me date_received [from, to].
+app.get('/api/repairs/argjendar-summary', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const args = []; const where = ["COALESCE(argjendar_name, '') <> ''"];
+    if (from) { where.push('date_received >= ?'); args.push(String(from)); }
+    if (to)   { where.push('date_received <= ?'); args.push(String(to));   }
+    const sql = `
+      SELECT argjendar_name,
+             COALESCE(currency, 'LEK') AS currency,
+             COUNT(*)                            AS count_total,
+             SUM(CASE WHEN paid = 1 THEN 1 ELSE 0 END)          AS count_paid,
+             SUM(CASE WHEN paid = 0 THEN 1 ELSE 0 END)          AS count_unpaid,
+             SUM(CASE WHEN paid = 1 THEN COALESCE(price, 0) ELSE 0 END) AS total_paid,
+             SUM(CASE WHEN paid = 0 THEN COALESCE(price, 0) ELSE 0 END) AS total_unpaid,
+             SUM(COALESCE(price, 0))             AS total_all
+        FROM repairs
+       WHERE ${where.join(' AND ')}
+       GROUP BY argjendar_name, COALESCE(currency, 'LEK')
+       ORDER BY argjendar_name ASC, currency ASC`;
     const rows = await queryAll(sql, args);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -716,8 +773,8 @@ app.post('/api/repairs', async (req, res) => {
       `INSERT INTO repairs
        (date_received, customer_name, customer_phone, item_description,
         issue_description, notes, price, currency, status, paid, created_by,
-        product_id, deposit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        product_id, deposit, argjendar_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date_received,
         customer_name,
@@ -732,6 +789,7 @@ app.post('/api/repairs', async (req, res) => {
         req.user.username,
         product_id,
         Math.max(0, Number(d.deposit) || 0),
+        String(d.argjendar_name || '').trim(),
       ],
     );
     const row = await queryOne(`${REPAIR_SELECT} WHERE r.id = ?`, [Number(result.lastInsertRowid)]);
@@ -775,7 +833,7 @@ app.put('/api/repairs/:id', async (req, res) => {
          date_received = ?, customer_name = ?, customer_phone = ?,
          item_description = ?, issue_description = ?, notes = ?,
          price = ?, currency = ?, status = ?, date_delivered = ?, paid = ?,
-         product_id = ?, deposit = ?,
+         product_id = ?, deposit = ?, argjendar_name = ?,
          updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
@@ -792,6 +850,7 @@ app.put('/api/repairs/:id', async (req, res) => {
         d.paid ? 1 : 0,
         product_id,
         Math.max(0, Number(d.deposit) || 0),
+        String(d.argjendar_name || '').trim(),
         id,
       ],
     );
@@ -1859,6 +1918,9 @@ app.post('/api/products/import', async (req, res) => {
     // Callers (e.g. FaturaBlerje import) need these ids to attach the freshly
     // created products as line items.
     const ids = [];
+    // Vetëm ID-të e produkteve të krijuara TANI (jo ato matched me ekzistuese).
+    // Frontend-i i mban për të pastruar orphanët nëse fatura anulohet pa u ruajtur.
+    const createdIds = [];
     let imported = 0;
     let matched = 0;
     // Regjistër i dublikatave — çfarë (barkodi, SKU, ose serial) përplaset me
@@ -1924,10 +1986,12 @@ app.post('/api/products/import', async (req, res) => {
         ]
       );
       const row = await queryOne('SELECT last_insert_rowid() AS id');
-      ids.push(row?.id || null);
+      const newId = row?.id || null;
+      ids.push(newId);
+      if (newId) createdIds.push(newId);
       imported++;
     }
-    res.json({ success: true, imported, matched, ids, duplicates });
+    res.json({ success: true, imported, matched, ids, createdIds, duplicates });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1938,6 +2002,29 @@ app.delete('/api/products/:id', async (req, res) => {
     const { id } = req.params;
     await run('UPDATE products SET active = 0 WHERE id = ?', [id]);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pastro produkte të sapokrijuara që s'u lidhën me asnjë faturë (draft-orphan).
+// Frontend-i e thërret kur user-i anulon një faturë blerjeje pas import-it Excel:
+// import.mjs krijon produkte menjëherë, kështu që nëse fatura s'ruhet, mbeten
+// jetim. Këtu fshihen vetëm ID-të e dhëna dhe vetëm nëse s'kanë asnjë referencë.
+app.post('/api/products/cleanup-orphans', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Number.isInteger) : [];
+    if (ids.length === 0) return res.json({ success: true, deleted: 0 });
+    let deleted = 0;
+    for (const pid of ids) {
+      const purchRef = await queryOne('SELECT COUNT(*) AS c FROM purchase_items WHERE product_id = ?', [pid]);
+      const salesRef = await queryOne('SELECT COUNT(*) AS c FROM invoice_items  WHERE product_id = ?', [pid]);
+      if ((purchRef?.c || 0) === 0 && (salesRef?.c || 0) === 0) {
+        await run('DELETE FROM products WHERE id = ?', [pid]);
+        deleted++;
+      }
+    }
+    res.json({ success: true, deleted });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2163,8 +2250,9 @@ function salesCostSubquery() {
 
 app.get('/api/invoices/by-date/:date', async (req, res) => {
   try {
-    const { date } = req.params;
+    let { date } = req.params;
     const { material, category, online, status } = req.query;
+    date = clampSalesDate(req, date);
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
     const gram = salesGramSubquery(material);
@@ -2185,8 +2273,11 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
 
 app.get('/api/invoices/by-range', async (req, res) => {
   try {
-    const { from, to, material, category, online, status } = req.query;
+    let { from, to } = req.query;
+    const { material, category, online, status } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    from = clampSalesDate(req, from);
+    to   = clampSalesDate(req, to);
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
     const gram = salesGramSubquery(material);
@@ -4820,17 +4911,20 @@ app.get('/api/hurda-purchases/next-no', async (req, res) => {
 
 app.get('/api/hurda-purchases/by-date/:date', async (req, res) => {
   try {
+    const date = clampSalesDate(req, req.params.date);
     res.json(await queryAll(
       'SELECT * FROM hurda_purchases WHERE date = ? ORDER BY id ASC',
-      [req.params.date]
+      [date]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/hurda-purchases/by-range', async (req, res) => {
   try {
-    const { from, to } = req.query;
+    let { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    from = clampSalesDate(req, from);
+    to   = clampSalesDate(req, to);
     res.json(await queryAll(
       'SELECT * FROM hurda_purchases WHERE date BETWEEN ? AND ? ORDER BY date ASC, id ASC',
       [from, to]
@@ -5992,8 +6086,9 @@ app.get('/api/inventory-summary', async (req, res) => {
 // Të gjitha vlerat kthehen në LEK duke përdorur exchange_rate të secilës faturë/shpenzim.
 app.get('/api/arka-ditore/:date', async (req, res) => {
   try {
-    const { date } = req.params;
+    let { date } = req.params;
     if (!date) return res.status(400).json({ error: 'date required' });
+    date = clampSalesDate(req, date);
 
     const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
     const zeroPerCur = () => ({ LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 });
@@ -6352,20 +6447,17 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     worker_payments_cash.EUR = +(workerCashRow.amt || 0).toFixed(2);
     const worker_payments_count = workerCashRow.cnt || 0;
 
-    // Riparimet me pagesë — cash që ka hyrë në sirtar në datën që ka shënuar
-    // user-i te formulari (date_received). `paid=1` do të thotë çmimi i
-    // plotë; `deposit>0` do të thotë kapari (parapagesë). Përjashtojmë ato
-    // të konvertuara në faturë sepse fatura tashmë e mban këtë cash te data
-    // e dorëzimit.
+    // Pagesa argjendari për riparime — cash që DEL nga sirtari kur user-i
+    // paguan argjendarin. Numërohen vetëm riparimet me `paid=1` (të shlyera)
+    // në datën e regjistrimit. Riparimet me `paid=0` janë borxh ndaj
+    // argjendarit (shfaqen te historiku i argjendarit, jo në arka).
     const repairsRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
-              COALESCE(price, 0)        AS price,
-              COALESCE(deposit, 0)      AS deposit,
-              COALESCE(paid, 0)         AS paid
+              COALESCE(price, 0)        AS price
          FROM repairs
         WHERE date_received = ?
-          AND converted_invoice_id IS NULL
-          AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
+          AND paid = 1
+          AND COALESCE(price, 0) > 0`,
       [date]
     );
     const repairs_cash = zeroPerCur();
@@ -6373,9 +6465,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     for (const r of repairsRows) {
       const c = (r.cur || 'LEK').toUpperCase();
       if (!(c in repairs_cash)) continue;
-      const amt = r.paid ? r.price : r.deposit;
-      if (amt > 0.005) {
-        repairs_cash[c] += amt;
+      if (r.price > 0.005) {
+        repairs_cash[c] += r.price;
         repairs_count += 1;
       }
     }
@@ -6455,11 +6546,11 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       // shitjet reale). Për UI shfaqet si rresht i veçantë "Marketingu Shitje".
       if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
-                          + repairs_cash[c]
                           + safe_to_arka[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
                           - worker_payments_cash[c]
                           - returns_cash[c]
+                          - repairs_cash[c]
                           - arka_to_bank[c];
       carryover_next_day[c] = Math.max(0, physical_cash[c] - closeout_to_safe[c]);
       // Për rastin normal (cash_balance >= 0): physical - teorike, si zakonisht.
@@ -6536,8 +6627,10 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
 // ditore; për një periudhë, kthimi është neto (kesh in − kesh out) gjatë saj.
 app.get('/api/arka-ditore-range', async (req, res) => {
   try {
-    const { from, to } = req.query;
+    let { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    from = clampSalesDate(req, from);
+    to   = clampSalesDate(req, to);
 
     const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
     const zeroPerCur = () => ({ LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 });
@@ -6752,18 +6845,16 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       if (c in porosi_deposits) porosi_deposits[c] += r.amt;
     }
 
-    // Riparimet me pagesë (paid=1 → price; deposit>0 → kapari) sipas datës
-    // që ka vendosur user-i te formulari (date_received). Përjashto ato që
-    // janë konvertuar në faturë sepse cashi shfaqet te fatura.
+    // Pagesa argjendari për riparime — cash që del nga arka kur user-i
+    // paguan argjendarin (paid=1). Riparimet me paid=0 janë borxh ndaj
+    // argjendarit dhe s'ndikojnë në arkë deri në momentin e pagesës.
     const repairsRangeRows = await queryAll(
       `SELECT COALESCE(currency, 'LEK') AS cur,
-              COALESCE(price, 0)        AS price,
-              COALESCE(deposit, 0)      AS deposit,
-              COALESCE(paid, 0)         AS paid
+              COALESCE(price, 0)        AS price
          FROM repairs
         WHERE date_received BETWEEN ? AND ?
-          AND converted_invoice_id IS NULL
-          AND (paid = 1 OR COALESCE(deposit, 0) > 0)`,
+          AND paid = 1
+          AND COALESCE(price, 0) > 0`,
       [from, to]
     );
     const repairs_cash = zeroPerCur();
@@ -6771,9 +6862,8 @@ app.get('/api/arka-ditore-range', async (req, res) => {
     for (const r of repairsRangeRows) {
       const c = (r.cur || 'LEK').toUpperCase();
       if (!(c in repairs_cash)) continue;
-      const amt = r.paid ? r.price : r.deposit;
-      if (amt > 0.005) {
-        repairs_cash[c] += amt;
+      if (r.price > 0.005) {
+        repairs_cash[c] += r.price;
         repairs_count_range += 1;
       }
     }
@@ -6784,7 +6874,7 @@ app.get('/api/arka-ditore-range', async (req, res) => {
       cash_from_sales[c] = xhiro_total[c] - paid_bank[c] - paid_pos[c] - amount_due[c];
       if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
-                          + repairs_cash[c]
+                          - repairs_cash[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c];
     }
 
@@ -7074,8 +7164,9 @@ async function syncSafeWithdrawTotals(date) {
 // nga modal-i "Menaxho Veprime" te Kasaforta për admin (fshirja e gabimeve).
 app.get('/api/kasaforta/events/:date', async (req, res) => {
   try {
-    const { date } = req.params;
+    let { date } = req.params;
     if (!date) return res.status(400).json({ error: 'date required' });
+    date = clampSalesDate(req, date);
 
     const withdrawals = await queryAll(
       `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
@@ -7155,7 +7246,13 @@ app.delete('/api/kasaforta/closeout/:date', async (req, res) => {
 
 app.get('/api/safe-withdrawals', async (req, res) => {
   try {
-    const { from, to, limit } = req.query;
+    let { from, to } = req.query;
+    const { limit } = req.query;
+    const salesMin = salesMinDate(req);
+    if (salesMin) {
+      if (!from || from < salesMin) from = salesMin;
+      if (!to   || to   < salesMin) to   = salesMin;
+    }
     const params = [];
     let where = '1=1';
     if (from) { where += ' AND date >= ?'; params.push(from); }
@@ -7611,7 +7708,13 @@ const CURS_BM = ['lek', 'eur', 'usd', 'gbp', 'chf'];
 
 app.get('/api/bank-movements', async (req, res) => {
   try {
-    const { from, to, limit } = req.query;
+    let { from, to } = req.query;
+    const { limit } = req.query;
+    const salesMin = salesMinDate(req);
+    if (salesMin) {
+      if (!from || from < salesMin) from = salesMin;
+      if (!to   || to   < salesMin) to   = salesMin;
+    }
     const params = [];
     let where = '1=1';
     if (from) { where += ' AND date >= ?'; params.push(from); }
@@ -8507,8 +8610,11 @@ app.delete('/api/expense-entries/:id', async (req, res) => {
 // ── Raporti i Shpenzimeve ────────────────────────────────────
 app.get('/api/reports/expenses', async (req, res) => {
   try {
-    const { from, to, category_id, currency, type } = req.query;
+    let { from, to } = req.query;
+    const { category_id, currency, type } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    from = clampSalesDate(req, from);
+    to   = clampSalesDate(req, to);
 
     const params = [from, to];
     let where = `e.date BETWEEN ? AND ?`;

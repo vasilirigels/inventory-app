@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
-import { getUser } from '../lib/auth.js'
+import { getUser, getSalesMinDate } from '../lib/auth.js'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -384,7 +384,15 @@ function ConvertModal({ balance, onClose, onSaved }) {
         <div className="p-6 space-y-4">
           <div>
             <label className="form-label">Data</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-field" />
+            <input type="date" value={date}
+              min={getSalesMinDate() || undefined}
+              onChange={e => {
+                const min = getSalesMinDate()
+                let v = e.target.value
+                if (min && v && v < min) v = min
+                setDate(v)
+              }}
+              className="input-field" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -732,7 +740,15 @@ function DepositModal({ onClose, onSaved }) {
         <div className="p-6 space-y-4">
           <div>
             <label className="form-label">Data</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-field" />
+            <input type="date" value={date}
+              min={getSalesMinDate() || undefined}
+              onChange={e => {
+                const min = getSalesMinDate()
+                let v = e.target.value
+                if (min && v && v < min) v = min
+                setDate(v)
+              }}
+              className="input-field" />
           </div>
 
           <div>

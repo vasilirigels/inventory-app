@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getUser } from '../lib/auth.js'
+import { getUser, getSalesMinDate } from '../lib/auth.js'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
 
@@ -1017,7 +1017,13 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
           <input
             type="date" value={fromDate}
             max={toDate}
-            onChange={e => setFromDate(e.target.value)}
+            min={getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setFromDate(v)
+            }}
             className="input-field"
           />
         </div>
@@ -1025,8 +1031,13 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
           <label className="form-label">Deri më datë</label>
           <input
             type="date" value={toDate}
-            min={fromDate}
-            onChange={e => setToDate(e.target.value)}
+            min={fromDate || getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setToDate(v)
+            }}
             className="input-field"
           />
         </div>

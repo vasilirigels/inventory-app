@@ -72,6 +72,37 @@
            text-white text-sm font-medium rounded-lg transition-colors shadow-sm;
   }
 
+  /* Rol viewer (vetëm shikim): dim + disable të butonave të shkrimit.
+     Nuk prek .btn-secondary (Anulo/Mbyll/Kthe) që përdoret për navigim. */
+  body.viewer-mode .btn-primary,
+  body.viewer-mode .btn-danger,
+  body.viewer-mode .btn-success,
+  body.viewer-mode button[type="submit"],
+  body.viewer-mode input[type="submit"] {
+    opacity: 0.4;
+    pointer-events: none;
+    cursor: not-allowed !important;
+    filter: grayscale(0.5);
+  }
+  /* Inputs/select/textarea të gjitha bëhen read-only vizualisht */
+  body.viewer-mode form input:not([type="search"]):not([readonly]),
+  body.viewer-mode form select:not([readonly]),
+  body.viewer-mode form textarea:not([readonly]) {
+    background-color: rgba(148, 163, 184, 0.08);
+  }
+
+  /* Rreshtat inline-editable të tabelave (p.sh. Produkte Inventar list view)
+     për viewer: klik/tastim i bllokuar në të gjitha inputs/kontrollet.
+     Barkodi (button me këtë title) mbetet i klikueshëm sepse është print. */
+  tr.viewer-row input,
+  tr.viewer-row select,
+  tr.viewer-row textarea,
+  tr.viewer-row button:not([title="Gjenero & Printo Barkod"]) {
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    opacity: 0.75;
+  }
+
   /* ── Cards ── */
   .card {
     @apply bg-white rounded-xl border border-slate-200 shadow-sm p-3 md:p-5

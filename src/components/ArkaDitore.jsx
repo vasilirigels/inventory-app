@@ -174,7 +174,6 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Kesh nga Shitjet',                src: 'cash_from_sales',   sign: '=', color: 'text-emerald-800 dark:text-emerald-200', bg: 'bg-emerald-50/60', detail: 'Xhiro − Bankë − POS − Borxh (përfshin parapagimin nga borxhet)' },
     { label: 'Pagesë Borxhi',                   src: 'debt_repayments',   sign: '+', color: 'text-teal-700',    bg: 'bg-teal-50',    detail: `${data.counts.debt_repayments || 0} pagesa kesh nga fatura të vjetra (jo pjesë e xhiros)` },
     { label: 'Depozita Porosi',                 src: 'porosi_deposits',   sign: '+', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50', detail: `${data.counts.porosi_deposits || 0} depozita kesh nga porositë (custom orders)` },
-    { label: 'Riparimet',                        src: 'repairs_cash',      sign: '+', color: 'text-lime-700 dark:text-lime-300', bg: 'bg-lime-50 dark:bg-lime-900/30', detail: `${data.counts?.repairs || 0} riparime me pagesë (të paguara ose me kapar) — para se të konvertohen në faturë` },
     { label: 'Tërheqje nga Kasaforta',          src: 'safe_to_arka',      sign: '+', color: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-900/30', detail: `${data.counts?.safe_to_arka || 0} tërheqje me destinacion arkë` },
   ]
   const outRows = [
@@ -186,6 +185,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Konvertim Hurdë',                 src: 'hurda_cash',        sign: '−', color: 'text-yellow-700 dark:text-yellow-300',  bg: 'bg-yellow-50 dark:bg-yellow-900/30',  detail: `${data.counts.hurda_purchases || 0} blerje · ${(data.hurda_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g` },
     { label: 'Blerje HAS',                      src: 'has_cash',          sign: '−', color: 'text-amber-800 dark:text-amber-200',   bg: 'bg-amber-50 dark:bg-amber-900/30',   detail: `${data.counts.has_purchases || 0} blerje · ${(data.has_gram_total || 0).toLocaleString('sq-AL', { maximumFractionDigits: 3 })} g HAS` },
     { label: 'Pagesa Punëtorësh',               src: 'worker_payments_cash', sign: '−', color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/30', detail: `${data.counts?.worker_payments || 0} pagesa · vetëm pjesa kesh (pjesa me bankë zbret nga banka, jo nga arka)` },
+    { label: 'Pagesa Argjendari (Riparime)',    src: 'repairs_cash',      sign: '−', color: 'text-lime-700 dark:text-lime-300', bg: 'bg-lime-50 dark:bg-lime-900/30', detail: `${data.counts?.repairs || 0} riparime të paguara — cash që del nga arka drejt argjendarit` },
     { label: 'Lëvizje në Bankë',                src: 'arka_to_bank',      sign: '−', color: 'text-blue-800 dark:text-blue-200', bg: 'bg-blue-50 dark:bg-blue-900/30', detail: `${data.counts?.arka_to_bank || 0} depozita nga arka → bankë (regjistrohen te faqja "Lëvizje e Re Banke")` },
   ]
 

@@ -3,6 +3,7 @@ import { exportToExcel, exportToPdf, formatNum } from '../utils/export.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
+import { getSalesMinDate } from '../lib/auth.js'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -369,7 +370,14 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
               <div className="grid grid-cols-4 gap-3">
                 <div>
                   <label className="form-label">Data</label>
-                  <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                  <input type="date" value={date}
+                    min={getSalesMinDate() || undefined}
+                    onChange={e => {
+                      const min = getSalesMinDate()
+                      let v = e.target.value
+                      if (min && v && v < min) v = min
+                      setDate(v)
+                    }}
                     className="input-field" required />
                 </div>
                 <div>

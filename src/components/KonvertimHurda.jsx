@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
+import { getSalesMinDate } from '../lib/auth.js'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -193,12 +194,23 @@ function HurdaList({ date, onOpen, onCreate, onDelete, refreshKey }) {
         <div>
           <label className="form-label">Nga data</label>
           <input type="date" value={fromDate} max={toDate}
-            onChange={e => setFromDate(e.target.value)} className="input-field" />
+            min={getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setFromDate(v)
+            }} className="input-field" />
         </div>
         <div>
           <label className="form-label">Deri më datë</label>
-          <input type="date" value={toDate} min={fromDate}
-            onChange={e => setToDate(e.target.value)} className="input-field" />
+          <input type="date" value={toDate} min={fromDate || getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setToDate(v)
+            }} className="input-field" />
         </div>
         {rangeActive && (
           <button onClick={() => { setFromDate(date); setToDate(date) }} className="btn-secondary text-xs">
@@ -445,7 +457,14 @@ function HurdaEditor({ date, purchaseId, onClose, onSaved }) {
         </div>
         <div>
           <label className="form-label">Datë</label>
-          <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} className="input-field" />
+          <input type="date" value={purchaseDate}
+            min={getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setPurchaseDate(v)
+            }} className="input-field" />
         </div>
         <div className="col-span-2">
           <SupplierPicker

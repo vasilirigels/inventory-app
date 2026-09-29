@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
+import { getSalesMinDate } from '../lib/auth.js'
 
 // Zgjedhës i zërit të shpenzimit me krijim/editim/fshirje inline.
 // - `➕ Krijo zër të ri` → kthen picker-in në modalitet krijimi
@@ -349,9 +350,15 @@ export default function Shpenzime({ date, onNavigate }) {
             <input
               type="date"
               value={draft.date || ''}
-              onChange={e => setDraft(d => ({ ...d, date: e.target.value }))}
+              onChange={e => {
+                const min = getSalesMinDate()
+                let v = e.target.value
+                if (min && v && v < min) v = min
+                setDraft(d => ({ ...d, date: v }))
+              }}
               className="input-field"
               max={date}
+              min={getSalesMinDate() || undefined}
             />
           </div>
           <div className="md:col-span-2">
@@ -428,7 +435,13 @@ export default function Shpenzime({ date, onNavigate }) {
           <input
             type="date" value={fromDate}
             max={toDate}
-            onChange={e => setFromDate(e.target.value)}
+            min={getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setFromDate(v)
+            }}
             className="input-field"
           />
         </div>
@@ -436,8 +449,13 @@ export default function Shpenzime({ date, onNavigate }) {
           <label className="form-label">Deri më datë</label>
           <input
             type="date" value={toDate}
-            min={fromDate}
-            onChange={e => setToDate(e.target.value)}
+            min={fromDate || getSalesMinDate() || undefined}
+            onChange={e => {
+              const min = getSalesMinDate()
+              let v = e.target.value
+              if (min && v && v < min) v = min
+              setToDate(v)
+            }}
             className="input-field"
           />
         </div>

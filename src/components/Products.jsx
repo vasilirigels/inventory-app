@@ -3,6 +3,7 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 import { loadXLSX } from '../lib/xlsx.js'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
+import { isViewer } from '../lib/auth.js'
 
 // ── Image upload helpers ───────────────────────────────────────────────────────
 function ProductImage({ product, onUploaded }) {
@@ -1003,6 +1004,7 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
 // Fatura Blerje. Ndryshimet ruhen me debounce (500ms) me PUT /api/products/:id.
 // Formula flori aplikohet auto kur ndryshojnë kodi/gram/has_rate/multiplier/sell_rate.
 function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultiplierApply }) {
+  const readOnly = isViewer()
   const initForm = () => ({
     barcode:               p.barcode || '',
     name:                  p.name || '',
@@ -1055,7 +1057,12 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       p.gram, p.has_gram, p.has_rate, p.kodi, p.multiplier, p.sell_rate,
       p.is_promotion, p.promo_discount_pct])
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  // Kur user-i është 'viewer' (read-only), set-i bëhet no-op → të gjitha
+  // inputs në rresht refuzojnë ndryshimet (state s'ndryshon, React revert).
+  const set = (k, v) => {
+    if (readOnly) return
+    setForm(f => ({ ...f, [k]: v }))
+  }
 
   // Formula flori — vetëm çmimi i shitjes:
   //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
@@ -1136,8 +1143,10 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   }
 
   // Debounced auto-save — 600ms pas ndalimit të shkrimit.
+  // Skip-o krejtësisht për rolin viewer që s'triggerohet toast-i i interceptor-it.
   useEffect(() => {
     if (initialMount.current) { initialMount.current = false; return }
+    if (readOnly) return
     const t = setTimeout(performSave, 600)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1146,7 +1155,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   const isDirty = JSON.stringify(form) !== savedSnapshot.current
 
   return (
-    <tr className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors ${isDirty ? 'bg-amber-50/60 dark:bg-amber-900/20' : ''}`}>
+    <tr className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors ${isDirty ? 'bg-amber-50/60 dark:bg-amber-900/20' : ''} ${readOnly ? 'viewer-row' : ''}`}>
       <td className="px-2 py-1 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
         {productNo(p.id)}
         {saving && <span className="ml-1 text-[10px] text-blue-500" title="Duke ruajtur...">⏳</span>}
@@ -1310,7 +1319,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       </td>
       <td className="px-2 py-1">
         <div className="flex items-center justify-center gap-1">
-          {(isDirty || saveError) && (
+          {!readOnly && (isDirty || saveError) && (
             <button onClick={performSave} disabled={saving}
               title={saveError ? `Ruaj sërish (${saveError})` : 'Ruaj ndryshimet e paruajtura'}
               className={`px-1.5 py-0.5 rounded text-white text-xs font-bold disabled:opacity-40 ${saveError ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
@@ -1319,10 +1328,14 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           )}
           <button onClick={() => onBarcode(p)} title="Gjenero & Printo Barkod"
             className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs">🏷️</button>
-          <button onClick={() => onEdit(p)} title="Hap modal-in e plotë"
-            className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs">✎</button>
-          <button onClick={() => onDelete(p)} title="Fshi"
-            className="px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs">✕</button>
+          {!readOnly && (
+            <>
+              <button onClick={() => onEdit(p)} title="Hap modal-in e plotë"
+                className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs">✎</button>
+              <button onClick={() => onDelete(p)} title="Fshi"
+                className="px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs">✕</button>
+            </>
+          )}
         </div>
       </td>
     </tr>
@@ -1663,6 +1676,7 @@ function ProductModal({ product, onClose, onSave }) {
 
 // ── Main Products Page ─────────────────────────────────────────────────────────
 export default function Products() {
+  const readOnly = isViewer()
   const [products, setProducts]     = useState([])
   const [loading, setLoading]       = useState(true)
   const [search, setSearch]         = useState('')
@@ -2000,12 +2014,16 @@ export default function Products() {
         <button onClick={() => setShowExport(true)} className="btn-secondary flex-shrink-0">
           ⬇️ Export
         </button>
-        <button onClick={() => setShowImport(true)} className="btn-secondary flex-shrink-0">
-          📂 Import
-        </button>
-        <button onClick={addNewRow} className="btn-primary flex-shrink-0">
-          + Shto Produkt
-        </button>
+        {!readOnly && (
+          <>
+            <button onClick={() => setShowImport(true)} className="btn-secondary flex-shrink-0">
+              📂 Import
+            </button>
+            <button onClick={addNewRow} className="btn-primary flex-shrink-0">
+              + Shto Produkt
+            </button>
+          </>
+        )}
       </div>
 
       {/* ── Date range filter + Bulk multiplier ── */}
@@ -2121,10 +2139,12 @@ export default function Products() {
               <div className="text-6xl mb-4">💍</div>
               <h3 className="text-xl font-bold text-slate-700 dark:text-slate-200 mb-2">Nuk ka produkte akoma</h3>
               <p className="text-slate-400 dark:text-slate-500 mb-6 text-sm">Shtoni artikuj manualisht ose importoni nga Excel</p>
-              <div className="flex gap-3 justify-center">
-                <button onClick={() => setShowImport(true)} className="btn-secondary">📂 Import Excel</button>
-                <button onClick={() => { setView('list'); addNewRow() }} className="btn-primary">+ Shto Manualisht</button>
-              </div>
+              {!readOnly && (
+                <div className="flex gap-3 justify-center">
+                  <button onClick={() => setShowImport(true)} className="btn-secondary">📂 Import Excel</button>
+                  <button onClick={() => { setView('list'); addNewRow() }} className="btn-primary">+ Shto Manualisht</button>
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -2251,9 +2271,11 @@ export default function Products() {
             </tbody>
           </table>
           </div>
-          <div className="p-3 border-t border-slate-100 dark:border-slate-800">
-            <button onClick={addNewRow} className="btn-secondary text-xs">+ Shto Produkt</button>
-          </div>
+          {!readOnly && (
+            <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={addNewRow} className="btn-secondary text-xs">+ Shto Produkt</button>
+            </div>
+          )}
         </div>
       )}
 

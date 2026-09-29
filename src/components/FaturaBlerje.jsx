@@ -1257,7 +1257,11 @@ function ImportExcelModal({ onClose, onImported, overrideCategoryLabel, forcedCa
           `Kontrollo Excel-in për të hequr dublikatat.${list}`
         )
       }
-      onImported(products, Array.isArray(data.ids) ? data.ids : [])
+      onImported(
+        products,
+        Array.isArray(data.ids) ? data.ids : [],
+        Array.isArray(data.createdIds) ? data.createdIds : [],
+      )
       onClose()
     } catch (err) {
       setError('Gabim gjatë importit: ' + err.message)
@@ -1469,6 +1473,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // vjen njësoj se blerja bëhet në të njëjtën ditë.
   const [hasRate, setHasRate]           = useState(0)
   const [hasRateLoading, setHasRateLoading] = useState(false)
+  // Track ID-të e produkteve të krijuara nga /api/products/import gjatë kësaj
+  // sesioni edit-i. Nëse user-i anulon pa ruajtur, dërgohen te cleanup-orphans
+  // që t'i fshijë (endpoint-i verifikon që janë vërtet pa referencë).
+  const pendingOrphanIds = useRef(new Set())
 
   const loadMaterialCategories = async () => {
     try {
@@ -1888,7 +1896,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
 
   // Map imported products → invoice items. Drop the leading empty placeholder
   // row if the user hasn't touched it, otherwise append.
-  const handleImported = (products, ids) => {
+  const handleImported = (products, ids, createdIds) => {
+    if (Array.isArray(createdIds)) {
+      for (const cid of createdIds) if (Number.isInteger(cid)) pendingOrphanIds.current.add(cid)
+    }
     const newItems = products.map((p, i) => ({
       product_id: ids[i] || null,
       barcode:               p.barcode || '',
@@ -1996,9 +2007,37 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         const e = await res.json().catch(() => ({}))
         throw new Error(e.error || 'Gabim në ruajtje')
       }
+      // Pas ruajtjes së suksesshme, produktet e importuara që u përfshinë te
+      // fatura kanë tashmë referencë; ato që u hoqën nga user-i para ruajtjes
+      // mbeten jetim — cleanup-orphans i fshin vetëm ato pa referencë.
+      if (pendingOrphanIds.current.size > 0) {
+        const ids = Array.from(pendingOrphanIds.current)
+        pendingOrphanIds.current.clear()
+        fetch('/api/products/cleanup-orphans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        }).catch(() => {})
+      }
       onSaved?.()
     } catch (e) { alert(e.message) }
     finally { setSaving(false) }
+  }
+
+  // Kur user-i mbyll editor-in pa ruajtur (Anulo / ← Mbrapa / ×), fshi produktet
+  // e krijuara nga import-i që s'u lidhën me faturë. Endpoint-i i verifikon
+  // dhe s'i prek ato që kanë ndonjë referencë tjetër.
+  const handleClose = () => {
+    if (pendingOrphanIds.current.size > 0) {
+      const ids = Array.from(pendingOrphanIds.current)
+      pendingOrphanIds.current.clear()
+      fetch('/api/products/cleanup-orphans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      }).catch(() => {})
+    }
+    onClose?.()
   }
 
   if (loading) {
@@ -2009,7 +2048,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className="btn-secondary">← Mbrapa</button>
+          <button onClick={handleClose} className="btn-secondary">← Mbrapa</button>
           <div>
             <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
               {invoiceId
@@ -2020,7 +2059,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={onClose} className="btn-secondary">Anulo</button>
+          <button onClick={handleClose} className="btn-secondary">Anulo</button>
           <button onClick={save} disabled={saving} className="btn-primary disabled:opacity-50 flex items-center gap-2">
             {saving ? (
               <>

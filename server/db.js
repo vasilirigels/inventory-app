@@ -979,6 +979,24 @@ const MIGRATIONS = [
   "ALTER TABLE repairs ADD COLUMN deposit REAL DEFAULT 0",
   "ALTER TABLE repairs ADD COLUMN converted_invoice_id INTEGER",
   "CREATE INDEX IF NOT EXISTS idx_repairs_product ON repairs(product_id)",
+
+  // Emri i argjendarit që bën punën e riparimit. Riparimi është shpenzim
+  // (para që dalin nga arka drejt argjendarit), jo të hyra. `paid=1` shënon
+  // që argjendari është shlyer; `paid=0` = borxh ndaj argjendarit.
+  "ALTER TABLE repairs ADD COLUMN argjendar_name TEXT DEFAULT ''",
+  "CREATE INDEX IF NOT EXISTS idx_repairs_argjendar ON repairs(argjendar_name)",
+
+  // Regjistër i argjendarëve — krijohet një herë nga user-i dhe pastaj përdoret
+  // nga dropdown-i te forma e riparimit. Emri kopjohet te repairs.argjendar_name
+  // si snapshot (rename → update auto edhe te riparimet ekzistuese).
+  `CREATE TABLE IF NOT EXISTS argjendars (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    phone TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
 ];
 
 async function initDB() {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { clearSession } from '../lib/auth.js'
 import { useUnreadCommentsCount } from '../lib/unreadComments.js'
 import { useTheme } from '../lib/theme.js'
@@ -184,6 +184,27 @@ export default function Layout({
   canGoBack, onGoBack,
 }) {
   const isSales = user?.role === 'sales'
+  const isViewer = user?.role === 'viewer'
+  // Kufi 30 ditë për shitësin — date navi te header s'lejon më prapa se kaq,
+  // dhe butoni "‹" bllokohet kur data është në minimum.
+  const salesMinDate = (() => {
+    if (!isSales) return null
+    const d = new Date()
+    d.setDate(d.getDate() - 29)
+    return d.toISOString().split('T')[0]
+  })()
+  const canGoPrevDay = !salesMinDate || currentDate > salesMinDate
+  const clampedDateChange = (v) => {
+    if (salesMinDate && v && v < salesMinDate) v = salesMinDate
+    onDateChange(v)
+  }
+
+  // Toggle `viewer-mode` class te body që CSS-i te index.css të dim-ojë
+  // butonat e shkrimit (btn-primary, btn-danger, btn-success, [type=submit]).
+  useEffect(() => {
+    document.body.classList.toggle('viewer-mode', isViewer)
+    return () => document.body.classList.remove('viewer-mode')
+  }, [isViewer])
   const rawNav = isSales
     ? NAV_GROUPS
         .map(g => ({
@@ -406,14 +427,17 @@ export default function Layout({
             {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && !PAGES_WITH_OWN_DATE_FILTER.has(page) && (
               <div className="hidden lg:flex items-center gap-1.5">
                 <button
-                  onClick={() => onDateChange(prevDay(currentDate))}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm"
+                  onClick={() => canGoPrevDay && onDateChange(prevDay(currentDate))}
+                  disabled={!canGoPrevDay}
+                  title={!canGoPrevDay ? `Kufi ${30} ditë për shitësin` : undefined}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                 >‹</button>
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200 px-1">{dateLabel}</span>
                 <input
                   type="date"
                   value={currentDate}
-                  onChange={e => onDateChange(e.target.value)}
+                  min={salesMinDate || undefined}
+                  onChange={e => clampedDateChange(e.target.value)}
                   className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
                 />
                 <button
@@ -471,13 +495,16 @@ export default function Layout({
         {(parentOfPage || ['arka'].includes(page)) && page !== 'permbledhese' && !PAGES_WITH_OWN_DATE_FILTER.has(page) && (
           <div className="lg:hidden bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 px-3 py-2 flex items-center gap-1.5 flex-wrap flex-shrink-0">
             <button
-              onClick={() => onDateChange(prevDay(currentDate))}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm"
+              onClick={() => canGoPrevDay && onDateChange(prevDay(currentDate))}
+              disabled={!canGoPrevDay}
+              title={!canGoPrevDay ? `Kufi ${30} ditë për shitësin` : undefined}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
             >‹</button>
             <input
               type="date"
               value={currentDate}
-              onChange={e => onDateChange(e.target.value)}
+              min={salesMinDate || undefined}
+              onChange={e => clampedDateChange(e.target.value)}
               className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 flex-1 min-w-[130px]"
             />
             <button

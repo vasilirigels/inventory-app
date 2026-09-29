@@ -11,7 +11,7 @@
 //   minFrom         — kufizim minimal i "Nga" (YYYY-MM-DD); përdoret p.sh. për shitësit
 
 import { memo } from 'react'
-import { getUser } from '../lib/auth.js'
+import { getUser, getSalesMinDate, SALES_DAYS_BACK } from '../lib/auth.js'
 
 // Data lokale (jo UTC) — që preseti "Sot" të mos anashkalojë ditën në Shqipëri (UTC+1/+2).
 function toISOLocal(d) {
@@ -25,7 +25,10 @@ function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, com
   // Shitësit s'kanë akses te periudha më e gjatë se 30 ditë.
   const isSales = getUser()?.role === 'sales'
   const longPresetsDisabled = isSales
-  const disabledTitle = isSales ? 'I çaktivizuar për shitësin (kufi 30 ditë)' : undefined
+  const disabledTitle = isSales ? `I çaktivizuar për shitësin (kufi ${SALES_DAYS_BACK} ditë)` : undefined
+  // Për shitësin, kufi automatik: input-i "Nga" s'lejon datë më të vjetër se
+  // 30 ditë. Caller-ët e tjerë mund të mbivendosin me minFrom manualisht.
+  const effectiveMinFrom = minFrom || getSalesMinDate()
   const setRange = (preset) => {
     const t = new Date()
     if (preset === 'today')      return onChange({ from: toISOLocal(t), to: toISOLocal(t) })
@@ -66,14 +69,22 @@ function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, com
       </div>
       <div>
         <label className="form-label">Nga</label>
-        <input type="date" value={from || ''} max={to || undefined} min={minFrom || undefined}
-          onChange={e => onChange({ from: e.target.value, to })}
+        <input type="date" value={from || ''} max={to || undefined} min={effectiveMinFrom || undefined}
+          onChange={e => {
+            let v = e.target.value
+            if (effectiveMinFrom && v && v < effectiveMinFrom) v = effectiveMinFrom
+            onChange({ from: v, to })
+          }}
           className="input-field" />
       </div>
       <div>
         <label className="form-label">Deri</label>
-        <input type="date" value={to || ''} min={from || minFrom || undefined}
-          onChange={e => onChange({ from, to: e.target.value })}
+        <input type="date" value={to || ''} min={from || effectiveMinFrom || undefined}
+          onChange={e => {
+            let v = e.target.value
+            if (effectiveMinFrom && v && v < effectiveMinFrom) v = effectiveMinFrom
+            onChange({ from, to: v })
+          }}
           className="input-field" />
       </div>
       <div className="flex flex-wrap gap-1.5">
