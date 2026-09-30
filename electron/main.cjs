@@ -639,11 +639,12 @@ function setupAutoUpdate() {
   // dezaktivizojmë tërësisht dhe përdorim vetëm updater-in tonë (si te macOS).
   const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR;
   if (isPortable) {
-    // Auto-check i çaktivizuar për portable me kërkesë të user-it: update-i
-    // ndodh VETËM kur user-i klikon menu "Kontrollo për Update" (thërret
-    // checkForUpdatePortable(true) manualisht). Nuk ka polling në startup
-    // as çdo orë — deploy-t nuk pushtojnë përdoruesin me dialog-e.
-    updaterLog(`Portable mode — auto-check DISABLED; update vetëm nga menu`);
+    // Auto-check në startup + çdo orë. checkForUpdatePortable() shfaq popup
+    // konfirmimi para se të shkarkojë — user-i vendos "Shkarko dhe instalo"
+    // ose "Më vonë". Nëse s'ka update, s'del dialog (manual=false).
+    updaterLog(`Portable mode — custom updater init, aktuali: v${app.getVersion()}`);
+    checkForUpdatePortable(false);
+    setInterval(() => checkForUpdatePortable(false), 60 * 60 * 1000);
     return;
   }
   autoUpdater.logger = { info: updaterLog, warn: updaterLog, error: updaterLog, debug: () => {} };
