@@ -3,7 +3,7 @@ import { exportToExcel, exportToPdf, formatNum } from '../utils/export.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
-import { getSalesMinDate } from '../lib/auth.js'
+import { getSalesMinDate, isSales } from '../lib/auth.js'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -847,15 +847,17 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
             {onlyPaid ? 'Faturat e Paguara (Historik)' : 'Faturat e Papaguara'} ({invoices.length})
           </h3>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onlyPaid}
-                onChange={e => onToggleOnlyPaid?.(e.target.checked)}
-                className="rounded"
-              />
-              Historik — vetëm të paguarat
-            </label>
+            {!isSales() && (
+              <label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={onlyPaid}
+                  onChange={e => onToggleOnlyPaid?.(e.target.checked)}
+                  className="rounded"
+                />
+                Historik — vetëm të paguarat
+              </label>
+            )}
             <label className="text-xs text-slate-600 dark:text-slate-300 font-medium">Rendit:</label>
             <select
               value={sortBy}
@@ -1020,7 +1022,7 @@ export default function DetyrimetKlienti({ onNavigate }) {
 
   return (
     <div className="space-y-4">
-      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} emptyForAll hint="Boshi = i gjithë historiku" />
+      <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} emptyForAll noSalesLimit hint="Boshi = i gjithë historiku" />
       <ClientSearchBox
         value={selected}
         onPick={setSelected}

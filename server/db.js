@@ -718,6 +718,20 @@ const MIGRATIONS = [
   "CREATE INDEX IF NOT EXISTS idx_purchase_payments_purchase ON purchase_payments(purchase_id)",
   "CREATE INDEX IF NOT EXISTS idx_purchase_payments_date ON purchase_payments(date)",
 
+  // Turso row-read savings — indekse për match ekzakt (nipt/barcode) që para
+  // shtoheshin bëheshin full table scan në çdo thirrje të search-it, detyrimeve,
+  // apo faturave. LIKE '%q%' me wildcard në fillim s'e përdor dot indeksin, por
+  // JOIN/WHERE me barazi po (p.sh. /api/client-debts?nipt=..., /api/products
+  // lookup me barkod, etj.). Cost një-herë në startup.
+  "CREATE INDEX IF NOT EXISTS idx_invoices_customer_nipt ON invoices(customer_nipt)",
+  "CREATE INDEX IF NOT EXISTS idx_invoices_cancelled_date ON invoices(cancelled, date)",
+  "CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)",
+  "CREATE INDEX IF NOT EXISTS idx_clients_nipt ON clients(nipt)",
+  "CREATE INDEX IF NOT EXISTS idx_suppliers_nipt ON suppliers(nipt)",
+  "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supplier_nipt ON purchase_invoices(supplier_nipt)",
+  "CREATE INDEX IF NOT EXISTS idx_invoice_items_barcode ON invoice_items(barcode)",
+  "CREATE INDEX IF NOT EXISTS idx_invoice_items_product ON invoice_items(product_id)",
+
   // Kategoritë e materialit për Fatura Blerje — më parë hardcoded (flori/
   // diamant/ora). Tani CRUD me tabelë të veçantë. Slug ruhet te
   // products.material dhe label te products.category kur zgjidhet një kategori

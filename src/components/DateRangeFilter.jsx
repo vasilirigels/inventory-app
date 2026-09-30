@@ -9,6 +9,8 @@
 //   compact         — variant më i vogël pa hapësirë vizuale
 //   hint            — tekst i vogël nën titullin, p.sh. "Ndikon: grafiku, faturat"
 //   minFrom         — kufizim minimal i "Nga" (YYYY-MM-DD); përdoret p.sh. për shitësit
+//   noSalesLimit    — nëse true, hiqet kufiri 30-ditor për shitësin (p.sh. Borxhe Klientesh
+//                     ku shitësi duhet të shohë historikun e plotë të detyrimeve).
 
 import { memo } from 'react'
 import { getUser, getSalesMinDate, SALES_DAYS_BACK } from '../lib/auth.js'
@@ -21,14 +23,16 @@ function toISOLocal(d) {
   return `${y}-${m}-${dd}`
 }
 
-function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, compact = false, hint, minFrom }) {
-  // Shitësit s'kanë akses te periudha më e gjatë se 30 ditë.
+function DateRangeFilter({ from, to, onChange, loading, emptyForAll = false, compact = false, hint, minFrom, noSalesLimit = false }) {
+  // Shitësit s'kanë akses te periudha më e gjatë se 30 ditë, përveç faqeve që
+  // e çaktivizojnë kufirin me `noSalesLimit` (p.sh. Borxhe Klientesh).
   const isSales = getUser()?.role === 'sales'
-  const longPresetsDisabled = isSales
-  const disabledTitle = isSales ? `I çaktivizuar për shitësin (kufi ${SALES_DAYS_BACK} ditë)` : undefined
+  const longPresetsDisabled = isSales && !noSalesLimit
+  const disabledTitle = longPresetsDisabled ? `I çaktivizuar për shitësin (kufi ${SALES_DAYS_BACK} ditë)` : undefined
   // Për shitësin, kufi automatik: input-i "Nga" s'lejon datë më të vjetër se
-  // 30 ditë. Caller-ët e tjerë mund të mbivendosin me minFrom manualisht.
-  const effectiveMinFrom = minFrom || getSalesMinDate()
+  // 30 ditë. Caller-ët e tjerë mund të mbivendosin me minFrom manualisht,
+  // ose ta heqin fare kufirin me noSalesLimit.
+  const effectiveMinFrom = minFrom || (noSalesLimit ? undefined : getSalesMinDate())
   const setRange = (preset) => {
     const t = new Date()
     if (preset === 'today')      return onChange({ from: toISOLocal(t), to: toISOLocal(t) })

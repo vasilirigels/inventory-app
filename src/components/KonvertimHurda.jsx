@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
-import { getSalesMinDate } from '../lib/auth.js'
+import { getSalesMinDate, isSales } from '../lib/auth.js'
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -268,7 +268,9 @@ function HurdaList({ date, onOpen, onCreate, onDelete, refreshKey }) {
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1.5">
                         <button onClick={() => onOpen(p.id)} className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 text-xs font-medium">Hap</button>
-                        <button onClick={() => onDelete(p.id, p.purchase_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                        {!isSales() && (
+                          <button onClick={() => onDelete(p.id, p.purchase_no)} className="px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium">Fshi</button>
+                        )}
                       </div>
                     </td>
                   </tr>

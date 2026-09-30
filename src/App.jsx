@@ -94,6 +94,8 @@ const SALES_ALLOWED_PAGES = new Set([
   'fatura-shitje',
   'shitje-online',
   'kthime-online',
+  'kthim-produkt',
+  'porosi',
   'produkte-promocion',
   'arka-ditore',
   'arka-kasaforta',

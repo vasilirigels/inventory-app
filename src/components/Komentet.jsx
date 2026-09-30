@@ -48,6 +48,12 @@ export default function Komentet() {
   const scrollRef = useRef(null)
   const wasNearBottom = useRef(true)
 
+  // Id-ja më e madhe që kemi tërhequr — përdoret nga poll i lehtë për të
+  // vendosur nëse duhet të bëjmë fetch të plotë. Kursen Turso reads: në vend
+  // të 500 rreshtave çdo 10s, tërhiqet 1 rresht (MAX id) çdo 15s dhe fetch i
+  // plotë vetëm kur ka koment të ri.
+  const knownMaxId = useRef(0)
+
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/comments?limit=500')
@@ -57,6 +63,7 @@ export default function Komentet() {
       // Sapo user hap faqen ose merr mesazh të ri ndërsa është këtu, e shënojmë
       // id-në më të lartë si të lexuar — badge-i i kuq pastrohet menjëherë.
       const maxId = arr.reduce((m, c) => Math.max(m, c.id), 0)
+      knownMaxId.current = maxId
       if (maxId > 0) setLastReadCommentId(maxId)
     } catch (_) {
       setMessages([])
@@ -68,12 +75,21 @@ export default function Komentet() {
   useEffect(() => { load() }, [load])
   useRealtimeSync('comments', load)
 
-  // Poll periodik — WS lokal nuk sheh komente të postuara nga PC të tjera
-  // (secili PC ka serverin e vet Express); polling e mbush këtë hendek pa
-  // ndryshuar arkitekturën. 10s është mjaftueshëm i shpejtë për një chat.
+  // Poll i lehtë çdo 30s — pyet vetëm MAX(id). Fetch të plotë (500 rreshta)
+  // vetëm kur MAX(id) ndryshon. WS lokal nuk sheh komente nga PC të tjera;
+  // ky poll e mbush hendekun pa djegur row-reads në Turso. Intervalin e mbajmë
+  // të njëjtë me useUnreadCommentsCount (30s) që të mos ketë dyfishim thirrjesh.
   useEffect(() => {
-    const id = setInterval(load, 10000)
-    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    const pollLight = async () => {
+      try {
+        const res = await fetch('/api/comments/latest-id')
+        if (!res.ok) return
+        const { id } = await res.json()
+        if ((id || 0) > knownMaxId.current) load()
+      } catch (_) { /* offline */ }
+    }
+    const id = setInterval(pollLight, 30000)
+    const onVisible = () => { if (document.visibilityState === 'visible') pollLight() }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
       clearInterval(id)

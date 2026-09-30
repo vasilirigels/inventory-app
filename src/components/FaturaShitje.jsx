@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getUser, getSalesMinDate } from '../lib/auth.js'
+import { getUser, getSalesMinDate, isSales } from '../lib/auth.js'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
 
@@ -1482,6 +1482,10 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   const [allRates, setAllRates]       = useState({ LEK: 1 })
 
   const isAdmin = getUser()?.role === 'admin'
+  // Shitësi s'lejohet të shtojë ose të heqë artikuj në një faturë ekzistuese;
+  // ka të drejtë t'i modifikojë vetëm në krijim. Kufizimi backend përforcohet
+  // nga bllokimi i PUT /api/invoices/:id për rolin 'sales'.
+  const lockItemChanges = isSales() && !!invoiceId
   const today = new Date().toISOString().split('T')[0]
 
   // Initial load: existing invoice OR fresh new invoice
@@ -2038,17 +2042,21 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                             </td>
                             <td className="px-2 py-1 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(inInv)}</td>
                             <td className="px-1 py-1 text-center">
-                              <button type="button" onClick={() => removeSplit(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
+                              {!lockItemChanges && (
+                                <button type="button" onClick={() => removeSplit(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
+                              )}
                             </td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
-                  <div className="p-2 border-t border-slate-100 dark:border-slate-800 flex gap-2">
-                    <button type="button" onClick={() => addSplit('cash')} className="btn-secondary text-xs">+ Shto Cash</button>
-                    <button type="button" onClick={() => addSplit('bank')} className="btn-secondary text-xs">+ Shto POS/Bankë</button>
-                  </div>
+                  {!lockItemChanges && (
+                    <div className="p-2 border-t border-slate-100 dark:border-slate-800 flex gap-2">
+                      <button type="button" onClick={() => addSplit('cash')} className="btn-secondary text-xs">+ Shto Cash</button>
+                      <button type="button" onClick={() => addSplit('bank')} className="btn-secondary text-xs">+ Shto POS/Bankë</button>
+                    </div>
+                  )}
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
@@ -2253,7 +2261,9 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                       )}
                     </td>
                     <td className="px-1 py-1 text-center">
-                      <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
+                      {!lockItemChanges && (
+                        <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-sm" title="Hiq">✕</button>
+                      )}
                     </td>
                   </tr>
                 )
@@ -2268,12 +2278,14 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
             </tfoot>
           </table>
         </div>
-        <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 flex-wrap">
-          <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
-          <button onClick={openGiftPicker} className="btn-secondary text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-300 dark:border-rose-800">
-            🎁 Shto Dhuratë
-          </button>
-        </div>
+        {!lockItemChanges && (
+          <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 flex-wrap">
+            <button onClick={addItem} className="btn-secondary text-xs">+ Shto Artikull</button>
+            <button onClick={openGiftPicker} className="btn-secondary text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-300 dark:border-rose-800">
+              🎁 Shto Dhuratë
+            </button>
+          </div>
+        )}
       </div>
 
       {showGiftPicker && (

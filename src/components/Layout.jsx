@@ -11,6 +11,8 @@ const SALES_ALLOWED_PAGES = new Set([
   'fatura-shitje',        // krijim fature shitjeje
   'shitje-online',        // shitje brenda stafit
   'kthime-online',        // kthime (diamante/flori)
+  'kthim-produkt',        // Kthim produkti nga faturë shitjeje
+  'porosi',               // Porosi (regjistrim + statusi)
   // Produkte
   'produkte-promocion',   // Promocionet (view only)
   // Arka

@@ -498,14 +498,12 @@ const SALES_WRITE_ALLOW = [
   { method: 'POST', pattern: /^\/api\/invoices\/\d+\/payments$/ },
   // Update i statusit të porosisë online — quick-action nga lista
   { method: 'PATCH', pattern: /^\/api\/invoices\/\d+\/order-status$/ },
-  // Shpenzime ditore — shitësi mund të shtojë, editojë dhe fshijë
-  // shpenzime dhe zëra (veprim i përditshëm në dyqan, jo administrativ).
-  { method: 'POST',   pattern: /^\/api\/expense-entries$/ },
-  { method: 'PUT',    pattern: /^\/api\/expense-entries\/\d+$/ },
-  { method: 'DELETE', pattern: /^\/api\/expense-entries\/\d+$/ },
-  { method: 'POST',   pattern: /^\/api\/expense-categories$/ },
-  { method: 'PUT',    pattern: /^\/api\/expense-categories\/\d+$/ },
-  { method: 'DELETE', pattern: /^\/api\/expense-categories\/\d+$/ },
+  // Shpenzime ditore — shitësi mund të shtojë dhe editojë; fshirjen e bën
+  // vetëm admin (rrisk kontabël: një zë i fshirë humbet gjurmimin).
+  { method: 'POST', pattern: /^\/api\/expense-entries$/ },
+  { method: 'PUT',  pattern: /^\/api\/expense-entries\/\d+$/ },
+  { method: 'POST', pattern: /^\/api\/expense-categories$/ },
+  { method: 'PUT',  pattern: /^\/api\/expense-categories\/\d+$/ },
   // Shpenzime Marketingu — të njëjtin flow si shpenzimet
   { method: 'POST', pattern: /^\/api\/marketing-entries$/ },
   { method: 'POST', pattern: /^\/api\/marketing-categories$/ },
@@ -520,6 +518,14 @@ const SALES_WRITE_ALLOW = [
   // Arka Ditore — gjendja fizike + mbyllja e ditës (veprim ditor i shitësit)
   { method: 'POST', pattern: /^\/api\/arka-ditore\/[\d-]+\/physical$/ },
   { method: 'POST', pattern: /^\/api\/arka-ditore\/[\d-]+\/closeout$/ },
+  // Porosi — shitësi mund të krijojë, editojë, shtojë depozitë dhe dorëzojë.
+  // Fshirjen e porosisë ose depozitës e bën vetëm admin (rregull kontabël).
+  { method: 'POST',   pattern: /^\/api\/porosi$/ },
+  { method: 'PUT',    pattern: /^\/api\/porosi\/\d+$/ },
+  { method: 'POST',   pattern: /^\/api\/porosi\/\d+\/image$/ },
+  { method: 'DELETE', pattern: /^\/api\/porosi\/\d+\/image$/ },
+  { method: 'POST',   pattern: /^\/api\/porosi\/\d+\/deposits$/ },
+  { method: 'POST',   pattern: /^\/api\/porosi\/\d+\/deliver$/ },
 ];
 
 // Komentet / chat — të gjithë userat (admin & sales) mund të shkruajnë,
@@ -530,11 +536,14 @@ const SALES_WRITE_ALLOW = [
 app.get('/api/comments', async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    const rows = await queryAll(
+    // Cache 30s: multi-PC scenario — 3 përdorues hapin faqen njëkohësisht → 1
+    // query Turso në vend të 3. Invalidohet automatikisht kur postohet ose
+    // fshihet një koment (rule më poshtë te CACHE_INVALIDATION_RULES).
+    const rows = await cached(`comments:limit:${limit}`, 30_000, () => queryAll(
       `SELECT id, user_id, username, role, body, created_at
        FROM comments ORDER BY id ASC LIMIT ?`,
       [limit],
-    );
+    ));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -617,7 +626,11 @@ app.get('/api/repairs', async (req, res) => {
     const sql = `${REPAIR_SELECT}
                  ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
                  ORDER BY r.id DESC LIMIT 500`;
-    const rows = await queryAll(sql, args);
+    // Cache 60s — thirret në çdo hapje të faqes Riparimet. Full scan me JOIN te
+    // products = 500+ reads/thirrje. Invalidohet automatikisht kur ndryshohet
+    // një riparim (rule i 'repairs').
+    const cacheKey = `repairs:${status || 'all'}:${argjendar || ''}:${q || ''}`;
+    const rows = await cached(cacheKey, 60_000, () => queryAll(sql, args));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -930,10 +943,15 @@ app.use('/api', (req, res, next) => {
 // Prekjet indirekte (purchase-invoices krijojnë/përditësojnë produkte,
 // invoices ulin stokun) invalidojnë cache-in 'products'.
 const CACHE_INVALIDATION_RULES = [
-  { pathRe: /^\/api\/(products|purchase-invoices|invoices|magazina-|flete-|hurda-purchases|has-purchases)/, keys: ['products'] },
+  { pathRe: /^\/api\/(products|purchase-invoices|invoices|magazina-|flete-|hurda-purchases|has-purchases)/, keys: ['products', 'client-debts-summary', 'supplier-debts-summary', 'invoices-by-range', 'report', 'yearly', 'monthly'] },
+  { pathRe: /^\/api\/invoice-payments/,   keys: ['client-debts-summary', 'invoices-by-range'] },
+  { pathRe: /^\/api\/purchase-payments/,  keys: ['supplier-debts-summary'] },
   { pathRe: /^\/api\/expense-categories/, keys: ['expense-categories'] },
+  { pathRe: /^\/api\/expense-entries/,    keys: ['report', 'yearly', 'monthly'] },
   { pathRe: /^\/api\/suppliers/,          keys: ['suppliers'] },
   { pathRe: /^\/api\/clients/,            keys: ['clients'] },
+  { pathRe: /^\/api\/comments/,           keys: ['comments'] },
+  { pathRe: /^\/api\/repairs/,            keys: ['repairs'] },
 ];
 app.use('/api', (req, res, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
@@ -1442,6 +1460,12 @@ app.get('/api/report', async (req, res) => {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
 
+    // Cache 5 min — raporti mbi periudhë historike ndryshon rrallë brenda ditës.
+    // Invalidohet automatikisht kur ndryshohet një faturë, pagesë, ose shpenzim.
+    const cacheKey = `report:${from}:${to}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
+
     const recs   = await queryAll('SELECT * FROM daily_records WHERE date BETWEEN ? AND ?', [from, to]);
     const sales  = await queryAll('SELECT * FROM sales WHERE date BETWEEN ? AND ?', [from, to]);
     const debts  = await queryAll('SELECT * FROM customer_debts WHERE date BETWEEN ? AND ?', [from, to]);
@@ -1514,7 +1538,7 @@ app.get('/api/report', async (req, res) => {
     });
     const buckets = Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date));
 
-    res.json({
+    const payload = {
       from, to,
       days_with_data: recs.length,
       xhiro,
@@ -1534,7 +1558,9 @@ app.get('/api/report', async (req, res) => {
         kthim_borxhi_lek: kthimBorxhi.lek, kthim_borxhi_eur: kthimBorxhi.eur, kthim_borxhi_usd: kthimBorxhi.usd, kthim_borxhi_gbp: kthimBorxhi.gbp, kthim_borxhi_chf: kthimBorxhi.chf,
       },
       buckets,
-    });
+    };
+    cache.set(`report:${from}:${to}`, payload, 5 * 60_000);
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1546,6 +1572,11 @@ app.get('/api/report', async (req, res) => {
 app.get('/api/yearly/:year', async (req, res) => {
   try {
     const { year } = req.params;
+    // Cache 5 min — 12 muaj × 3 query = 36 query. Vitet e kaluara s'ndryshojnë,
+    // viti aktual ndryshon me faturë të re (invalidim automatik).
+    const cacheKey = `yearly:${year}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
     const months = [];
     for (let m = 1; m <= 12; m++) {
       const prefix = `${year}-${String(m).padStart(2, '0')}`;
@@ -1614,6 +1645,7 @@ app.get('/api/yearly/:year', async (req, res) => {
         safe_withdraw_lek: sumD('safe_withdraw_lek'), safe_withdraw_eur: sumD('safe_withdraw_eur'),
       });
     }
+    cache.set(`yearly:${year}`, months, 5 * 60_000);
     res.json(months);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1666,7 +1698,12 @@ app.get('/api/products/search', async (req, res) => {
     if (q) params.push(like, like, like, like);
     if (q) params.push(q, q, q);
     if (exceptRepairId) params.push(exceptRepairId);
-    const rows = await queryAll(
+    // Cache 60s — kërkim me LIKE '%q%' është i shtrenjtë (full scan). Multi-PC:
+    // kur dy përdorues kërkojnë të njëjtin term brenda 60s, i dyti merr nga
+    // memoria. Invalidohet automatikisht kur ndryshojnë produktet (rule i
+    // 'products' fshin edhe çelësat me prefiksin 'products:').
+    const cacheKey = `products:search:${q}:${giftsOnly ? 1 : 0}:${exceptRepairId}`;
+    const rows = await cached(cacheKey, 60_000, () => queryAll(
       `SELECT id, name, sku, barcode, category, sell_price, cost_price, vat_rate, stock, image_path, gram,
               is_promotion, promo_discount_pct, serial_no, purchase_price_no_vat,
               has_gram, has_currency, has_rate,
@@ -1677,7 +1714,7 @@ app.get('/api/products/search', async (req, res) => {
         ${orderClause}
         LIMIT 30`,
       params
-    );
+    ));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2281,7 +2318,12 @@ app.get('/api/invoices/by-range', async (req, res) => {
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
     const gram = salesGramSubquery(material);
-    const rows = await queryAll(
+    // Cache 60s — Dashboard e thërret shpesh me të njëjtat parametra për 3-5 PC.
+    // Query ka 4 subquery të korreluar për çdo faturë (i shtrenjtë). Invalidohet
+    // automatikisht kur bëhet ndryshim te invoices, invoice_items, invoice_payments,
+    // invoice_payment_splits (rule i 'invoices-by-range' më poshtë).
+    const cacheKey = `invoices-by-range:${from}:${to}:${material || ''}:${category || ''}:${online || ''}:${status || ''}`;
+    const rows = await cached(cacheKey, 60_000, () => queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid,
          (SELECT GROUP_CONCAT(barcode, '|') FROM invoice_items WHERE invoice_id = i.id AND barcode IS NOT NULL AND barcode <> '') AS barcodes,
@@ -2291,7 +2333,7 @@ app.get('/api/invoices/by-range', async (req, res) => {
          ${salesCostSubquery()}
        FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ${onl.sql} ORDER BY i.date ASC, i.id ASC`,
       [...gram.params, from, to, ...filter.params, ...onl.params]
-    );
+    ));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3229,12 +3271,28 @@ app.get('/api/client-debts', async (req, res) => {
     // Any invoice with unpaid balance counts as debt — pavarësisht payment_method.
     // Tolerance 0.005 to guard against float residuals leaving 0.00... amount_due behind.
     // onlyPaid=1 → shfaq VETËM faturat e paguara plotësisht (historik).
+    // Refaktor për Turso row-reads: në vend të 3 subquery-ve të korreluar për
+    // çdo rresht fature (last_payment_date, last_payment_amount, payment_count),
+    // përdorim një CTE që agregron payments-in një herë të vetme dhe pastaj
+    // LEFT JOIN sipas invoice_id. Rezultati identik në formë; kosto e reads
+    // bie ~3× (nga 3N në 1 skanim të indeksuar mbi invoice_payments).
     let sql = `
+      WITH pay_agg AS (
+        SELECT invoice_id, date, amount, payment_count
+        FROM (
+          SELECT invoice_id, date, amount, id,
+                 COUNT(*) OVER (PARTITION BY invoice_id) AS payment_count,
+                 ROW_NUMBER() OVER (PARTITION BY invoice_id ORDER BY date DESC, id DESC) AS rn
+          FROM invoice_payments
+        )
+        WHERE rn = 1
+      )
       SELECT i.*,
-        (SELECT date   FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
-        (SELECT amount FROM invoice_payments WHERE invoice_id = i.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
-        (SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = i.id) AS payment_count
+        p.date   AS last_payment_date,
+        p.amount AS last_payment_amount,
+        COALESCE(p.payment_count, 0) AS payment_count
       FROM invoices i
+      LEFT JOIN pay_agg p ON p.invoice_id = i.id
       WHERE COALESCE(i.cancelled, 0) = 0`;
     if (onlyPaid) {
       sql += ` AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) <= 0.005
@@ -3353,7 +3411,12 @@ app.get('/api/client-debts/summary', async (req, res) => {
         customer_name COLLATE NOCASE ASC,
         customer_nipt ASC
     `;
-    res.json(await queryAll(sql, params));
+    // Cache 60s — thirret nga Dashboard-i te çdo hapje dhe nga Detyrime Klienti.
+    // Multi-PC: 3 PC hapin Dashboard-in → 1 skanim invoices në vend të 3.
+    // Invalidohet automatikisht kur bëhen ndryshime te invoices/invoice-payments.
+    const cacheKey = `client-debts-summary:${onlyDebt ? 1 : 0}:${from || ''}:${to || ''}`;
+    const rows = await cached(cacheKey, 60_000, () => queryAll(sql, params));
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3392,12 +3455,14 @@ app.get('/api/suppliers/search', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
     const like = `%${q}%`;
-    res.json(await queryAll(
+    // Cache 60s — invalidohet automatikisht kur ndryshojnë furnitorët.
+    const rows = await cached(`suppliers:search:${q}`, 60_000, () => queryAll(
       `SELECT * FROM suppliers
         WHERE nipt LIKE ? OR name LIKE ? OR phone LIKE ?
         ORDER BY name COLLATE NOCASE ASC LIMIT 12`,
       [like, like, like]
     ));
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -5679,7 +5744,11 @@ app.get('/api/supplier-debts/summary', async (req, res) => {
         supplier_name COLLATE NOCASE ASC,
         supplier_nipt ASC
     `;
-    res.json(await queryAll(sql, params));
+    // Cache 60s — thirret nga Dashboard-i te çdo hapje. Invalidohet automatikisht
+    // kur ndryshojnë purchase-invoices ose purchase-payments.
+    const cacheKey = `supplier-debts-summary:${onlyDebt ? 1 : 0}:${from || ''}:${to || ''}`;
+    const rows = await cached(cacheKey, 60_000, () => queryAll(sql, params));
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -5761,13 +5830,14 @@ app.get('/api/clients/search', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
     const like = `%${q}%`;
-    const rows = await queryAll(
+    // Cache 60s — invalidohet automatikisht kur ndryshojnë klientët.
+    const rows = await cached(`clients:search:${q}`, 60_000, () => queryAll(
       `SELECT * FROM clients
         WHERE nipt LIKE ? OR first_name LIKE ? OR last_name LIKE ?
            OR (first_name || ' ' || last_name) LIKE ? OR phone LIKE ?
         ORDER BY last_name, first_name LIMIT 12`,
       [like, like, like, like, like]
-    );
+    ));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -6067,7 +6137,10 @@ app.get('/api/inventory-summary', async (req, res) => {
     }
 
     const payload = { rows, totals, profitByCurrency };
-    cacheSet(cacheKey, payload, 60_000);
+    // TTL 5 min — 8 JOIN mbi historikun është query më i shtrenjtë i sistemit.
+    // Invalidohet menjëherë kur ndryshohet një produkt/faturë/magazinë (rule
+    // te middleware më lart).
+    cacheSet(cacheKey, payload, 5 * 60_000);
     res.json(payload);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

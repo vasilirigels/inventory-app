@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
-import { getSalesMinDate } from '../lib/auth.js'
+import { getSalesMinDate, isSales } from '../lib/auth.js'
 
 // Zgjedhës i zërit të shpenzimit me krijim/editim/fshirje inline.
 // - `➕ Krijo zër të ri` → kthen picker-in në modalitet krijimi
@@ -367,6 +367,7 @@ export default function Shpenzime({ date, onNavigate }) {
               value={draft.category_id}
               onChange={v => setDraft(d => ({ ...d, category_id: v }))}
               categories={categories}
+              canManage={!isSales()}
               onCreated={async (newId) => {
                 await load()
                 setDraft(d => ({ ...d, category_id: String(newId) }))
@@ -554,6 +555,7 @@ export default function Shpenzime({ date, onNavigate }) {
                               ? [...categories, { id: parseInt(editDraft.category_id), name: r.category_name || '(zër i fshirë)' }]
                               : categories
                           }
+                          canManage={!isSales()}
                           onCreated={async (newId) => {
                             await load()
                             setEditDraft(d => ({ ...d, category_id: String(newId) }))
@@ -649,11 +651,13 @@ export default function Shpenzime({ date, onNavigate }) {
                         className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-medium mr-1"
                         title="Edito"
                       >✏️</button>
-                      <button
-                        onClick={() => removeEntry(r.id)}
-                        className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
-                        title="Fshi"
-                      >✕</button>
+                      {!isSales() && (
+                        <button
+                          onClick={() => removeEntry(r.id)}
+                          className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs font-medium"
+                          title="Fshi"
+                        >✕</button>
+                      )}
                     </td>
                   </tr>
                 )
