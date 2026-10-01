@@ -11,7 +11,11 @@ function clientFullName(c) {
 }
 
 function pmLabel(pm) {
-  return pm === 'debt' ? 'Borxh' : pm === 'bank' ? 'Bankë' : pm === 'pos' ? 'POS' : 'Cash'
+  return pm === 'debt' ? 'Borxh'
+    : pm === 'bank' ? 'Bankë'
+    : pm === 'pos' ? 'POS'
+    : pm === 'return' ? 'Kthim Malli'
+    : 'Cash'
 }
 
 function exportActivityExcel(enriched, totals, client, dateRange, currencyByInvoiceId) {
@@ -525,7 +529,10 @@ function ActivityPanel({ client, onNavigate, dateRange }) {
                       >{p.invoice_no}</button>
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {p.payment_method === 'bank' ? '🏦 Bankë' : p.payment_method === 'pos' ? '💳 POS' : '💵 Cash'}{p.notes ? ` · ${p.notes}` : ''}
+                      {p.payment_method === 'bank' ? '🏦 Bankë'
+                        : p.payment_method === 'pos' ? '💳 POS'
+                        : p.payment_method === 'return' ? '🔁 Kthim Malli'
+                        : '💵 Cash'}{p.notes ? ` · ${p.notes}` : ''}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-center">

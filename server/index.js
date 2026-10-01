@@ -3221,7 +3221,9 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
     const amount = parseFloat(d.amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: 'amount must be > 0' });
     const date = d.date || new Date().toISOString().slice(0, 10);
-    const pm = ['cash', 'bank', 'debt', 'pos'].includes(d.payment_method) ? d.payment_method : 'cash';
+    // 'return' = mbyllje borxhi nga kthim malli (produkti u kthye nga klientja).
+    // Nuk hyn në arkë sepse query-t e /api/arka-ditore filtrojnë payment_method='cash'.
+    const pm = ['cash', 'bank', 'debt', 'pos', 'return'].includes(d.payment_method) ? d.payment_method : 'cash';
 
     const inv = await queryOne('SELECT * FROM invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'invoice not found' });

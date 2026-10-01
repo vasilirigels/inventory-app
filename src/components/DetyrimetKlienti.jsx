@@ -15,7 +15,11 @@ function clientFullName(c) {
 }
 
 function pmLabel(pm) {
-  return pm === 'debt' ? 'Borxh' : pm === 'bank' ? 'Bankë' : pm === 'pos' ? 'POS' : 'Cash'
+  return pm === 'debt' ? 'Borxh'
+    : pm === 'bank' ? 'Bankë'
+    : pm === 'pos' ? 'POS'
+    : pm === 'return' ? 'Kthim Malli'
+    : 'Cash'
 }
 
 function exportDebtsExcel(invoices, groupArr, totals, client) {
@@ -228,14 +232,18 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     const amtToCharge = payCurrency === inv.currency
       ? `${fmt(due)} ${inv.currency}`
       : `${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
-    const methodLabel = method === 'pos' ? 'POS' : 'Cash'
+    const methodLabel = method === 'pos' ? 'POS'
+      : method === 'return' ? 'Kthim Malli (NUK prek arkën)'
+      : 'Cash'
     if (!(await showConfirm(
       `Të mbyllet borxhi plotësisht me ${amtToCharge} (${methodLabel}, datë ${date})?`,
       { title: 'Mbyll borxhin', confirmLabel: 'Mbyll' }
     ))) return
-    const ccyNote = payCurrency !== inv.currency
-      ? `Mbyllje me ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
-      : 'Mbyllje e plotë e borxhit'
+    const ccyNote = method === 'return'
+      ? 'Mbyllje borxhi nga kthim malli (pa prekur arkën)'
+      : payCurrency !== inv.currency
+        ? `Mbyllje me ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
+        : 'Mbyllje e plotë e borxhit'
     await sendPayment({
       amount: due,
       date,
@@ -259,6 +267,8 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
     : pm === 'pos'
     ? <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
+    : pm === 'return'
+    ? <span className="badge bg-orange-100 text-orange-700 dark:text-orange-300">🔁 Kthim Malli</span>
     : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
 
   return (
@@ -340,20 +350,33 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
 
           {/* Close-debt-in-one-click action */}
           {!isPaid && (
-            <button
-              type="button"
-              onClick={closeFullDebt}
-              disabled={saving || (payCurrency !== inv.currency && !payRate)}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold text-lg shadow-lg shadow-emerald-500/30 disabled:opacity-50 transition-all"
-            >
-              {saving
-                ? '⏳ Duke ruajtur...'
-                : payCurrency === inv.currency
-                  ? `✓ MBYLL BORXHIN PLOTËSISHT — ${fmt(due)} ${inv.currency}`
-                  : dueInPayCcy != null
-                    ? `✓ MBYLL BORXHIN PLOTËSISHT — ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
-                    : `✓ MBYLL BORXHIN PLOTËSISHT (mungon kurs ${payCurrency})`}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={closeFullDebt}
+                disabled={saving || (payCurrency !== inv.currency && !payRate)}
+                className={`w-full py-4 rounded-2xl text-white font-bold text-lg shadow-lg disabled:opacity-50 transition-all ${
+                  method === 'return'
+                    ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 shadow-orange-500/30'
+                    : 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-emerald-500/30'
+                }`}
+              >
+                {saving
+                  ? '⏳ Duke ruajtur...'
+                  : method === 'return'
+                    ? `🔁 MBYLL BORXHIN ME KTHIM MALLI — ${fmt(due)} ${inv.currency}`
+                    : payCurrency === inv.currency
+                      ? `✓ MBYLL BORXHIN PLOTËSISHT — ${fmt(due)} ${inv.currency}`
+                      : dueInPayCcy != null
+                        ? `✓ MBYLL BORXHIN PLOTËSISHT — ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
+                        : `✓ MBYLL BORXHIN PLOTËSISHT (mungon kurs ${payCurrency})`}
+              </button>
+              {method === 'return' && (
+                <p className="text-[11px] text-orange-700 dark:text-orange-300 bg-orange-50 dark:bg-orange-900/30 border border-orange-200 rounded-lg px-3 py-2 -mt-2">
+                  ℹ️ <strong>Kthim Malli</strong>: borxhi mbyllet pa prekur arkën. Produkti duhet kthyer veçmas në magazinë nga Fatura e Shitjes → Kthim Shitje (nëse s'është bërë).
+                </p>
+              )}
+            </>
           )}
 
           {/* Partial payment form */}
@@ -403,6 +426,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                   <select value={method} onChange={e => setMethod(e.target.value)} className="input-field">
                     <option value="cash">💵 Cash</option>
                     <option value="pos">💳 POS</option>
+                    <option value="return">🔁 Kthim Malli</option>
                   </select>
                 </div>
                 <div className="col-span-4">
