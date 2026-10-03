@@ -69,20 +69,20 @@ export async function printLabels(items) {
   .label:last-child { page-break-after: auto; }
   .label svg { max-width: 100%; }
   .price { font-weight: 700; font-size: 12pt; margin-top: 1mm; letter-spacing: 0.3px; }
-  @media screen {
-    body { background: #eee; padding: 12px; }
-    .label { background: #fff; margin: 8px auto; border: 1px solid #ccc; }
-  }
-</style></head><body>${labels}
-<script>window.onload = () => setTimeout(() => window.print(), 250)</script>
-</body></html>`
+</style></head><body>${labels}</body></html>`
 
-  const w = window.open('', '_blank', 'width=420,height=520')
-  if (!w) {
-    alert('Bllokuesi i popup-eve e ndaloi dritaren e printimit. Lejo popup-in për këtë faqe dhe provo përsëri.')
-    return
-  }
-  w.document.open()
-  w.document.write(html)
-  w.document.close()
+  // Iframe i fshehur në vend të window.open() — kjo e fundit bllokohet si popup
+  // nga Windows (Edge/Chrome) edhe në app-in Electron.
+  const frame = document.createElement('iframe')
+  Object.assign(frame.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+  document.body.appendChild(frame)
+  const doc = frame.contentDocument || frame.contentWindow.document
+  doc.open(); doc.write(html); doc.close()
+  setTimeout(() => {
+    try {
+      frame.contentWindow.focus()
+      frame.contentWindow.print()
+    } catch (e) { console.error(e) }
+    setTimeout(() => { try { document.body.removeChild(frame) } catch { /* ignore */ } }, 1000)
+  }, 250)
 }

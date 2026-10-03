@@ -281,6 +281,10 @@ function ContractsSection({ date }) {
     product: null, product_qty: '1', unit_price: '', vat_rate: '',
   })
   const [busy, setBusy] = useState(false)
+  // Modal për shtimin e një zëri — ruan ID-në e kontratës aktive; null = modali mbyllur.
+  const [addEntryFor, setAddEntryFor] = useState(null)
+  // Set i ID-ve të zërave me metadata e produktit të zgjeruar (chip-at e barkod/gram/etj.).
+  const [showMetaFor, setShowMetaFor] = useState(() => new Set())
 
   const loadContracts = useCallback(async () => {
     setLoading(true)
@@ -367,8 +371,18 @@ function ContractsSection({ date }) {
         date: savedDate, type: entryDraft.type, amount_eur: '', description: '',
         product: null, product_qty: '1', unit_price: '', vat_rate: '',
       })
+      setAddEntryFor(null)
       await Promise.all([loadContracts(), loadDetail(contractId)])
     } finally { setBusy(false) }
+  }
+
+  const toggleMeta = (entryId) => {
+    setShowMetaFor(prev => {
+      const next = new Set(prev)
+      if (next.has(entryId)) next.delete(entryId)
+      else next.add(entryId)
+      return next
+    })
   }
 
   const deleteEntry = async (entryId, contractId) => {
@@ -524,140 +538,11 @@ function ContractsSection({ date }) {
                 {isExpanded && (
                   <div className="border-t border-slate-200 dark:border-slate-700 p-3 bg-slate-50/50 dark:bg-slate-800/30">
                     {!isClosed && (
-                      <div className="mb-3 p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-                        <div className="flex items-center gap-2 mb-2 flex-wrap">
-                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">+ Shto zë:</span>
-                          <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
-                            <button
-                              onClick={() => setEntryDraft(d => ({ ...d, type: 'cash' }))}
-                              className={`text-[11px] px-2 py-1 ${entryDraft.type === 'cash' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
-                            >💵 Cash EUR</button>
-                            <button
-                              onClick={() => setEntryDraft(d => ({ ...d, type: 'product' }))}
-                              className={`text-[11px] px-2 py-1 ${entryDraft.type === 'product' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
-                            >📦 Produkt</button>
-                          </div>
-                          <div className="flex items-center gap-1 ml-auto">
-                            <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data:</label>
-                            <input
-                              type="date"
-                              value={entryDraft.date || ''}
-                              onChange={e => setEntryDraft(d => ({ ...d, date: e.target.value }))}
-                              className="input-field-sm w-36"
-                              max={date}
-                            />
-                            {entryDraft.date && entryDraft.date !== date && (
-                              <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">
-                                jashtë {fmtDate(date)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {entryDraft.type === 'cash' ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-                            <div>
-                              <label className="form-label text-[10px]">Shuma (EUR)</label>
-                              <MoneyInput value={entryDraft.amount_eur}
-                                onChange={v => setEntryDraft(d => ({ ...d, amount_eur: v }))}
-                                className="input-field-sm" placeholder="0.00" />
-                            </div>
-                            <div className="md:col-span-2">
-                              <label className="form-label text-[10px]">Përshkrimi</label>
-                              <input type="text" value={entryDraft.description}
-                                onChange={e => setEntryDraft(d => ({ ...d, description: e.target.value }))}
-                                className="input-field-sm" placeholder="opsional" />
-                            </div>
-                            <div className="md:col-span-3 flex justify-end">
-                              <button onClick={() => addEntry(c.id)} disabled={busy} className="btn-primary text-xs disabled:opacity-50">+ Shto</button>
-                            </div>
-                          </div>
-                        ) : (() => {
-                          const p = entryDraft.product
-                          const qty = parseInt(entryDraft.product_qty) || 1
-                          const unit = parseFloat(entryDraft.unit_price) || 0
-                          const vat = parseFloat(entryDraft.vat_rate) || 0
-                          const finalTotal = +(unit * qty * (1 + vat / 100)).toFixed(2)
-                          return (
-                            <>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-2">
-                                <div className="md:col-span-2">
-                                  <label className="form-label text-[10px]">Produkti (barkod ose emër)</label>
-                                  <MarketingProductPicker
-                                    product={p}
-                                    onPick={pp => setEntryDraft(d => ({
-                                      ...d,
-                                      product: pp,
-                                      ...snapshotFromProduct(pp),
-                                    }))}
-                                    className="input-field-sm"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="form-label text-[10px]">Përshkrimi</label>
-                                  <input type="text" value={entryDraft.description}
-                                    onChange={e => setEntryDraft(d => ({ ...d, description: e.target.value }))}
-                                    className="input-field-sm" placeholder="opsional" />
-                                </div>
-                              </div>
-                              {p && (
-                                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 mb-2">
-                                  <table className="w-full text-xs">
-                                    <thead className="text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50">
-                                      <tr>
-                                        <th className="px-2 py-1 text-left w-28">Barkodi</th>
-                                        <th className="px-2 py-1 text-right w-16">Stok</th>
-                                        <th className="px-2 py-1 text-right w-16">Sasia</th>
-                                        <th className="px-2 py-1 text-right w-20">Gram</th>
-                                        <th className="px-2 py-1 text-right w-24">Cmim Blerje €</th>
-                                        <th className="px-2 py-1 text-right w-24">Cmim Shitje €</th>
-                                        <th className="px-2 py-1 text-right w-16">TVSH %</th>
-                                        <th className="px-2 py-1 text-right w-24">Totali €</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr>
-                                        <td className="px-2 py-1 font-mono text-[10px] text-slate-600 dark:text-slate-300">{p.barcode || '—'}</td>
-                                        <td className={`px-2 py-1 text-right tabular-nums font-semibold ${qty > (p.stock || 0) ? 'text-rose-600' : 'text-slate-600 dark:text-slate-300'}`}>{p.stock || 0}</td>
-                                        <td className="px-1 py-1">
-                                          <input type="number" min="1" step="1" value={entryDraft.product_qty}
-                                            onChange={e => setEntryDraft(d => ({ ...d, product_qty: e.target.value }))}
-                                            className="input-field-sm text-right tabular-nums" />
-                                        </td>
-                                        <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">
-                                          {p.gram ? Number(p.gram).toFixed(3) : '—'}
-                                        </td>
-                                        <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">
-                                          {Number(p.cost_price) > 0 ? Number(p.cost_price).toFixed(2) : '—'}
-                                        </td>
-                                        <td className="px-1 py-1">
-                                          <MoneyInput
-                                            value={entryDraft.unit_price}
-                                            onChange={v => setEntryDraft(d => ({ ...d, unit_price: String(v) }))}
-                                            className="input-field-sm text-right tabular-nums font-semibold text-emerald-800 dark:text-emerald-200"
-                                            placeholder="0.00"
-                                          />
-                                        </td>
-                                        <td className="px-1 py-1">
-                                          <input type="number" step="0.01" min="0" max="100"
-                                            value={entryDraft.vat_rate}
-                                            onChange={e => setEntryDraft(d => ({ ...d, vat_rate: e.target.value }))}
-                                            className="input-field-sm text-right tabular-nums"
-                                            placeholder="0" />
-                                        </td>
-                                        <td className="px-2 py-1 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">
-                                          €{finalTotal.toFixed(2)}
-                                        </td>
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )}
-                              <div className="flex justify-end">
-                                <button onClick={() => addEntry(c.id)} disabled={busy} className="btn-primary text-xs disabled:opacity-50">+ Shto</button>
-                              </div>
-                            </>
-                          )
-                        })()}
+                      <div className="flex justify-end mb-3">
+                        <button
+                          onClick={() => setAddEntryFor(c.id)}
+                          className="btn-primary text-xs"
+                        >+ Shto zë</button>
                       </div>
                     )}
 
@@ -688,8 +573,64 @@ function ContractsSection({ date }) {
                               <td className="py-1 px-1 text-slate-700 dark:text-slate-200">
                                 {e.type === 'product' ? (
                                   <div>
-                                    <div className="font-semibold">{e.product_name || '(produkt i fshirë)'} × {e.product_qty}</div>
-                                    {e.description && <div className="text-[10px] text-slate-500 dark:text-slate-400">{e.description}</div>}
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold">{e.product_name || '(produkt i fshirë)'} × {e.product_qty}</span>
+                                      <button
+                                        onClick={() => toggleMeta(e.id)}
+                                        title="Shfaq/Fshih detajet e produktit"
+                                        className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] leading-none"
+                                      >{showMetaFor.has(e.id) ? '▲' : 'ℹ️'}</button>
+                                    </div>
+                                    {showMetaFor.has(e.id) && (
+                                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-slate-500 dark:text-slate-400 mt-1 p-1.5 rounded bg-slate-100/60 dark:bg-slate-800/40">
+                                        {e.product_barcode && (
+                                          <span className="font-mono">🏷 {e.product_barcode}</span>
+                                        )}
+                                        {e.product_sku && (
+                                          <span className="font-mono">SKU {e.product_sku}</span>
+                                        )}
+                                        {e.product_category && (
+                                          <span>📂 {e.product_category}</span>
+                                        )}
+                                        {e.product_brand && (
+                                          <span>Brend: {e.product_brand}</span>
+                                        )}
+                                        {e.product_material && (
+                                          <span>Material: {e.product_material}</span>
+                                        )}
+                                        {parseFloat(e.product_gram) > 0 && (
+                                          <span>⚖ {parseFloat(e.product_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} gr</span>
+                                        )}
+                                        {parseFloat(e.product_has_gram) > 0 && (
+                                          <span className="text-amber-700 dark:text-amber-300">HAS {parseFloat(e.product_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} gr</span>
+                                        )}
+                                        {parseFloat(e.product_kodi) > 0 && (
+                                          <span>Kodi {parseFloat(e.product_kodi).toLocaleString('sq-AL', { maximumFractionDigits: 2 })}</span>
+                                        )}
+                                        {parseFloat(e.product_multiplier) > 0 && (
+                                          <span>Shum. {parseFloat(e.product_multiplier).toLocaleString('sq-AL', { maximumFractionDigits: 2 })}</span>
+                                        )}
+                                        {parseFloat(e.product_has_rate) > 0 && (
+                                          <span>Kursi Blerje {parseFloat(e.product_has_rate).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        )}
+                                        {parseFloat(e.product_sell_rate) > 0 && (
+                                          <span className="text-emerald-700 dark:text-emerald-300">Kursi Shitje {parseFloat(e.product_sell_rate).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        )}
+                                        {parseFloat(e.product_cost_price) > 0 && (
+                                          <span>Çmim Blerje €{parseFloat(e.product_cost_price).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        )}
+                                        {parseFloat(e.product_sell_price) > 0 && (
+                                          <span>Çmim Shitje €{parseFloat(e.product_sell_price).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        )}
+                                        {parseFloat(e.product_vat_rate) > 0 && (
+                                          <span>TVSH {parseFloat(e.product_vat_rate)}%</span>
+                                        )}
+                                        {e.product_stock != null && (
+                                          <span>Stok {parseInt(e.product_stock) || 0}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {e.description && <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{e.description}</div>}
                                   </div>
                                 ) : (
                                   e.description || <span className="text-slate-400 italic">—</span>
@@ -718,6 +659,156 @@ function ContractsSection({ date }) {
           })}
         </div>
       )}
+
+      {addEntryFor != null && (() => {
+        const c = contracts.find(x => x.id === addEntryFor)
+        if (!c) return null
+        const p = entryDraft.product
+        const qty = parseInt(entryDraft.product_qty) || 1
+        const unit = parseFloat(entryDraft.unit_price) || 0
+        const vat = parseFloat(entryDraft.vat_rate) || 0
+        const finalTotal = +(unit * qty * (1 + vat / 100)).toFixed(2)
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+               onClick={() => setAddEntryFor(null)}>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto"
+                 onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">+ Shto zë te "{c.name}"</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Zgjidh Cash EUR ose Produkt dhe mbush fushat përkatëse.</p>
+                </div>
+                <button onClick={() => setAddEntryFor(null)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+              </div>
+              <div className="p-4">
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
+                    <button
+                      onClick={() => setEntryDraft(d => ({ ...d, type: 'cash' }))}
+                      className={`text-[11px] px-3 py-1.5 ${entryDraft.type === 'cash' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
+                    >💵 Cash EUR</button>
+                    <button
+                      onClick={() => setEntryDraft(d => ({ ...d, type: 'product' }))}
+                      className={`text-[11px] px-3 py-1.5 ${entryDraft.type === 'product' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'}`}
+                    >📦 Produkt</button>
+                  </div>
+                  <div className="flex items-center gap-1 ml-auto">
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Data:</label>
+                    <input
+                      type="date"
+                      value={entryDraft.date || ''}
+                      onChange={e => setEntryDraft(d => ({ ...d, date: e.target.value }))}
+                      className="input-field-sm w-36"
+                      max={date}
+                    />
+                    {entryDraft.date && entryDraft.date !== date && (
+                      <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">
+                        jashtë {fmtDate(date)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {entryDraft.type === 'cash' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                    <div>
+                      <label className="form-label text-[10px]">Shuma (EUR)</label>
+                      <MoneyInput value={entryDraft.amount_eur}
+                        onChange={v => setEntryDraft(d => ({ ...d, amount_eur: v }))}
+                        className="input-field-sm" placeholder="0.00" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="form-label text-[10px]">Përshkrimi</label>
+                      <input type="text" value={entryDraft.description}
+                        onChange={e => setEntryDraft(d => ({ ...d, description: e.target.value }))}
+                        className="input-field-sm" placeholder="opsional" />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-2">
+                      <div className="md:col-span-2">
+                        <label className="form-label text-[10px]">Produkti (barkod ose emër)</label>
+                        <MarketingProductPicker
+                          product={p}
+                          onPick={pp => setEntryDraft(d => ({
+                            ...d,
+                            product: pp,
+                            ...snapshotFromProduct(pp),
+                          }))}
+                          className="input-field-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label text-[10px]">Përshkrimi</label>
+                        <input type="text" value={entryDraft.description}
+                          onChange={e => setEntryDraft(d => ({ ...d, description: e.target.value }))}
+                          className="input-field-sm" placeholder="opsional" />
+                      </div>
+                    </div>
+                    {p && (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 mb-2">
+                        <table className="w-full text-xs">
+                          <thead className="text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50">
+                            <tr>
+                              <th className="px-2 py-1 text-left w-28">Barkodi</th>
+                              <th className="px-2 py-1 text-right w-16">Stok</th>
+                              <th className="px-2 py-1 text-right w-16">Sasia</th>
+                              <th className="px-2 py-1 text-right w-20">Gram</th>
+                              <th className="px-2 py-1 text-right w-24">Cmim Blerje €</th>
+                              <th className="px-2 py-1 text-right w-24">Cmim Shitje €</th>
+                              <th className="px-2 py-1 text-right w-16">TVSH %</th>
+                              <th className="px-2 py-1 text-right w-24">Totali €</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="px-2 py-1 font-mono text-[10px] text-slate-600 dark:text-slate-300">{p.barcode || '—'}</td>
+                              <td className={`px-2 py-1 text-right tabular-nums font-semibold ${qty > (p.stock || 0) ? 'text-rose-600' : 'text-slate-600 dark:text-slate-300'}`}>{p.stock || 0}</td>
+                              <td className="px-1 py-1">
+                                <input type="number" min="1" step="1" value={entryDraft.product_qty}
+                                  onChange={e => setEntryDraft(d => ({ ...d, product_qty: e.target.value }))}
+                                  className="input-field-sm text-right tabular-nums" />
+                              </td>
+                              <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                {p.gram ? Number(p.gram).toFixed(3) : '—'}
+                              </td>
+                              <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                {Number(p.cost_price) > 0 ? Number(p.cost_price).toFixed(2) : '—'}
+                              </td>
+                              <td className="px-1 py-1">
+                                <MoneyInput
+                                  value={entryDraft.unit_price}
+                                  onChange={v => setEntryDraft(d => ({ ...d, unit_price: String(v) }))}
+                                  className="input-field-sm text-right tabular-nums font-semibold text-emerald-800 dark:text-emerald-200"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-1 py-1">
+                                <input type="number" step="0.01" min="0" max="100"
+                                  value={entryDraft.vat_rate}
+                                  onChange={e => setEntryDraft(d => ({ ...d, vat_rate: e.target.value }))}
+                                  className="input-field-sm text-right tabular-nums"
+                                  placeholder="0" />
+                              </td>
+                              <td className="px-2 py-1 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">
+                                €{finalTotal.toFixed(2)}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                <button onClick={() => setAddEntryFor(null)} className="btn-secondary text-xs">Anulo</button>
+                <button onClick={() => addEntry(c.id)} disabled={busy} className="btn-primary text-xs disabled:opacity-50">+ Shto</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

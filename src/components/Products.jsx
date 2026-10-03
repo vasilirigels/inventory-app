@@ -1695,6 +1695,8 @@ export default function Products() {
   //   'all' = normalja (fshihen pa-stoku), 'out' = vetëm pa stok,
   //   'low' = vetëm stok i ulët, 'ok' = vetëm OK.
   const [stockFilter, setStockFilter] = useState('all')
+  // Renditja sipas datës së shtimit: 'newest' (default) ose 'oldest'.
+  const [sortOrder, setSortOrder] = useState('newest')
   // Rreshtat e rinj për shtim inline — si te Fatura Blerje "+ Shto Artikull"
   const [newRows, setNewRows] = useState([])
   const newRowKey = useRef(0)
@@ -1767,7 +1769,17 @@ export default function Products() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })()
 
-  const filtered = products.filter(p => {
+  const filtered = products.slice().sort((a, b) => {
+    // Rendit sipas created_at — fallback te id nëse created_at mungon.
+    const aKey = a.created_at ? String(a.created_at) : ''
+    const bKey = b.created_at ? String(b.created_at) : ''
+    if (aKey && bKey) {
+      if (sortOrder === 'oldest') return aKey.localeCompare(bKey)
+      return bKey.localeCompare(aKey)
+    }
+    if (sortOrder === 'oldest') return (a.id || 0) - (b.id || 0)
+    return (b.id || 0) - (a.id || 0)
+  }).filter(p => {
     // Filtri i stokut — default 'all' fsheh pa-stoku. User-i mund të klikojë
     // "pa stok" / "stok i ulët" / "OK" te stock strip për të parë vetëm ata.
     const stockN = parseInt(p.stock) || 0
@@ -2003,6 +2015,16 @@ export default function Products() {
               {c === 'Të gjitha' ? '📂 Të gjitha' : `${CAT_ICONS[c] || '📦'} ${c}`}
             </option>
           ))}
+        </select>
+
+        <select
+          value={sortOrder}
+          onChange={e => setSortOrder(e.target.value)}
+          className="input-field w-44 flex-shrink-0"
+          title="Renditja sipas datës së shtimit"
+        >
+          <option value="newest">⬇️ Më të rejat lart</option>
+          <option value="oldest">⬆️ Më të vjetrat lart</option>
         </select>
 
         {/* Grid / List toggle */}

@@ -9147,7 +9147,13 @@ app.get('/api/marketing-contracts/:id', async (req, res) => {
     const entries = await queryAll(
       `SELECT e.*,
               p.name AS product_name, p.barcode AS product_barcode,
-              p.sell_price AS product_sell_price, p.stock AS product_stock
+              p.sku AS product_sku, p.category AS product_category,
+              p.brand AS product_brand, p.material AS product_material,
+              p.sell_price AS product_sell_price, p.cost_price AS product_cost_price,
+              p.stock AS product_stock, p.vat_rate AS product_vat_rate,
+              p.gram AS product_gram, p.has_gram AS product_has_gram,
+              p.kodi AS product_kodi, p.multiplier AS product_multiplier,
+              p.sell_rate AS product_sell_rate, p.has_rate AS product_has_rate
          FROM marketing_contract_entries e
          LEFT JOIN products p ON p.id = e.product_id
         WHERE e.contract_id = ?

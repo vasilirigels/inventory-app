@@ -221,7 +221,7 @@ function ClientPicker({ value, onChange }) {
 }
 
 // ── Product picker for a single row (searches barcode/SKU/name) ─────────────
-function ProductPickerCell({ value, onPick }) {
+function ProductPickerCell({ value, onPick, disabled }) {
   // value = { name, barcode }
   // Pershkrimi është i pavarur nga barkodi — mos ridiktoj vlerën nga barcode-i,
   // sepse ndryshe kur user-i shkruan barkodin, ai duket edhe këtu.
@@ -297,7 +297,8 @@ function ProductPickerCell({ value, onPick }) {
         onChange={e => handleChange(e.target.value)}
         onFocus={() => query && setOpen(true)}
         onKeyDown={handleKeyDown}
-        className="input-field-sm"
+        disabled={disabled}
+        className="input-field-sm disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
       />
       {open && (results.length > 0 || loading) && (
         <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-96 overflow-y-auto min-w-[420px]">
@@ -314,7 +315,7 @@ function ProductPickerCell({ value, onPick }) {
 // ── Barcode input për kolonën Barkodi te secili rresht ─────────────────────
 // Lejon shkrim/skanim manual: kërkon produkte me barkodin e shkruar dhe hap
 // dropdown me rezultatet; me Enter (nga skaneri ose tastiera) zgjedh të parin.
-function BarcodeSearchInput({ value, onTypedChange, onPick }) {
+function BarcodeSearchInput({ value, onTypedChange, onPick, disabled }) {
   const [query, setQuery]     = useState(value || '')
   const [results, setResults] = useState([])
   const [open, setOpen]       = useState(false)
@@ -385,7 +386,8 @@ function BarcodeSearchInput({ value, onTypedChange, onPick }) {
         }}
         onFocus={() => query && setOpen(true)}
         onKeyDown={handleKeyDown}
-        className="input-field-sm font-mono"
+        disabled={disabled}
+        className="input-field-sm font-mono disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
       />
       {open && (results.length > 0 || loading) && (
         <div className="absolute z-20 left-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-96 overflow-y-auto min-w-[420px]">
@@ -1482,10 +1484,14 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   const [allRates, setAllRates]       = useState({ LEK: 1 })
 
   const isAdmin = getUser()?.role === 'admin'
+  const isSalesRole = isSales()
   // Shitësi s'lejohet të shtojë ose të heqë artikuj në një faturë ekzistuese;
   // ka të drejtë t'i modifikojë vetëm në krijim. Kufizimi backend përforcohet
   // nga bllokimi i PUT /api/invoices/:id për rolin 'sales'.
-  const lockItemChanges = isSales() && !!invoiceId
+  const lockItemChanges = isSalesRole && !!invoiceId
+  // Shitësi kërkon produktin me barkod/përshkrim, por nuk prek Gramaturën,
+  // Has-in dhe Kursin e Shitjes — ato vijnë nga produkti.
+  const lockProductFields = isSalesRole
   const today = new Date().toISOString().split('T')[0]
 
   // Initial load: existing invoice OR fresh new invoice
@@ -2168,31 +2174,35 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                         value={it.barcode}
                         onTypedChange={v => setItem(idx, { barcode: v })}
                         onPick={p => pickProduct(idx, p)}
+                        disabled={lockItemChanges}
                       />
                     </td>
                     <td className="px-1 py-1">
-                      <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} />
+                      <ProductPickerCell value={it} onPick={p => pickProduct(idx, p)} disabled={lockItemChanges} />
                       {isGiftRow && <div className="text-[10px] font-semibold text-rose-600 dark:text-rose-300 mt-0.5">🎁 Dhuratë (nuk hyn në total)</div>}
                     </td>
                     <td className="px-1 py-1">
                       <input
                         type="number" step="any" value={it.qty}
                         onChange={e => setItem(idx, { qty: e.target.value })}
-                        className="input-field-sm text-right"
+                        disabled={lockProductFields}
+                        className="input-field-sm text-right disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                       />
                     </td>
                     <td className="px-1 py-1">
                       <input
                         type="number" step="0.001" min="0" value={it.gram}
                         onChange={e => setItem(idx, { gram: e.target.value })}
-                        className="input-field-sm text-right"
+                        disabled={lockProductFields}
+                        className="input-field-sm text-right disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                       />
                     </td>
                     <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
                       <MoneyInput
                         value={it.has_gram}
                         onChange={v => changeItemFloriField(idx, 'has_gram', v)}
-                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+                        disabled={lockProductFields}
+                        className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                         placeholder="0.000"
                       />
                     </td>
@@ -2200,7 +2210,8 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                       <MoneyInput
                         value={it.sell_rate}
                         onChange={v => changeItemSellRate(idx, v)}
-                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200"
+                        disabled={lockItemChanges}
+                        className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                         placeholder="0.00"
                       />
                     </td>
@@ -2216,7 +2227,8 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                           const pct = Math.max(0, Math.min(100, (eur / (base * vatFactor)) * 100))
                           setItem(idx, { discount_percent: +pct.toFixed(2) })
                         }}
-                        className="input-field-sm text-right"
+                        disabled={lockItemChanges}
+                        className="input-field-sm text-right disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                         placeholder="0.00"
                       />
                     </td>
@@ -2224,14 +2236,16 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                       <input
                         type="number" step="0.01" min="0" max="100" value={it.discount_percent}
                         onChange={e => setItem(idx, { discount_percent: e.target.value })}
-                        className="input-field-sm text-right"
+                        disabled={lockItemChanges}
+                        className="input-field-sm text-right disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                       />
                     </td>
                     <td className="px-1 py-1">
                       <input
                         type="number" step="0.01" min="0" max="100" value={it.vat_rate}
                         onChange={e => setItem(idx, { vat_rate: e.target.value })}
-                        className="input-field-sm text-right"
+                        disabled={lockItemChanges}
+                        className="input-field-sm text-right disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                       />
                     </td>
                     <td className="px-1 py-1 text-right tabular-nums font-semibold text-slate-900 dark:text-white">
