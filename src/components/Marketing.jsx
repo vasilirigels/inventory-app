@@ -269,12 +269,23 @@ function snapshotFromProduct(p) {
 // Një kontratë mban një buxhet total EUR dhe përmban zëra (product ose cash EUR)
 // që zbriten nga buxheti derisa arrihet totali. Cash EUR entries shfaqen si
 // shpenzim në Arkën Ditore.
-function ContractsSection({ date }) {
+function ContractsSection({ date, dateFrom, dateTo }) {
+  // Filtri i datës i trashëguar nga faqja — zbatohet në backend mbi start_date
+  // e kontratave: kontratat që nisin jashtë intervalit fshehen, dhe personat
+  // pa asnjë kontratë në interval fshihen gjithashtu.
+  // Hierarkia: Personat → Kontratat e tyre → Zërat.
+  const [people, setPeople] = useState([])
+  const [expandedPersonId, setExpandedPersonId] = useState(null)
   const [contracts, setContracts] = useState([])
   const [expandedId, setExpandedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [showNew, setShowNew] = useState(false)
+  const [peopleSearch, setPeopleSearch] = useState('')
+  // Dialogu për Person të ri.
+  const [showNewPerson, setShowNewPerson] = useState(false)
+  const [newPersonDraft, setNewPersonDraft] = useState({ name: '', phone: '', notes: '' })
+  // Dialogu për Kontratë të re — ruan person_id-në e synuar; null = mbyllur.
+  const [newContractFor, setNewContractFor] = useState(null)
   const [newDraft, setNewDraft] = useState({ name: '', total_amount_eur: '', notes: '', start_date: date })
   const [entryDraft, setEntryDraft] = useState({
     date, type: 'cash', amount_eur: '', description: '',
@@ -283,16 +294,34 @@ function ContractsSection({ date }) {
   const [busy, setBusy] = useState(false)
   // Modal për shtimin e një zëri — ruan ID-në e kontratës aktive; null = modali mbyllur.
   const [addEntryFor, setAddEntryFor] = useState(null)
-  // Set i ID-ve të zërave me metadata e produktit të zgjeruar (chip-at e barkod/gram/etj.).
-  const [showMetaFor, setShowMetaFor] = useState(() => new Set())
 
-  const loadContracts = useCallback(async () => {
+  // Intervali për endpoint-et — kur përdoruesi s'ka ndryshuar filtrin (dmth
+  // fromDate=toDate=date e sotme), e trajtojmë si "pa filter" që personat/
+  // kontratat të shfaqen të gjithë. Vetëm nëse user-i ka ndryshuar filtrin,
+  // backend-i aplikon BETWEEN në të dyja fushat.
+  const rangeIsCustom = (dateFrom && dateFrom !== date) || (dateTo && dateTo !== date)
+  const qsRange = rangeIsCustom
+    ? `from=${encodeURIComponent(dateFrom || '')}&to=${encodeURIComponent(dateTo || '')}`
+    : ''
+
+  const loadPeople = useCallback(async () => {
     setLoading(true)
     try {
-      const rows = await fetch('/api/marketing-contracts').then(r => r.json())
-      setContracts(Array.isArray(rows) ? rows : [])
+      const url = qsRange ? `/api/marketing-people?${qsRange}` : '/api/marketing-people'
+      const rows = await fetch(url).then(r => r.json())
+      setPeople(Array.isArray(rows) ? rows : [])
     } finally { setLoading(false) }
-  }, [])
+  }, [qsRange])
+
+  const loadContracts = useCallback(async (personId) => {
+    if (!personId) { setContracts([]); return }
+    try {
+      const base = `/api/marketing-contracts?person_id=${personId}`
+      const url = qsRange ? `${base}&${qsRange}` : base
+      const rows = await fetch(url).then(r => r.json())
+      setContracts(Array.isArray(rows) ? rows : [])
+    } catch { setContracts([]) }
+  }, [qsRange])
 
   const loadDetail = useCallback(async (id) => {
     if (!id) { setDetail(null); return }
@@ -302,7 +331,11 @@ function ContractsSection({ date }) {
     } catch { setDetail(null) }
   }, [])
 
-  useEffect(() => { loadContracts() }, [loadContracts])
+  useEffect(() => { loadPeople() }, [loadPeople])
+  useEffect(() => {
+    if (expandedPersonId) loadContracts(expandedPersonId)
+    else { setContracts([]); setExpandedId(null) }
+  }, [expandedPersonId, loadContracts])
   useEffect(() => { if (expandedId) loadDetail(expandedId) }, [expandedId, loadDetail])
 
   useEffect(() => {
@@ -312,19 +345,56 @@ function ContractsSection({ date }) {
   const createContract = async () => {
     const name = String(newDraft.name || '').trim()
     const total = parseFloat(newDraft.total_amount_eur) || 0
-    if (!name) { alert('Vendos një emër.'); return }
+    const personId = newContractFor
+    if (!personId) { alert('Zgjidh një person.'); return }
+    if (!name) { alert('Vendos një emër kontrate.'); return }
     if (total <= 0) { alert('Buxheti duhet të jetë > 0.'); return }
     setBusy(true)
     try {
       const res = await fetch('/api/marketing-contracts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, total_amount_eur: total, notes: newDraft.notes || '', start_date: newDraft.start_date || date }),
+        body: JSON.stringify({
+          name, total_amount_eur: total, notes: newDraft.notes || '',
+          start_date: newDraft.start_date || date, person_id: personId,
+        }),
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
       setNewDraft({ name: '', total_amount_eur: '', notes: '', start_date: date })
-      setShowNew(false)
-      await loadContracts()
+      setNewContractFor(null)
+      await Promise.all([loadPeople(), loadContracts(personId)])
+    } finally { setBusy(false) }
+  }
+
+  const createPerson = async () => {
+    const n = String(newPersonDraft.name || '').trim()
+    if (!n) { alert('Vendos emrin e personit.'); return }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/marketing-people', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: n, phone: newPersonDraft.phone || '', notes: newPersonDraft.notes || '' }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Gabim'); return }
+      setNewPersonDraft({ name: '', phone: '', notes: '' })
+      setShowNewPerson(false)
+      await loadPeople()
+    } finally { setBusy(false) }
+  }
+
+  const deletePerson = async (person) => {
+    const ok = await showConfirm(
+      `Të gjitha kontratat (${person.contracts_count}) dhe zërat brenda tyre do të fshihen. Stoku i produkteve do të rikthehet.`,
+      { title: `Fshi personin "${person.name}"?`, danger: true, confirmLabel: 'Fshi' }
+    )
+    if (!ok) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/marketing-people/${person.id}`, { method: 'DELETE' })
+      if (!res.ok) { alert('Gabim'); return }
+      if (expandedPersonId === person.id) setExpandedPersonId(null)
+      await loadPeople()
     } finally { setBusy(false) }
   }
 
@@ -372,17 +442,8 @@ function ContractsSection({ date }) {
         product: null, product_qty: '1', unit_price: '', vat_rate: '',
       })
       setAddEntryFor(null)
-      await Promise.all([loadContracts(), loadDetail(contractId)])
+      await Promise.all([loadPeople(), loadContracts(expandedPersonId), loadDetail(contractId)])
     } finally { setBusy(false) }
-  }
-
-  const toggleMeta = (entryId) => {
-    setShowMetaFor(prev => {
-      const next = new Set(prev)
-      if (next.has(entryId)) next.delete(entryId)
-      else next.add(entryId)
-      return next
-    })
   }
 
   const deleteEntry = async (entryId, contractId) => {
@@ -392,7 +453,7 @@ function ContractsSection({ date }) {
     try {
       const res = await fetch(`/api/marketing-contract-entries/${entryId}`, { method: 'DELETE' })
       if (!res.ok) { alert('Gabim gjatë fshirjes'); return }
-      await Promise.all([loadContracts(), loadDetail(contractId)])
+      await Promise.all([loadPeople(), loadContracts(expandedPersonId), loadDetail(contractId)])
     } finally { setBusy(false) }
   }
 
@@ -410,7 +471,7 @@ function ContractsSection({ date }) {
         body: JSON.stringify({ status: newStatus }),
       })
       if (!res.ok) { alert('Gabim'); return }
-      await Promise.all([loadContracts(), expandedId === contract.id ? loadDetail(contract.id) : Promise.resolve()])
+      await Promise.all([loadPeople(), loadContracts(expandedPersonId), expandedId === contract.id ? loadDetail(contract.id) : Promise.resolve()])
     } finally { setBusy(false) }
   }
 
@@ -425,67 +486,99 @@ function ContractsSection({ date }) {
       const res = await fetch(`/api/marketing-contracts/${contract.id}`, { method: 'DELETE' })
       if (!res.ok) { alert('Gabim'); return }
       if (expandedId === contract.id) { setExpandedId(null); setDetail(null) }
-      await loadContracts()
+      await Promise.all([loadPeople(), loadContracts(expandedPersonId)])
     } finally { setBusy(false) }
   }
 
   const fmtEur = (v) => (parseFloat(v) || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+  const filteredPeople = people.filter(p => {
+    const q = peopleSearch.trim().toLowerCase()
+    if (!q) return true
+    return (p.name || '').toLowerCase().includes(q) || (p.phone || '').toLowerCase().includes(q)
+  })
+
   return (
     <div className="card">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div>
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">📋 Kontratat Marketing</h3>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">Buxhet EUR që plotësohet me zëra produkti (zbret stokun) ose me cash EUR (shpenzim në Arkë).</p>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">👥 Marketing — Personat & Kontratat</h3>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">Zgjidh një person për të parë kontratat e tij. Çdo kontratë ka buxhet EUR që plotësohet me produkte (zbret stokun) ose me cash EUR (shpenzim në Arkë).</p>
         </div>
-        <button onClick={() => setShowNew(v => !v)} className="btn-primary text-xs">
-          {showNew ? '× Anulo' : '+ Kontratë e Re'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            value={peopleSearch}
+            onChange={e => setPeopleSearch(e.target.value)}
+            placeholder="🔍 Kërko person..."
+            className="input-field-sm w-48"
+          />
+          <button onClick={() => setShowNewPerson(true)} className="btn-primary text-xs">
+            + Person i Ri
+          </button>
+        </div>
       </div>
-
-      {showNew && (
-        <div className="mb-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
-            <div>
-              <label className="form-label">Data Fillimit</label>
-              <input type="date" value={newDraft.start_date || ''}
-                onChange={e => setNewDraft(d => ({ ...d, start_date: e.target.value }))}
-                className="input-field" max={date} />
-            </div>
-            <div className="md:col-span-2">
-              <label className="form-label">Emri</label>
-              <input type="text" value={newDraft.name}
-                onChange={e => setNewDraft(d => ({ ...d, name: e.target.value }))}
-                className="input-field" placeholder="p.sh. Biben" />
-            </div>
-            <div>
-              <label className="form-label">Buxheti (EUR)</label>
-              <MoneyInput value={newDraft.total_amount_eur}
-                onChange={v => setNewDraft(d => ({ ...d, total_amount_eur: v }))}
-                className="input-field" placeholder="20000.00" />
-            </div>
-            <div>
-              <label className="form-label">Shënime</label>
-              <input type="text" value={newDraft.notes}
-                onChange={e => setNewDraft(d => ({ ...d, notes: e.target.value }))}
-                className="input-field" placeholder="opsional" />
-            </div>
-          </div>
-          <div className="mt-2 flex justify-end">
-            <button onClick={createContract} disabled={busy} className="btn-primary text-xs disabled:opacity-50">
-              💾 Ruaj Kontratën
-            </button>
-          </div>
-        </div>
-      )}
 
       {loading ? (
         <div className="text-center py-6 text-xs text-slate-400">Duke ngarkuar...</div>
-      ) : contracts.length === 0 ? (
-        <div className="text-center py-6 text-xs text-slate-400 dark:text-slate-500">Nuk ka kontrata të krijuara.</div>
+      ) : people.length === 0 ? (
+        <div className="text-center py-6 text-xs text-slate-400 dark:text-slate-500">Ende s'ka persona. Kliko "+ Person i Ri" për të filluar.</div>
+      ) : filteredPeople.length === 0 ? (
+        <div className="text-center py-6 text-xs text-slate-400 dark:text-slate-500">Asnjë person nuk përputhet me kërkimin.</div>
       ) : (
         <div className="space-y-2">
-          {contracts.map(c => {
+          {filteredPeople.map(person => {
+            const isPersonExpanded = expandedPersonId === person.id
+            const totalBudget = parseFloat(person.total_budget_eur) || 0
+            const totalUsed = parseFloat(person.total_used_eur) || 0
+            return (
+              <div key={person.id} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                <div className="p-3 flex items-start justify-between gap-3 flex-wrap">
+                  <button
+                    onClick={() => setExpandedPersonId(isPersonExpanded ? null : person.id)}
+                    className="flex-1 min-w-[200px] text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{isPersonExpanded ? '👤' : '👥'}</span>
+                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{person.name}</span>
+                      <span className="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px]">
+                        {person.contracts_count} kontrata{person.open_contracts > 0 ? ` · ${person.open_contracts} hapur` : ''}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap gap-x-3">
+                      {person.phone && <span>📞 {person.phone}</span>}
+                      {person.notes && <span>{person.notes}</span>}
+                      <span>Buxheti total: €{fmtEur(totalBudget)}</span>
+                      <span>Përdorur: €{fmtEur(totalUsed)}</span>
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setExpandedPersonId(isPersonExpanded ? null : person.id)} className="btn-secondary text-[11px] px-2 py-1">
+                      {isPersonExpanded ? '▲ Mbylle' : '▼ Kontratat'}
+                    </button>
+                    <button onClick={() => deletePerson(person)} className="btn-secondary text-[11px] px-2 py-1 text-red-600" title="Fshi personin dhe të gjitha kontratat">
+                      🗑
+                    </button>
+                  </div>
+                </div>
+
+                {isPersonExpanded && (
+                  <div className="border-t border-slate-200 dark:border-slate-700 p-3 bg-slate-50/60 dark:bg-slate-800/30">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 uppercase">Kontratat</span>
+                      <button
+                        onClick={() => {
+                          setNewContractFor(person.id)
+                          setNewDraft({ name: '', total_amount_eur: '', notes: '', start_date: date })
+                        }}
+                        className="btn-primary text-[11px] px-2 py-1"
+                      >+ Kontratë e Re</button>
+                    </div>
+                    {contracts.length === 0 ? (
+                      <div className="text-center py-4 text-[11px] text-slate-400 dark:text-slate-500">S'ka asnjë kontratë për këtë person.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {contracts.map(c => {
             const total = parseFloat(c.total_amount_eur) || 0
             const used  = parseFloat(c.used_eur) || 0
             const remaining = Math.max(0, total - used)
@@ -573,64 +666,48 @@ function ContractsSection({ date }) {
                               <td className="py-1 px-1 text-slate-700 dark:text-slate-200">
                                 {e.type === 'product' ? (
                                   <div>
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-semibold">{e.product_name || '(produkt i fshirë)'} × {e.product_qty}</span>
-                                      <button
-                                        onClick={() => toggleMeta(e.id)}
-                                        title="Shfaq/Fshih detajet e produktit"
-                                        className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] leading-none"
-                                      >{showMetaFor.has(e.id) ? '▲' : 'ℹ️'}</button>
+                                    <div className="font-semibold mb-1">{e.product_name || '(produkt i fshirë)'}</div>
+                                    <div className="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700">
+                                      <table className="w-full text-[10px]">
+                                        <thead className="text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50">
+                                          <tr>
+                                            <th className="px-2 py-1 text-left">Barkodi</th>
+                                            <th className="px-2 py-1 text-right">Stok</th>
+                                            <th className="px-2 py-1 text-right">Sasia</th>
+                                            <th className="px-2 py-1 text-right">Gram</th>
+                                            <th className="px-2 py-1 text-right">Cmim Blerje €</th>
+                                            <th className="px-2 py-1 text-right">Cmim Shitje €</th>
+                                            <th className="px-2 py-1 text-right">TVSH %</th>
+                                            <th className="px-2 py-1 text-right">Totali €</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          <tr>
+                                            <td className="px-2 py-1 font-mono text-slate-600 dark:text-slate-300">{e.product_barcode || '—'}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">{e.product_stock != null ? parseInt(e.product_stock) || 0 : '—'}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums font-semibold">{e.product_qty}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">{parseFloat(e.product_gram) > 0 ? parseFloat(e.product_gram).toFixed(3) : '—'}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">{parseFloat(e.product_cost_price) > 0 ? parseFloat(e.product_cost_price).toFixed(2) : '—'}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums text-emerald-800 dark:text-emerald-200 font-semibold">{parseFloat(e.product_sell_price) > 0 ? parseFloat(e.product_sell_price).toFixed(2) : '—'}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums text-slate-600 dark:text-slate-300">{parseFloat(e.product_vat_rate) > 0 ? parseFloat(e.product_vat_rate) : '—'}</td>
+                                            <td className="px-2 py-1 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">€{fmtEur(e.amount_eur)}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
                                     </div>
-                                    {showMetaFor.has(e.id) && (
-                                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-slate-500 dark:text-slate-400 mt-1 p-1.5 rounded bg-slate-100/60 dark:bg-slate-800/40">
-                                        {e.product_barcode && (
-                                          <span className="font-mono">🏷 {e.product_barcode}</span>
-                                        )}
-                                        {e.product_sku && (
-                                          <span className="font-mono">SKU {e.product_sku}</span>
-                                        )}
-                                        {e.product_category && (
-                                          <span>📂 {e.product_category}</span>
-                                        )}
-                                        {e.product_brand && (
-                                          <span>Brend: {e.product_brand}</span>
-                                        )}
-                                        {e.product_material && (
-                                          <span>Material: {e.product_material}</span>
-                                        )}
-                                        {parseFloat(e.product_gram) > 0 && (
-                                          <span>⚖ {parseFloat(e.product_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} gr</span>
-                                        )}
+                                    {(e.product_has_gram > 0 || e.product_sell_rate > 0 || e.product_category || e.product_material) && (
+                                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                        {e.product_category && <span>📂 {e.product_category}</span>}
+                                        {e.product_material && <span>Material: {e.product_material}</span>}
                                         {parseFloat(e.product_has_gram) > 0 && (
-                                          <span className="text-amber-700 dark:text-amber-300">HAS {parseFloat(e.product_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} gr</span>
-                                        )}
-                                        {parseFloat(e.product_kodi) > 0 && (
-                                          <span>Kodi {parseFloat(e.product_kodi).toLocaleString('sq-AL', { maximumFractionDigits: 2 })}</span>
-                                        )}
-                                        {parseFloat(e.product_multiplier) > 0 && (
-                                          <span>Shum. {parseFloat(e.product_multiplier).toLocaleString('sq-AL', { maximumFractionDigits: 2 })}</span>
-                                        )}
-                                        {parseFloat(e.product_has_rate) > 0 && (
-                                          <span>Kursi Blerje {parseFloat(e.product_has_rate).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                          <span className="text-amber-700 dark:text-amber-300">HAS {parseFloat(e.product_has_gram).toFixed(3)} gr</span>
                                         )}
                                         {parseFloat(e.product_sell_rate) > 0 && (
-                                          <span className="text-emerald-700 dark:text-emerald-300">Kursi Shitje {parseFloat(e.product_sell_rate).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                        )}
-                                        {parseFloat(e.product_cost_price) > 0 && (
-                                          <span>Çmim Blerje €{parseFloat(e.product_cost_price).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                        )}
-                                        {parseFloat(e.product_sell_price) > 0 && (
-                                          <span>Çmim Shitje €{parseFloat(e.product_sell_price).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                        )}
-                                        {parseFloat(e.product_vat_rate) > 0 && (
-                                          <span>TVSH {parseFloat(e.product_vat_rate)}%</span>
-                                        )}
-                                        {e.product_stock != null && (
-                                          <span>Stok {parseInt(e.product_stock) || 0}</span>
+                                          <span className="text-emerald-700 dark:text-emerald-300">Kursi Shitje {parseFloat(e.product_sell_rate).toFixed(2)}</span>
                                         )}
                                       </div>
                                     )}
-                                    {e.description && <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{e.description}</div>}
+                                    {e.description && <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 italic">{e.description}</div>}
                                   </div>
                                 ) : (
                                   e.description || <span className="text-slate-400 italic">—</span>
@@ -657,8 +734,107 @@ function ContractsSection({ date }) {
               </div>
             )
           })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
+
+      {showNewPerson && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+             onClick={() => setShowNewPerson(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700"
+               onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">+ Person i Ri</h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Krijoj një person të ri për të grupuar kontratat e marketingut.</p>
+              </div>
+              <button onClick={() => setShowNewPerson(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+            </div>
+            <div className="p-4 space-y-2">
+              <div>
+                <label className="form-label">Emri *</label>
+                <input type="text" value={newPersonDraft.name}
+                  onChange={e => setNewPersonDraft(d => ({ ...d, name: e.target.value }))}
+                  className="input-field" placeholder="p.sh. Dora Kryeziu" autoFocus />
+              </div>
+              <div>
+                <label className="form-label">Telefoni</label>
+                <input type="text" value={newPersonDraft.phone}
+                  onChange={e => setNewPersonDraft(d => ({ ...d, phone: e.target.value }))}
+                  className="input-field" placeholder="opsional" />
+              </div>
+              <div>
+                <label className="form-label">Shënime</label>
+                <input type="text" value={newPersonDraft.notes}
+                  onChange={e => setNewPersonDraft(d => ({ ...d, notes: e.target.value }))}
+                  className="input-field" placeholder="opsional" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <button onClick={() => setShowNewPerson(false)} className="btn-secondary text-xs">Anulo</button>
+              <button onClick={createPerson} disabled={busy} className="btn-primary text-xs disabled:opacity-50">💾 Ruaj</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newContractFor != null && (() => {
+        const person = people.find(x => x.id === newContractFor)
+        if (!person) return null
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+               onClick={() => setNewContractFor(null)}>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700"
+                 onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">+ Kontratë e Re për "{person.name}"</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Një buxhet EUR që plotësohet me zëra produkti ose cash.</p>
+                </div>
+                <button onClick={() => setNewContractFor(null)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+              </div>
+              <div className="p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-end">
+                  <div>
+                    <label className="form-label">Data Fillimit</label>
+                    <input type="date" value={newDraft.start_date || ''}
+                      onChange={e => setNewDraft(d => ({ ...d, start_date: e.target.value }))}
+                      className="input-field" max={date} />
+                  </div>
+                  <div>
+                    <label className="form-label">Emri i kontratës *</label>
+                    <input type="text" value={newDraft.name}
+                      onChange={e => setNewDraft(d => ({ ...d, name: e.target.value }))}
+                      className="input-field" placeholder="p.sh. Fushata Vere 2026" autoFocus />
+                  </div>
+                  <div>
+                    <label className="form-label">Buxheti (EUR) *</label>
+                    <MoneyInput value={newDraft.total_amount_eur}
+                      onChange={v => setNewDraft(d => ({ ...d, total_amount_eur: v }))}
+                      className="input-field" placeholder="20000.00" />
+                  </div>
+                  <div>
+                    <label className="form-label">Shënime</label>
+                    <input type="text" value={newDraft.notes}
+                      onChange={e => setNewDraft(d => ({ ...d, notes: e.target.value }))}
+                      className="input-field" placeholder="opsional" />
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                <button onClick={() => setNewContractFor(null)} className="btn-secondary text-xs">Anulo</button>
+                <button onClick={createContract} disabled={busy} className="btn-primary text-xs disabled:opacity-50">💾 Ruaj Kontratën</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {addEntryFor != null && (() => {
         const c = contracts.find(x => x.id === addEntryFor)
@@ -1091,7 +1267,44 @@ export default function Marketing({ date }) {
         </div>
       </div>
 
-      <ContractsSection date={date} />
+      {/* Filtër Periudhe — në krye të faqes që të aplikohet në të gjithë seksionet më poshtë. */}
+      <div className="card flex flex-wrap items-end gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">📅</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
+        </div>
+        <div>
+          <label className="form-label">Nga data</label>
+          <input
+            type="date" value={fromDate}
+            max={toDate}
+            onChange={e => setFromDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        <div>
+          <label className="form-label">Deri më datë</label>
+          <input
+            type="date" value={toDate}
+            min={fromDate}
+            onChange={e => setToDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+        {rangeActive && (
+          <button
+            onClick={() => { setFromDate(date); setToDate(date) }}
+            className="btn-secondary text-xs"
+          >Pastro filtrin</button>
+        )}
+        {loading && (
+          <span className="text-[11px] text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg border border-blue-200">
+            ⏳ Duke ngarkuar...
+          </span>
+        )}
+      </div>
+
+      <ContractsSection date={date} dateFrom={fromDate} dateTo={toDate} />
 
       {/* Përmbledhje për periudhën — 3 totale (respekton filtrin e datave më poshtë) */}
       {breakdown && (
@@ -1380,43 +1593,6 @@ export default function Marketing({ date }) {
             </button>
           </div>
         </div>
-      </div>
-
-      {/* Filtër Periudhe — i njëjtë me atë të Blerjeve */}
-      <div className="card flex flex-wrap items-end gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">📅</span>
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtër data</span>
-        </div>
-        <div>
-          <label className="form-label">Nga data</label>
-          <input
-            type="date" value={fromDate}
-            max={toDate}
-            onChange={e => setFromDate(e.target.value)}
-            className="input-field"
-          />
-        </div>
-        <div>
-          <label className="form-label">Deri më datë</label>
-          <input
-            type="date" value={toDate}
-            min={fromDate}
-            onChange={e => setToDate(e.target.value)}
-            className="input-field"
-          />
-        </div>
-        {rangeActive && (
-          <button
-            onClick={() => { setFromDate(date); setToDate(date) }}
-            className="btn-secondary text-xs"
-          >Pastro filtrin</button>
-        )}
-        {loading && (
-          <span className="text-[11px] text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg border border-blue-200">
-            ⏳ Duke ngarkuar...
-          </span>
-        )}
       </div>
 
       {/* Existing entries */}

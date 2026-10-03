@@ -21,7 +21,7 @@ const EMPTY_ROW = {
 const TYPE_LABELS = {
   flori:   { title: 'Shitje Flori',       color: 'yellow' },
   diamant: { title: 'Shitje Diamant',     color: 'blue'   },
-  online:  { title: 'Shitje Online/Staff', color: 'purple' },
+  online:  { title: 'Shitje Brenda Stafit', color: 'purple' },
 }
 
 // ── Inventory.xlsx column map (0-indexed) ──────────────────────────────────

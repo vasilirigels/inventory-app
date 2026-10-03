@@ -956,12 +956,12 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-            {online ? '🛒 Shitje Online' : 'Fatura të Shitjes'}
+            {online ? '🛒 Shitje Brenda Stafit' : 'Fatura të Shitjes'}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {fromDate === toDate
-              ? (online ? 'Porositë online për këtë datë' : 'Lista e faturave për këtë datë')
-              : (online ? `Porositë online nga ${fromDate} në ${toDate}` : `Lista e faturave nga ${fromDate} në ${toDate}`)}
+              ? (online ? 'Shitjet Brenda Stafit për këtë datë' : 'Lista e faturave për këtë datë')
+              : (online ? `Shitjet Brenda Stafit nga ${fromDate} në ${toDate}` : `Lista e faturave nga ${fromDate} në ${toDate}`)}
             {filtersActive && <span className="ml-2 text-blue-600">· {list.length} të filtruara nga {rawList.length}</span>}
           </p>
           {online && (

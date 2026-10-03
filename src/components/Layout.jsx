@@ -9,7 +9,7 @@ const SALES_ALLOWED_PAGES = new Set([
   'dashboard',
   // Shitje
   'fatura-shitje',        // krijim fature shitjeje
-  'shitje-online',        // shitje brenda stafit
+  'shitje-online',        // Shitje Brenda Stafit
   'kthime-online',        // kthime (diamante/flori)
   'kthim-produkt',        // Kthim produkti nga faturë shitjeje
   'porosi',               // Porosi (regjistrim + statusi)
@@ -67,7 +67,7 @@ const NAV_GROUPS = [
         id: 'shitje', label: 'Shitje', icon: '⬆️',
         children: [
           { id: 'fatura-shitje',         label: 'FATURA SHITJE' },
-          { id: 'shitje-online',         label: '🛒 Shitje Online' },
+          { id: 'shitje-online',         label: '🛒 Shitje Brenda Stafit' },
           { id: 'porosi',                label: '🛠️ Porosi' },
           { id: 'kthim-produkt',         label: '🔄 Kthim Produkt' },
           { id: 'shitje-klering',        label: 'Pagesë me Klering' },

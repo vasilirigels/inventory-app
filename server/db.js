@@ -1011,6 +1011,19 @@ const MIGRATIONS = [
     active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
+
+  // Marketing — Personat: tabelë e re që grupon kontratat e marketing-ut sipas
+  // personit (influencer, agjent, biznes). Një person mund të ketë shumë
+  // kontrata. Emri është unik që backfill-i të jetë idempotent.
+  `CREATE TABLE IF NOT EXISTS marketing_people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    phone TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "ALTER TABLE marketing_contracts ADD COLUMN person_id INTEGER DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_marketing_contracts_person ON marketing_contracts(person_id)",
 ];
 
 async function initDB() {
@@ -1091,6 +1104,28 @@ async function initDB() {
     // kjo është vetëm rregullim një-herë për të dhënat ekzistuese.
     client.execute(`UPDATE products SET active = 0 WHERE stock = 0 AND active = 1`),
   ]);
+
+  // Backfill marketing_people nga emrat ekzistues të marketing_contracts.
+  // Këto duhen SEKUENCIAL (INSERT para UPDATE) dhe PAS skemës së marketing_people,
+  // ndaj nuk shkojnë te MIGRATIONS (që ekzekutohet në paralel me Promise.allSettled
+  // dhe injoron dështimet — INSERT para CREATE do dështonte në heshtje).
+  try {
+    await client.execute(`
+      INSERT OR IGNORE INTO marketing_people (name)
+        SELECT DISTINCT TRIM(name) FROM marketing_contracts
+         WHERE name IS NOT NULL AND TRIM(name) != ''
+    `);
+    await client.execute(`
+      UPDATE marketing_contracts
+         SET person_id = (
+           SELECT mp.id FROM marketing_people mp WHERE mp.name = TRIM(marketing_contracts.name)
+         )
+       WHERE (person_id IS NULL OR person_id = 0)
+         AND name IS NOT NULL AND TRIM(name) != ''
+    `);
+  } catch (e) {
+    console.warn('marketing_people backfill skipped:', e.message);
+  }
 
   initialized = true;
   return client;

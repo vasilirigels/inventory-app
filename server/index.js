@@ -9128,14 +9128,148 @@ app.delete('/api/marketing-entries/:id', async (req, res) => {
 
 app.get('/api/marketing-contracts', async (req, res) => {
   try {
+    const { person_id, from, to } = req.query;
+    const fromD = from || '0000-01-01';
+    const toD   = to   || '9999-12-31';
+    const hasRange = !!(from || to);
+    const conds = [];
+    const params = [];
+    if (person_id) { conds.push('mc.person_id = ?'); params.push(parseInt(person_id)); }
+    if (hasRange) {
+      // Filtrim mbi datën e fillimit të kontratës — kontratat që kanë nisur
+      // jashtë intervalit fshihen krejt. (Përdoruesi pret këtë sjellje intuitive.)
+      conds.push(`COALESCE(mc.start_date, '') != '' AND mc.start_date BETWEEN ? AND ?`);
+      params.push(fromD, toD);
+    }
+    const whereClause = conds.length ? ('WHERE ' + conds.join(' AND ')) : '';
     const rows = await queryAll(
       `SELECT mc.*,
               COALESCE((SELECT SUM(amount_eur) FROM marketing_contract_entries WHERE contract_id = mc.id), 0) AS used_eur,
               COALESCE((SELECT COUNT(*) FROM marketing_contract_entries WHERE contract_id = mc.id), 0) AS entries_count
          FROM marketing_contracts mc
-        ORDER BY (mc.status = 'closed') ASC, mc.created_at DESC`
+         ${whereClause}
+        ORDER BY (mc.status = 'closed') ASC, mc.created_at DESC`,
+      params
     );
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Marketing — Personat (grupon kontratat sipas emrit të personit).
+// Kur jepet from/to, filtrohen VETËM personat që kanë të paktën një kontratë
+// me start_date në interval. Agregatet llogariten për ato kontrata.
+app.get('/api/marketing-people', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const fromD = from || '0000-01-01';
+    const toD   = to   || '9999-12-31';
+    const hasRange = !!(from || to);
+    if (hasRange) {
+      const rows = await queryAll(
+        `SELECT mp.*,
+                COALESCE((SELECT COUNT(*) FROM marketing_contracts mc
+                           WHERE mc.person_id = mp.id
+                             AND COALESCE(mc.start_date, '') != ''
+                             AND mc.start_date BETWEEN ? AND ?), 0) AS contracts_count,
+                COALESCE((SELECT COUNT(*) FROM marketing_contracts mc
+                           WHERE mc.person_id = mp.id AND mc.status = 'open'
+                             AND COALESCE(mc.start_date, '') != ''
+                             AND mc.start_date BETWEEN ? AND ?), 0) AS open_contracts,
+                COALESCE((SELECT SUM(mc.total_amount_eur) FROM marketing_contracts mc
+                           WHERE mc.person_id = mp.id
+                             AND COALESCE(mc.start_date, '') != ''
+                             AND mc.start_date BETWEEN ? AND ?), 0) AS total_budget_eur,
+                COALESCE((SELECT SUM(e.amount_eur)
+                            FROM marketing_contract_entries e
+                            JOIN marketing_contracts mc ON mc.id = e.contract_id
+                           WHERE mc.person_id = mp.id
+                             AND COALESCE(mc.start_date, '') != ''
+                             AND mc.start_date BETWEEN ? AND ?), 0) AS total_used_eur
+           FROM marketing_people mp
+          WHERE EXISTS (
+            SELECT 1 FROM marketing_contracts mc
+             WHERE mc.person_id = mp.id
+               AND COALESCE(mc.start_date, '') != ''
+               AND mc.start_date BETWEEN ? AND ?
+          )
+          ORDER BY mp.name COLLATE NOCASE ASC`,
+        [fromD, toD, fromD, toD, fromD, toD, fromD, toD, fromD, toD]
+      );
+      return res.json(rows);
+    }
+    const rows = await queryAll(
+      `SELECT mp.*,
+              COALESCE((SELECT COUNT(*) FROM marketing_contracts WHERE person_id = mp.id), 0) AS contracts_count,
+              COALESCE((SELECT COUNT(*) FROM marketing_contracts WHERE person_id = mp.id AND status = 'open'), 0) AS open_contracts,
+              COALESCE((SELECT SUM(total_amount_eur) FROM marketing_contracts WHERE person_id = mp.id), 0) AS total_budget_eur,
+              COALESCE((
+                SELECT SUM(amount_eur) FROM marketing_contract_entries
+                 WHERE contract_id IN (SELECT id FROM marketing_contracts WHERE person_id = mp.id)
+              ), 0) AS total_used_eur
+         FROM marketing_people mp
+        ORDER BY mp.name COLLATE NOCASE ASC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/marketing-people', async (req, res) => {
+  try {
+    const { name, phone, notes } = req.body || {};
+    const n = String(name || '').trim();
+    if (!n) return res.status(400).json({ error: 'name required' });
+    const existing = await queryOne('SELECT id FROM marketing_people WHERE name = ?', [n]);
+    if (existing) return res.status(409).json({ error: 'Një person me këtë emër ekziston.' });
+    await run(
+      'INSERT INTO marketing_people (name, phone, notes) VALUES (?, ?, ?)',
+      [n, phone || '', notes || '']
+    );
+    const row = await queryOne('SELECT * FROM marketing_people ORDER BY id DESC LIMIT 1');
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/marketing-people/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await queryOne('SELECT * FROM marketing_people WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const { name, phone, notes } = req.body || {};
+    const n = name != null ? String(name).trim() : existing.name;
+    if (!n) return res.status(400).json({ error: 'name required' });
+    if (n !== existing.name) {
+      const dup = await queryOne('SELECT id FROM marketing_people WHERE name = ? AND id != ?', [n, id]);
+      if (dup) return res.status(409).json({ error: 'Një person tjetër me këtë emër ekziston.' });
+    }
+    await run(
+      'UPDATE marketing_people SET name = ?, phone = ?, notes = ? WHERE id = ?',
+      [n, phone != null ? phone : existing.phone, notes != null ? notes : existing.notes, id]
+    );
+    res.json(await queryOne('SELECT * FROM marketing_people WHERE id = ?', [id]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/marketing-people/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Rikthe stokun për të gjitha product entries nga të gjitha kontratat e këtij personi.
+    const contracts = await queryAll('SELECT id FROM marketing_contracts WHERE person_id = ?', [id]);
+    for (const c of contracts) {
+      const productEntries = await queryAll(
+        `SELECT product_id, product_qty FROM marketing_contract_entries
+          WHERE contract_id = ? AND type = 'product' AND product_id IS NOT NULL`,
+        [c.id]
+      );
+      for (const e of productEntries) {
+        if (e.product_qty > 0) {
+          await run('UPDATE products SET stock = stock + ? WHERE id = ?', [e.product_qty, e.product_id]);
+        }
+      }
+      await run('DELETE FROM marketing_contract_entries WHERE contract_id = ?', [c.id]);
+      await run('DELETE FROM marketing_contracts WHERE id = ?', [c.id]);
+    }
+    await run('DELETE FROM marketing_people WHERE id = ?', [id]);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9170,13 +9304,17 @@ app.get('/api/marketing-contracts/:id', async (req, res) => {
 
 app.post('/api/marketing-contracts', async (req, res) => {
   try {
-    const { name, total_amount_eur, notes, start_date } = req.body || {};
+    const { name, total_amount_eur, notes, start_date, person_id } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'name required' });
     const total = parseFloat(total_amount_eur) || 0;
     if (total <= 0) return res.status(400).json({ error: 'total_amount_eur must be > 0' });
+    const pid = parseInt(person_id) || 0;
+    if (!pid) return res.status(400).json({ error: 'person_id required' });
+    const person = await queryOne('SELECT id FROM marketing_people WHERE id = ?', [pid]);
+    if (!person) return res.status(400).json({ error: 'Personi nuk ekziston.' });
     await run(
-      `INSERT INTO marketing_contracts (name, total_amount_eur, notes, status, start_date) VALUES (?, ?, ?, 'open', ?)`,
-      [String(name).trim(), total, notes || '', start_date || '']
+      `INSERT INTO marketing_contracts (name, total_amount_eur, notes, status, start_date, person_id) VALUES (?, ?, ?, 'open', ?, ?)`,
+      [String(name).trim(), total, notes || '', start_date || '', pid]
     );
     const row = await queryOne('SELECT * FROM marketing_contracts ORDER BY id DESC LIMIT 1');
     res.json(row);
