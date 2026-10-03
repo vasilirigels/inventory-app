@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import MoneyInput from './MoneyInput.jsx'
 import { showConfirm } from './ConfirmDialog.jsx'
-import { getUser, getSalesMinDate } from '../lib/auth.js'
+import { getUser, getSalesMinDate, isSales } from '../lib/auth.js'
 
 const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF']
 
@@ -35,6 +35,7 @@ export default function Kasaforta() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [manageDate, setManageDate] = useState(null) // 'YYYY-MM-DD' ose null
   const isAdmin = getUser()?.role === 'admin'
+  const isSalesRole = isSales()
 
   useEffect(() => {
     let cancel = false
@@ -52,7 +53,12 @@ export default function Kasaforta() {
 
   const { balance: currentBalance = {}, history: rawHistory = [] } = data
 
+  // Shitësi sheh vetëm 30 ditët e fundit — çdo rresht më i vjetër fshihet
+  // para se të aplikohet filtri i user-it (që edhe pse user-i pastron filtrin,
+  // të mos i duken rreshtat e vjetër).
+  const salesMinDate = getSalesMinDate()
   const history = rawHistory.filter(r => {
+    if (salesMinDate && r.date < salesMinDate) return false
     if (dateRange.from && r.date < dateRange.from) return false
     if (dateRange.to   && r.date > dateRange.to)   return false
     return true
@@ -103,8 +109,9 @@ export default function Kasaforta() {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => setShowDeposit(true)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-sm"
-              title="Fut kesh direkt në kasafortë"
+              disabled={isSalesRole}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-sm disabled:bg-slate-500 disabled:hover:bg-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+              title={isSalesRole ? 'Vetëm admini mund të derdhë në kasafortë' : 'Fut kesh direkt në kasafortë'}
             >💰 Derdh në Kasafortë</button>
             <button
               onClick={() => setShowConvert(true)}
