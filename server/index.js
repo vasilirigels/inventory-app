@@ -6191,6 +6191,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
          COALESCE(i.paid_cash, 0)             AS paid_cash,
          COALESCE(i.paid_pos, 0)              AS paid_pos,
          COALESCE(i.paid_bank, 0)             AS paid_bank,
+         COALESCE(i.amount_due, 0)            AS amount_due,
          COALESCE(i.is_credit_note, 0)        AS is_credit_note,
          (COALESCE(i.amount_paid, 0)
            - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)
@@ -6237,14 +6238,18 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
 
       // ── Kthimet (kreditoret) — ndahen nga xhiro ──────────────────────────
       // total_with_vat është negativ; ekspozojmë vlerë pozitive për UI.
+      // Kujdes: `total` = vlera bruto e artikujve të kthyer (p.sh. 800), ndërsa
+      // paid_cash/paid_bank/paid_pos mbajnë rimbursimin real (p.sh. 500 kur user
+      // vendos çmim më të ulët sesa fatura origjinale). Për ndarjen cash/bankë/
+      // POS përdorim vlerat reale të pagesës, që arka të pasqyrojë keshin që
+      // doli faktikisht nga sirtari, jo vlerën e plotë të faturës origjinale.
       if (r.is_credit_note) {
         credit_note_count += 1;
-        const abs = Math.abs(r.total);
-        returns_gross[c] += abs;
-        if (r.pm === 'cash')      returns_cash[c] += abs;
-        else if (r.pm === 'bank') returns_bank[c] += abs;
-        else if (r.pm === 'pos')  returns_pos[c]  += abs;
-        else if (r.pm === 'debt') returns_debt[c] += abs;
+        returns_gross[c] += Math.abs(r.total);
+        if (r.pm === 'cash')      returns_cash[c] += Math.abs(r.paid_cash || 0);
+        else if (r.pm === 'bank') returns_bank[c] += Math.abs(r.paid_bank || 0);
+        else if (r.pm === 'pos')  returns_pos[c]  += Math.abs(r.paid_pos  || 0);
+        else if (r.pm === 'debt') returns_debt[c] += Math.abs(r.amount_due || 0);
         else if (r.pm === 'mikse') {
           const splits = splitsByInv[r.id] || [];
           for (const s of splits) {
