@@ -9810,7 +9810,7 @@ app.get('/api/reports/marketing', async (req, res) => {
 });
 
 async function computeMarketingBreakdown(from, to) {
-  const [contractCash, contractProd, directCash, directProd] = await Promise.all([
+  const [contractCash, contractProd, directCash, directProd, directCashPeople, contractPeople] = await Promise.all([
     queryOne(
       `SELECT COALESCE(SUM(amount_eur), 0) AS total, COUNT(*) AS cnt
          FROM marketing_contract_entries
@@ -9841,6 +9841,34 @@ async function computeMarketingBreakdown(from, to) {
         WHERE m.date BETWEEN ? AND ? AND m.product_id IS NOT NULL`,
       [from, to]
     ),
+    queryAll(
+      `SELECT m.date AS date,
+              COALESCE(c.name, '— pa zër —') AS name,
+              COALESCE(SUM(m.amount_eur), 0) AS total,
+              COUNT(*) AS cnt
+         FROM marketing_expenses m
+         LEFT JOIN marketing_categories c ON c.id = m.category_id
+        WHERE m.date BETWEEN ? AND ? AND m.product_id IS NULL
+        GROUP BY m.date, COALESCE(c.name, '— pa zër —')
+        ORDER BY m.date DESC, total DESC`,
+      [from, to]
+    ),
+    queryAll(
+      `SELECT mce.date AS date,
+              COALESCE(mp.name, '— pa person —') AS name,
+              COALESCE(SUM(CASE WHEN mce.type = 'cash' THEN mce.amount_eur ELSE 0 END), 0) AS cash_eur,
+              COALESCE(SUM(CASE WHEN mce.type = 'product' THEN mce.amount_eur ELSE 0 END), 0) AS prod_eur,
+              COALESCE(SUM(CASE WHEN mce.type = 'product' THEN mce.product_qty ELSE 0 END), 0) AS prod_qty,
+              SUM(CASE WHEN mce.type = 'cash' THEN 1 ELSE 0 END) AS cash_cnt,
+              SUM(CASE WHEN mce.type = 'product' THEN 1 ELSE 0 END) AS prod_cnt
+         FROM marketing_contract_entries mce
+         LEFT JOIN marketing_contracts mc ON mc.id = mce.contract_id
+         LEFT JOIN marketing_people mp ON mp.id = mc.person_id
+        WHERE mce.date BETWEEN ? AND ?
+        GROUP BY mce.date, COALESCE(mp.name, '— pa person —')
+        ORDER BY mce.date DESC, (COALESCE(SUM(mce.amount_eur), 0)) DESC`,
+      [from, to]
+    ),
   ]);
   const contractProdSell = contractProd.reduce((s, r) => s + (r.amt || 0), 0);
   const contractProdCost = contractProd.reduce((s, r) => s + (r.qty * r.cost || 0), 0);
@@ -9862,6 +9890,22 @@ async function computeMarketingBreakdown(from, to) {
     direct_products_qty:         directProdQty,
     direct_count_cash:           directCash?.cnt || 0,
     direct_count_products:       directProd.length,
+    direct_cash_people:          directCashPeople.map(p => ({
+      date: p.date,
+      name: p.name,
+      total_eur: +(p.total || 0).toFixed(2),
+      count: p.cnt || 0,
+    })),
+    contracts_people:            contractPeople.map(p => ({
+      date: p.date,
+      name: p.name,
+      cash_eur: +(p.cash_eur || 0).toFixed(2),
+      products_eur: +(p.prod_eur || 0).toFixed(2),
+      total_eur: +((p.cash_eur || 0) + (p.prod_eur || 0)).toFixed(2),
+      cash_count: p.cash_cnt || 0,
+      products_count: p.prod_cnt || 0,
+      products_qty: p.prod_qty || 0,
+    })),
   };
 }
 

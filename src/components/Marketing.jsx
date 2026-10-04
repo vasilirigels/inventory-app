@@ -1331,6 +1331,25 @@ export default function Marketing({ date }) {
                 )}
               </div>
             </div>
+            {Array.isArray(breakdown.contracts_people) && breakdown.contracts_people.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-emerald-200/70 dark:border-emerald-800/70 space-y-0.5">
+                {breakdown.contracts_people.map((p, i) => (
+                  <div key={`${p.date}-${p.name}-${i}`} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-emerald-800 dark:text-emerald-200 truncate">
+                      <span className="font-mono text-emerald-600/80 dark:text-emerald-400/80 mr-1.5">{fmtDate(p.date)}</span>
+                      {p.name}
+                      <span className="text-emerald-600/70 dark:text-emerald-400/70 ml-1">
+                        · {p.cash_count} cash
+                        {p.products_count > 0 ? ` · ${p.products_qty} prod` : ''}
+                      </span>
+                    </span>
+                    <span className="font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
+                      €{(p.total_eur || 0).toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="card border-2 border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-900/20">
             <div className="flex items-start justify-between gap-2">
@@ -1346,6 +1365,22 @@ export default function Marketing({ date }) {
                 </div>
               </div>
             </div>
+            {Array.isArray(breakdown.direct_cash_people) && breakdown.direct_cash_people.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-amber-200/70 dark:border-amber-800/70 space-y-0.5">
+                {breakdown.direct_cash_people.map((p, i) => (
+                  <div key={`${p.date}-${p.name}-${i}`} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-amber-800 dark:text-amber-200 truncate">
+                      <span className="font-mono text-amber-600/80 dark:text-amber-400/80 mr-1.5">{fmtDate(p.date)}</span>
+                      {p.name}
+                      <span className="text-amber-600/70 dark:text-amber-400/70 ml-1">· {p.count}</span>
+                    </span>
+                    <span className="font-semibold tabular-nums text-amber-900 dark:text-amber-100">
+                      €{(p.total_eur || 0).toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="card border-2 border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-50/60 dark:bg-fuchsia-900/20">
             <div className="flex items-start justify-between gap-2">
