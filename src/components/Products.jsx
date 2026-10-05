@@ -833,9 +833,17 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
   // Formula flori — vetëm çmimi i shitjes:
   //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
   // has_gram, cost_price, has_rate merren nga importi/user-i pa formulë.
-  // Diamanti nuk përdor logjikën e florit — cost/sell futen dorazi.
+  // Diamanti përdor formulë të vetën: sell_price = cost_price × multiplier.
   useEffect(() => {
-    if (rowData.category === 'Diamant') return
+    if (rowData.category === 'Diamant') {
+      const cp  = parseFloat(rowData.cost_price) || 0
+      const mul = parseFloat(rowData.multiplier) || 0
+      if (cp <= 0 || mul <= 0) return
+      const newSell = +(cp * mul).toFixed(2)
+      if (String(newSell) === String(parseFloat(rowData.sell_price) || 0)) return
+      onChange({ sell_price: String(newSell) })
+      return
+    }
     const hg  = parseFloat(rowData.has_gram) || 0
     const mul = parseFloat(rowData.multiplier) || 0
     const hr  = parseFloat(rowData.has_rate) || 0
@@ -847,7 +855,7 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
     if (String(newSell) === String(parseFloat(rowData.sell_price) || 0)) return
     onChange({ sell_price: String(newSell) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowData.has_gram, rowData.multiplier, rowData.has_rate, rowData.sell_rate, rowData.category])
+  }, [rowData.has_gram, rowData.multiplier, rowData.has_rate, rowData.sell_rate, rowData.category, rowData.cost_price])
 
   return (
     <tr className="border-b border-slate-200 dark:border-slate-700 bg-blue-50/40 dark:bg-blue-900/10">
@@ -1075,9 +1083,19 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   // Formula flori — vetëm çmimi i shitjes:
   //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
   // has_gram, cost_price, has_rate, gram, kodi merren nga importi/user-i pa formulë.
-  // Diamanti nuk përdor logjikën e florit — cost/sell futen dorazi.
+  // Diamanti përdor formulë të vetën: sell_price = cost_price × multiplier.
   useEffect(() => {
-    if (form.category === 'Diamant') return
+    if (form.category === 'Diamant') {
+      const cp  = parseFloat(form.cost_price) || 0
+      const mul = parseFloat(form.multiplier) || 0
+      if (cp <= 0 || mul <= 0) return
+      const newSell = +(cp * mul).toFixed(2)
+      setForm(prev => {
+        if (String(newSell) === String(parseFloat(prev.sell_price) || 0)) return prev
+        return { ...prev, sell_price: String(newSell) }
+      })
+      return
+    }
     const hg  = parseFloat(form.has_gram) || 0
     const mul = parseFloat(form.multiplier) || 0
     const hr  = parseFloat(form.has_rate) || 0
@@ -1090,7 +1108,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       if (String(newSell) === String(parseFloat(prev.sell_price) || 0)) return prev
       return { ...prev, sell_price: String(newSell) }
     })
-  }, [form.has_gram, form.multiplier, form.has_rate, form.sell_rate, form.category])
+  }, [form.has_gram, form.multiplier, form.has_rate, form.sell_rate, form.category, form.cost_price])
 
   // Ekzekuton PUT me formin më të fundit. Përdoret nga debounce dhe nga
   // butoni manual 💾. Pret çdo save të mëparshëm të mbarojë para se të nisë
@@ -1396,9 +1414,19 @@ function ProductModal({ product, onClose, onSave }) {
   //   has_gram   = (kodi/1000 + has_rate/1000) × gram
   //   cost_price = has_gram × has_rate
   //   sell_price = has_gram × multiplier × sell_rate    (sell_rate ose has_rate si fallback)
-  // Diamanti nuk përdor logjikën e florit — cost/sell futen dorazi.
+  // Diamanti përdor formulë të vetën: sell_price = cost_price × multiplier.
   useEffect(() => {
-    if (form.category === 'Diamant') return
+    if (form.category === 'Diamant') {
+      const cp  = parseFloat(form.cost_price) || 0
+      const mul = parseFloat(form.multiplier) || 0
+      if (cp <= 0 || mul <= 0) return
+      const newSell = +(cp * mul).toFixed(2)
+      setForm(prev => {
+        if (String(newSell) === String(parseFloat(prev.sell_price) || 0)) return prev
+        return { ...prev, sell_price: String(newSell) }
+      })
+      return
+    }
     const g   = parseFloat(form.gram) || 0
     const k   = parseFloat(form.kodi) || 0
     const hr  = parseFloat(form.has_rate) || 0
@@ -1416,7 +1444,7 @@ function ProductModal({ product, onClose, onSave }) {
       if (newSell != null && String(newSell) !== String(parseFloat(prev.sell_price) || 0)) patch.sell_price = String(newSell)
       return Object.keys(patch).length ? { ...prev, ...patch } : prev
     })
-  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate, form.category])
+  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate, form.category, form.cost_price])
 
   const margin =
     parseFloat(form.cost_price) > 0 && parseFloat(form.sell_price) > 0
