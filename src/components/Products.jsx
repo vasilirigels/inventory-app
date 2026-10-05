@@ -833,7 +833,9 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
   // Formula flori — vetëm çmimi i shitjes:
   //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
   // has_gram, cost_price, has_rate merren nga importi/user-i pa formulë.
+  // Diamanti nuk përdor logjikën e florit — cost/sell futen dorazi.
   useEffect(() => {
+    if (rowData.category === 'Diamant') return
     const hg  = parseFloat(rowData.has_gram) || 0
     const mul = parseFloat(rowData.multiplier) || 0
     const hr  = parseFloat(rowData.has_rate) || 0
@@ -845,7 +847,7 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
     if (String(newSell) === String(parseFloat(rowData.sell_price) || 0)) return
     onChange({ sell_price: String(newSell) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowData.has_gram, rowData.multiplier, rowData.has_rate, rowData.sell_rate])
+  }, [rowData.has_gram, rowData.multiplier, rowData.has_rate, rowData.sell_rate, rowData.category])
 
   return (
     <tr className="border-b border-slate-200 dark:border-slate-700 bg-blue-50/40 dark:bg-blue-900/10">
@@ -879,20 +881,25 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <input type="number" step="1" min="0" value={rowData.kodi}
           onChange={e => set('kodi', e.target.value)}
-          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+          disabled={rowData.category === 'Diamant'}
+          title={rowData.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
+          className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 ${rowData.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
           placeholder="585" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <input type="number" step="0.001" min="0" value={rowData.has_gram}
           onChange={e => set('has_gram', e.target.value)}
-          className="input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300"
+          disabled={rowData.category === 'Diamant'}
+          title={rowData.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
+          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${rowData.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
           placeholder="0.000" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <div className="flex items-center gap-1">
           <MoneyInput value={rowData.has_rate}
             onChange={v => set('has_rate', String(v))}
-            className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
+            disabled={rowData.category === 'Diamant'}
+            className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0 ${rowData.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
             placeholder="0.00" />
           <span
             title="Valuta: USD (fikse për Kursi Blerje)"
@@ -927,7 +934,8 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
         <div className="flex items-center gap-1">
           <MoneyInput value={rowData.sell_rate}
             onChange={v => set('sell_rate', String(v))}
-            className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
+            disabled={rowData.category === 'Diamant'}
+            className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0 ${rowData.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
             placeholder="0.00" />
           <CurrencyToggle value={rowData.sell_rate_currency}
             onChange={v => set('sell_rate_currency', v)} />
@@ -946,8 +954,8 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
       <td className="px-1 py-1">
         <MoneyInput value={rowData.sell_price}
           onChange={v => set('sell_price', String(v))}
-          disabled={parseFloat(rowData.has_gram) > 0 && parseFloat(rowData.multiplier) > 0}
-          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(rowData.has_gram) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          disabled={rowData.category !== 'Diamant' && parseFloat(rowData.has_gram) > 0 && parseFloat(rowData.multiplier) > 0}
+          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${rowData.category !== 'Diamant' && parseFloat(rowData.has_gram) > 0 && parseFloat(rowData.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
           placeholder="0.00" />
       </td>
       {(() => {
@@ -1067,7 +1075,9 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
   // Formula flori — vetëm çmimi i shitjes:
   //   sell_price = has_gram × multiplier × sell_rate   (fallback: has_rate)
   // has_gram, cost_price, has_rate, gram, kodi merren nga importi/user-i pa formulë.
+  // Diamanti nuk përdor logjikën e florit — cost/sell futen dorazi.
   useEffect(() => {
+    if (form.category === 'Diamant') return
     const hg  = parseFloat(form.has_gram) || 0
     const mul = parseFloat(form.multiplier) || 0
     const hr  = parseFloat(form.has_rate) || 0
@@ -1080,7 +1090,7 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       if (String(newSell) === String(parseFloat(prev.sell_price) || 0)) return prev
       return { ...prev, sell_price: String(newSell) }
     })
-  }, [form.has_gram, form.multiplier, form.has_rate, form.sell_rate])
+  }, [form.has_gram, form.multiplier, form.has_rate, form.sell_rate, form.category])
 
   // Ekzekuton PUT me formin më të fundit. Përdoret nga debounce dhe nga
   // butoni manual 💾. Pret çdo save të mëparshëm të mbarojë para se të nisë
@@ -1207,20 +1217,25 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <input type="number" step="1" min="0" value={form.kodi}
           onChange={e => set('kodi', e.target.value)}
-          className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200"
+          disabled={form.category === 'Diamant'}
+          title={form.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
+          className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
           placeholder="585" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <input type="number" step="0.001" min="0" value={form.has_gram}
           onChange={e => set('has_gram', e.target.value)}
-          className="input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300"
+          disabled={form.category === 'Diamant'}
+          title={form.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
+          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
           placeholder="0.000" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <div className="flex items-center gap-1">
           <MoneyInput value={form.has_rate}
             onChange={v => set('has_rate', String(v))}
-            className="input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0"
+            disabled={form.category === 'Diamant'}
+            className={`input-field-sm text-right font-semibold text-amber-800 dark:text-amber-200 flex-1 min-w-0 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
             placeholder="0.00" />
           <span
             title="Valuta: USD (fikse për Kursi Blerje)"
@@ -1255,7 +1270,8 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
         <div className="flex items-center gap-1">
           <MoneyInput value={form.sell_rate}
             onChange={v => set('sell_rate', String(v))}
-            className="input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0"
+            disabled={form.category === 'Diamant'}
+            className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 flex-1 min-w-0 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
             placeholder="0.00" />
           <CurrencyToggle value={form.sell_rate_currency}
             onChange={v => set('sell_rate_currency', v)} />
@@ -1274,9 +1290,9 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
       <td className="px-1 py-1">
         <MoneyInput value={form.sell_price}
           onChange={v => set('sell_price', String(v))}
-          disabled={parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0}
-          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-          title={parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: Cmim Blerje Has × Shumëzues × Kursi Shitje' : undefined}
+          disabled={form.category !== 'Diamant' && parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0}
+          className={`input-field-sm text-right font-bold text-slate-900 dark:text-white ${form.category !== 'Diamant' && parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0 ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+          title={form.category !== 'Diamant' && parseFloat(form.has_gram) > 0 && parseFloat(form.multiplier) > 0 ? 'Auto: Cmim Blerje Has × Shumëzues × Kursi Shitje' : undefined}
           placeholder="0.00" />
       </td>
       {(() => {
@@ -1380,7 +1396,9 @@ function ProductModal({ product, onClose, onSave }) {
   //   has_gram   = (kodi/1000 + has_rate/1000) × gram
   //   cost_price = has_gram × has_rate
   //   sell_price = has_gram × multiplier × sell_rate    (sell_rate ose has_rate si fallback)
+  // Diamanti nuk përdor logjikën e florit — cost/sell futen dorazi.
   useEffect(() => {
+    if (form.category === 'Diamant') return
     const g   = parseFloat(form.gram) || 0
     const k   = parseFloat(form.kodi) || 0
     const hr  = parseFloat(form.has_rate) || 0
@@ -1398,7 +1416,7 @@ function ProductModal({ product, onClose, onSave }) {
       if (newSell != null && String(newSell) !== String(parseFloat(prev.sell_price) || 0)) patch.sell_price = String(newSell)
       return Object.keys(patch).length ? { ...prev, ...patch } : prev
     })
-  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate])
+  }, [form.gram, form.kodi, form.has_rate, form.multiplier, form.sell_rate, form.category])
 
   const margin =
     parseFloat(form.cost_price) > 0 && parseFloat(form.sell_price) > 0
@@ -1539,14 +1557,18 @@ function ProductModal({ product, onClose, onSave }) {
                   <label className="form-label">Kodi (585/750...)</label>
                   <input type="number" step="1" min="0" value={form.kodi}
                     onChange={e => set('kodi', e.target.value)}
-                    className="input-field font-semibold text-amber-800 dark:text-amber-200"
+                    disabled={form.category === 'Diamant'}
+                    title={form.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
+                    className={`input-field font-semibold text-amber-800 dark:text-amber-200 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
                     placeholder="585" />
                 </div>
                 <div>
                   <label className="form-label">Blerje Ne Monedhe</label>
                   <input type="number" step="0.001" min="0" value={form.has_gram}
                     onChange={e => set('has_gram', e.target.value)}
-                    className="input-field"
+                    disabled={form.category === 'Diamant'}
+                    title={form.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
+                    className={`input-field ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
                     placeholder="0.000" />
                 </div>
                 <div>
@@ -1559,7 +1581,8 @@ function ProductModal({ product, onClose, onSave }) {
                   <label className="form-label">Kursi Blerje ($/g)</label>
                   <MoneyInput value={form.has_rate}
                     onChange={v => set('has_rate', String(v))}
-                    className="input-field tabular-nums font-semibold text-amber-800 dark:text-amber-200"
+                    disabled={form.category === 'Diamant'}
+                    className={`input-field tabular-nums font-semibold text-amber-800 dark:text-amber-200 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
                     placeholder="0.00" />
                 </div>
                 <div>
@@ -1573,7 +1596,8 @@ function ProductModal({ product, onClose, onSave }) {
                   <label className="form-label">Kursi Shitje (EUR/g)</label>
                   <MoneyInput value={form.sell_rate}
                     onChange={v => set('sell_rate', String(v))}
-                    className="input-field tabular-nums font-semibold text-emerald-800 dark:text-emerald-200"
+                    disabled={form.category === 'Diamant'}
+                    className={`input-field tabular-nums font-semibold text-emerald-800 dark:text-emerald-200 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
                     placeholder="0.00" />
                 </div>
                 <p className="col-span-3 text-[10px] text-amber-700 dark:text-amber-300">
