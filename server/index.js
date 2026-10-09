@@ -8109,7 +8109,182 @@ app.get('/api/reports/sales-items', async (req, res) => {
       };
     }
 
-    res.json({ rows, rowsDetailed, totals, totalsByMaterial, totalsByCurrency });
+    // ── Marketing in-kind — produktet e dhëna si marketing (direkt + nga
+    // kontratat). Trajtohen me vlerën e kostos (qty × cost_price në EUR).
+    // Shfaqen në listë me Lloji="Marketing" dhe nuk përfshihen te totalet
+    // e shitjeve (xhiro mbetet korrekt).
+    const mktParamsBase = [from, to];
+    let mktWhereProd = '';
+    if (q && q.trim()) {
+      const like = `%${q.trim()}%`;
+      mktWhereProd += ` AND (p.barcode LIKE ? OR p.name LIKE ? OR p.sku LIKE ?)`;
+      mktParamsBase.push(like, like, like);
+    }
+    if (material === 'flori' || material === 'diamant') {
+      mktWhereProd += ` AND COALESCE(p.material, '') = ?`;
+      mktParamsBase.push(material);
+    }
+
+    // Marketing direkt (jo nga kontratë).
+    const mktDirectRows = await queryAll(
+      `SELECT
+         'direct' AS marketing_kind,
+         m.id AS entry_id,
+         m.date AS date,
+         COALESCE(m.description, '') AS party_name,
+         COALESCE(m.product_qty, 0) AS qty,
+         COALESCE(p.id, 0)                     AS product_id,
+         COALESCE(p.barcode, '')               AS barcode,
+         COALESCE(p.name, '')                  AS name,
+         COALESCE(p.sku, '')                   AS sku,
+         COALESCE(p.category, '')              AS category,
+         COALESCE(p.material, '')              AS material,
+         COALESCE(p.unit, 'copë')              AS unit,
+         COALESCE(p.cost_price, 0)             AS unit_cost,
+         COALESCE(er.rate, 0)                  AS eur_rate
+       FROM marketing_expenses m
+       JOIN products p ON p.id = m.product_id
+       LEFT JOIN exchange_rates er ON er.date = m.date AND er.currency = 'EUR'
+       WHERE m.date BETWEEN ? AND ?
+         AND m.product_id IS NOT NULL
+         ${mktWhereProd}
+       ORDER BY m.date ASC, m.id ASC`,
+      mktParamsBase
+    );
+
+    // Marketing nga kontratat (type='product').
+    const mktContractRows = await queryAll(
+      `SELECT
+         'contract' AS marketing_kind,
+         mce.id AS entry_id,
+         mce.contract_id AS contract_id,
+         mce.date AS date,
+         COALESCE(mp.name, mc.name, '') AS party_name,
+         COALESCE(mce.product_qty, 0) AS qty,
+         COALESCE(p.id, 0)                     AS product_id,
+         COALESCE(p.barcode, '')               AS barcode,
+         COALESCE(p.name, '')                  AS name,
+         COALESCE(p.sku, '')                   AS sku,
+         COALESCE(p.category, '')              AS category,
+         COALESCE(p.material, '')              AS material,
+         COALESCE(p.unit, 'copë')              AS unit,
+         COALESCE(p.cost_price, 0)             AS unit_cost,
+         COALESCE(er.rate, 0)                  AS eur_rate
+       FROM marketing_contract_entries mce
+       JOIN marketing_contracts mc ON mc.id = mce.contract_id
+       LEFT JOIN marketing_people mp ON mp.id = mc.person_id
+       JOIN products p ON p.id = mce.product_id
+       LEFT JOIN exchange_rates er ON er.date = mce.date AND er.currency = 'EUR'
+       WHERE mce.date BETWEEN ? AND ?
+         AND mce.type = 'product'
+         AND mce.product_id IS NOT NULL
+         ${mktWhereProd}
+       ORDER BY mce.date ASC, mce.id ASC`,
+      mktParamsBase
+    );
+
+    // Fallback-i për kursin EUR nëse nuk ekziston për datën përkatëse.
+    const latestEurRow = await queryAll(
+      `SELECT rate FROM exchange_rates WHERE currency = 'EUR' ORDER BY date DESC LIMIT 1`
+    );
+    const fallbackEurRate = +(latestEurRow?.[0]?.rate || 0);
+
+    const buildMktDetailed = (r) => {
+      const qty      = +(r.qty || 0);
+      const unitCost = +(r.unit_cost || 0);
+      const value    = +(qty * unitCost).toFixed(2);
+      const eurRate  = +(r.eur_rate || 0) || fallbackEurRate || 0;
+      const refNo    = r.marketing_kind === 'contract'
+        ? `MKT-K${r.contract_id || ''}`
+        : `MKT-${r.entry_id || ''}`;
+      return {
+        source: 'marketing',
+        marketing_kind: r.marketing_kind,
+        item_id: `mkt-${r.marketing_kind}-${r.entry_id}`,
+        invoice_id: null,
+        contract_id: r.contract_id || null,
+        entry_id: r.entry_id,
+        date: r.date,
+        invoice_no: refNo,
+        customer_name: r.party_name || '',
+        currency: 'EUR',
+        exchange_rate: eurRate || 1,
+        is_credit_note: false,
+        product_id: r.product_id,
+        barcode: r.barcode, name: r.name,
+        sku: r.sku, category: r.category,
+        material: r.material, unit: r.unit,
+        qty,
+        gram: 0,
+        unit_price: +unitCost.toFixed(2),
+        discount_percent: 0,
+        discount: 0,
+        value_no_vat: value,
+        vat: 0,
+        value_with_vat: value,
+        unit_price_lek:     +(unitCost * eurRate).toFixed(2),
+        discount_lek:       0,
+        value_no_vat_lek:   +(value * eurRate).toFixed(2),
+        vat_lek:            0,
+        value_with_vat_lek: +(value * eurRate).toFixed(2),
+      };
+    };
+
+    const mktDetailed = [...mktDirectRows, ...mktContractRows]
+      .map(buildMktDetailed)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    // Agregim marketing për "Përmbledhur sipas artikullit" — rresht i veçantë
+    // për çdo produkt me source='marketing'.
+    const mktAggMap = new Map();
+    for (const r of mktDetailed) {
+      const key = `mkt|${r.product_id || 0}|${(r.barcode || '').toLowerCase()}|${(r.name || '').toLowerCase()}`;
+      const e = mktAggMap.get(key) || {
+        source: 'marketing',
+        product_id: r.product_id, barcode: r.barcode, name: r.name,
+        sku: r.sku, category: r.category, material: r.material, unit: r.unit,
+        qty: 0, gram: 0,
+        gross_lek: 0, discount_lek: 0,
+        value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0,
+        docs_count: 0,
+      };
+      e.qty                += r.qty;
+      e.gross_lek          += r.qty * r.unit_price_lek;
+      e.value_no_vat_lek   += r.value_no_vat_lek;
+      e.value_with_vat_lek += r.value_with_vat_lek;
+      e.docs_count         += 1;
+      mktAggMap.set(key, e);
+    }
+    const mktRowsAggregated = Array.from(mktAggMap.values()).map(e => ({
+      source: 'marketing',
+      product_id: e.product_id, barcode: e.barcode, name: e.name,
+      sku: e.sku, category: e.category, material: e.material, unit: e.unit,
+      qty: e.qty,
+      gram: 0,
+      unit_price_lek:    e.qty !== 0 ? +(e.gross_lek / e.qty).toFixed(2) : 0,
+      discount_lek:      0,
+      value_no_vat_lek:  +e.value_no_vat_lek.toFixed(2),
+      vat_lek:           0,
+      value_with_vat_lek:+e.value_with_vat_lek.toFixed(2),
+      docs_count:        e.docs_count,
+    }));
+
+    // Shëno rreshtat ekzistues të shitjeve me source='sale' për dallim në frontend.
+    for (const r of rows) r.source = 'sale';
+    if (rowsDetailed) {
+      for (const r of rowsDetailed) r.source = 'sale';
+    }
+
+    const rowsOut         = [...rows, ...mktRowsAggregated];
+    const rowsDetailedOut = rowsDetailed
+      ? [...rowsDetailed, ...mktDetailed].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+      : null;
+
+    res.json({
+      rows: rowsOut,
+      rowsDetailed: rowsDetailedOut,
+      totals, totalsByMaterial, totalsByCurrency,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

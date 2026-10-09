@@ -269,7 +269,7 @@ function snapshotFromProduct(p) {
 // Një kontratë mban një buxhet total EUR dhe përmban zëra (product ose cash EUR)
 // që zbriten nga buxheti derisa arrihet totali. Cash EUR entries shfaqen si
 // shpenzim në Arkën Ditore.
-function ContractsSection({ date, dateFrom, dateTo }) {
+function ContractsSection({ date, dateFrom, dateTo, openContractId, onConsumeOpenContract }) {
   // Filtri i datës i trashëguar nga faqja — zbatohet në backend mbi start_date
   // e kontratave: kontratat që nisin jashtë intervalit fshehen, dhe personat
   // pa asnjë kontratë në interval fshihen gjithashtu.
@@ -337,6 +337,28 @@ function ContractsSection({ date, dateFrom, dateTo }) {
     else { setContracts([]); setExpandedId(null) }
   }, [expandedPersonId, loadContracts])
   useEffect(() => { if (expandedId) loadDetail(expandedId) }, [expandedId, loadDetail])
+
+  // Hap automatikisht një kontratë kur vjen `openContractId` (nga navigimi,
+  // p.sh. nga Raporti i Shitjeve mbi një rresht marketing). Marrim person_id
+  // nga kontrata, zgjerojmë personin dhe kontratën, pastaj e harrojmë ID-në.
+  useEffect(() => {
+    if (!openContractId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const row = await fetch(`/api/marketing-contracts/${openContractId}`).then(r => r.json())
+        if (cancelled || !row || !row.id) return
+        const pid = row.person_id || null
+        if (pid) setExpandedPersonId(pid)
+        setExpandedId(row.id)
+      } catch {
+        // ignore
+      } finally {
+        onConsumeOpenContract?.()
+      }
+    })()
+    return () => { cancelled = true }
+  }, [openContractId, onConsumeOpenContract])
 
   useEffect(() => {
     setEntryDraft(d => ({ ...d, date }))
@@ -1066,7 +1088,7 @@ function ContractsSection({ date, dateFrom, dateTo }) {
   )
 }
 
-export default function Marketing({ date }) {
+export default function Marketing({ date, openContractId, onConsumeOpenContract }) {
   const [categories, setCategories] = useState([])
   const [rows, setRows] = useState([])
   const [breakdown, setBreakdown] = useState(null)
@@ -1381,7 +1403,7 @@ export default function Marketing({ date }) {
         )}
       </div>
 
-      <ContractsSection date={date} dateFrom={fromDate} dateTo={toDate} />
+      <ContractsSection date={date} dateFrom={fromDate} dateTo={toDate} openContractId={openContractId} onConsumeOpenContract={onConsumeOpenContract} />
 
       {/* Përmbledhje për periudhën — 3 totale (respekton filtrin e datave më poshtë) */}
       {breakdown && (

@@ -114,6 +114,7 @@ function AppInner({ user }) {
   const [currentDate, setCurrentDate] = useState(getToday())
   const [openInvoiceId, setOpenInvoiceId] = useState(null)
   const [openNewInvoice, setOpenNewInvoice] = useState(false)
+  const [openMarketingContractId, setOpenMarketingContractId] = useState(null)
   const [pageHistory, setPageHistory] = useState([])
 
   const isSales = user?.role === 'sales'
@@ -137,6 +138,7 @@ function AppInner({ user }) {
     if (opts.date)      setCurrentDate(opts.date)
     if (opts.invoiceId !== undefined) setOpenInvoiceId(opts.invoiceId)
     if (opts.newInvoice) setOpenNewInvoice(true)
+    if (opts.openContractId !== undefined) setOpenMarketingContractId(opts.openContractId)
     const expected = `#/${pg}`
     if (window.location.hash !== expected) {
       window.history.pushState(null, '', expected)
@@ -190,7 +192,7 @@ function AppInner({ user }) {
       case 'arka-shpenzime': return <Shpenzime date={currentDate} onNavigate={navigateTo} />
       case 'shpenzime-transporti': return <ShpenziTransporti date={currentDate} />
       case 'raport-shpenzime': return <RaportShpenzime />
-      case 'marketing': return <Marketing date={currentDate} />
+      case 'marketing': return <Marketing date={currentDate} openContractId={openMarketingContractId} onConsumeOpenContract={() => setOpenMarketingContractId(null)} />
       case 'arka':      return <CashRegister date={currentDate} />
 
       // Fatura Shitje — new invoice-based module

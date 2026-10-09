@@ -229,6 +229,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     const XLSX = await loadXLSX()
     const matLabel = (m) => m === 'flori' ? 'Flori' : m === 'diamant' ? 'Diamant' : ''
     const out = rows.map(r => ({
+      Lloji: r.source === 'marketing' ? 'Marketing' : 'Shitje',
       Barkodi: r.barcode || '',
       SKU: r.sku || '',
       Artikulli: r.name || '',
@@ -295,7 +296,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     }
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(out)
-    ws['!cols'] = [14, 12, 32, 14, 10, 10, 14, 14, 16, 14, 16, 10].map(w => ({ wch: w }))
+    ws['!cols'] = [12, 14, 12, 32, 14, 10, 10, 14, 14, 16, 14, 16, 10].map(w => ({ wch: w }))
     XLSX.utils.book_append_sheet(wb, ws, 'Raport Shitje Artikuj')
     XLSX.writeFile(wb, `raport_shitje_artikuj_${from}_${to}.xlsx`)
   }
@@ -365,11 +366,15 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
             title="Një rresht për çdo shitje (çdo faturë e ndarë)"
           >🧾 I Detajuar (fatura të veçanta)</button>
         </div>
-        {viewMode === 'detailed' && searched && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            {rowsDetailed.length} rreshta shitjeje
-          </p>
-        )}
+        {viewMode === 'detailed' && searched && (() => {
+          const nMkt = rowsDetailed.filter(r => r.source === 'marketing').length
+          const nSale = rowsDetailed.length - nMkt
+          return (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              {nSale} shitje{nMkt > 0 ? ` · ${nMkt} marketing` : ''}
+            </p>
+          )
+        })()}
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -381,7 +386,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
           rowsDetailed.length === 0 ? (
             <div className="p-10 text-center">
               <div className="text-5xl mb-3">🧾</div>
-              <p className="text-slate-500 dark:text-slate-400">Nuk u gjetën shitje në këtë periudhë.</p>
+              <p className="text-slate-500 dark:text-slate-400">Nuk u gjetën shitje ose marketing në këtë periudhë.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -389,6 +394,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                 <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Lloji</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Klienti</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
@@ -407,17 +413,34 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                 </thead>
                 <tbody>
                   {rowsDetailed.map((r, idx) => {
-                    const isForeign = (r.currency || 'LEK') !== 'LEK'
+                    const isMarketing = r.source === 'marketing'
                     return (
                       <tr key={`${r.item_id}-${idx}`}
-                          className={`border-b border-slate-100 dark:border-slate-800 ${r.is_credit_note ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                          className={`border-b border-slate-100 dark:border-slate-800 ${
+                            isMarketing ? 'bg-purple-50/40 hover:bg-purple-50 dark:bg-purple-900/10'
+                            : r.is_credit_note ? 'bg-red-50/40 hover:bg-red-50'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          }`}>
                         <td className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">{r.date}</td>
+                        <td className="px-3 py-2 text-xs">
+                          {isMarketing
+                            ? <span className="px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200 font-semibold text-[10px]">📣 Marketing</span>
+                            : <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 font-semibold text-[10px]">💰 Shitje</span>}
+                        </td>
                         <td className="px-3 py-2 font-mono text-xs">
-                          <button
-                            onClick={() => onNavigate?.('fatura-shitje', { date: r.date, invoiceId: r.invoice_id })}
-                            className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-                            title="Hap faturën"
-                          >{r.invoice_no}</button>
+                          {isMarketing ? (
+                            <button
+                              onClick={() => onNavigate?.('marketing', { date: r.date, openContractId: r.contract_id || null })}
+                              className="text-purple-600 hover:text-purple-800 hover:underline font-semibold"
+                              title={r.contract_id ? 'Hap kontratën e marketingut' : 'Hap Fletën e Marketingut për këtë datë'}
+                            >{r.invoice_no}</button>
+                          ) : (
+                            <button
+                              onClick={() => onNavigate?.('fatura-shitje', { date: r.date, invoiceId: r.invoice_id })}
+                              className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                              title="Hap faturën"
+                            >{r.invoice_no}</button>
+                          )}
                           {r.is_credit_note && <span className="ml-1 badge bg-red-100 text-red-700 dark:text-red-300 text-[9px]">KREDIT</span>}
                         </td>
                         <td className="px-3 py-2 text-slate-800 dark:text-slate-100 text-xs">
@@ -443,29 +466,33 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                           {fmt(r.unit_price)}
-                          {isForeign && <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">= {fmt(r.unit_price_lek)} LEK</div>}
                         </td>
                         <td className={`px-3 py-2 text-right tabular-nums ${r.discount_percent > 0 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
                           {r.discount_percent > 0 ? `${r.discount_percent}%` : '—'}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                           {fmt(r.value_no_vat)}
-                          {isForeign && <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">= {fmt(r.value_no_vat_lek)} LEK</div>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">
                           {fmt(r.vat)}
-                          {isForeign && r.vat > 0.005 && <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">= {fmt(r.vat_lek)} LEK</div>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">
                           {fmt(r.value_with_vat)}
-                          {isForeign && <div className="text-[10px] font-normal text-blue-600/70 italic">= {fmt(r.value_with_vat_lek)} LEK</div>}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <button
-                            onClick={() => onNavigate?.('fatura-shitje', { date: r.date, invoiceId: r.invoice_id })}
-                            className="px-2 py-0.5 rounded-md text-xs font-semibold text-blue-600 hover:bg-blue-50"
-                            title="Hap faturën"
-                          >📄</button>
+                          {isMarketing ? (
+                            <button
+                              onClick={() => onNavigate?.('marketing', { date: r.date, openContractId: r.contract_id || null })}
+                              className="px-2 py-0.5 rounded-md text-xs font-semibold text-purple-600 hover:bg-purple-50"
+                              title={r.contract_id ? 'Hap kontratën e marketingut' : 'Hap Fletën e Marketingut'}
+                            >📣</button>
+                          ) : (
+                            <button
+                              onClick={() => onNavigate?.('fatura-shitje', { date: r.date, invoiceId: r.invoice_id })}
+                              className="px-2 py-0.5 rounded-md text-xs font-semibold text-blue-600 hover:bg-blue-50"
+                              title="Hap faturën"
+                            >📄</button>
+                          )}
                         </td>
                       </tr>
                     )
@@ -477,7 +504,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       const t = totalsByCurrency[cur]
                       return (
                         <tr key={cur} className={`font-bold text-xs ${idx > 0 ? 'border-t border-emerald-200' : ''}`}>
-                          <td colSpan={7} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL ({cur}):</td>
+                          <td colSpan={8} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL SHITJE ({cur}):</td>
                           <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(t.qty)}</td>
                           <td className="px-3 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200">
                             {t.gram > 0 ? `${t.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
@@ -501,13 +528,14 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
         ) : rows.length === 0 ? (
           <div className="p-10 text-center">
             <div className="text-5xl mb-3">📊</div>
-            <p className="text-slate-500 dark:text-slate-400">Nuk u gjetën artikuj të shitur në këtë periudhë.</p>
+            <p className="text-slate-500 dark:text-slate-400">Nuk u gjetën artikuj të shitur ose të dhënë marketing në këtë periudhë.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Lloji</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Barkodi</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Artikulli</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
@@ -522,8 +550,15 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, idx) => (
-                  <tr key={`${r.product_id}-${r.barcode}-${idx}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                {rows.map((r, idx) => {
+                  const isMarketing = r.source === 'marketing'
+                  return (
+                  <tr key={`${r.source || 'sale'}-${r.product_id}-${r.barcode}-${idx}`} className={`border-b border-slate-100 dark:border-slate-800 ${isMarketing ? 'bg-purple-50/40 hover:bg-purple-50 dark:bg-purple-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                    <td className="px-3 py-2 text-xs">
+                      {isMarketing
+                        ? <span className="px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200 font-semibold text-[10px]">📣 Marketing</span>
+                        : <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 font-semibold text-[10px]">💰 Shitje</span>}
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{r.barcode || '—'}</td>
                     <td className="px-3 py-2 text-slate-800 dark:text-slate-100">{r.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}</td>
                     <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{r.category || '—'}</td>
@@ -543,24 +578,34 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.value_no_vat_lek)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt(r.vat_lek)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-700 dark:text-blue-300">{fmt(r.value_with_vat_lek)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-bold ${isMarketing ? 'text-purple-700 dark:text-purple-300' : 'text-blue-700 dark:text-blue-300'}`}>{fmt(r.value_with_vat_lek)}</td>
                     <td className="px-3 py-2 text-center">
-                      <button
-                        type="button"
-                        onClick={() => setDocsRow(r)}
-                        disabled={!r.docs_count}
-                        className="px-2 py-0.5 rounded-md text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:text-slate-400 disabled:hover:bg-transparent"
-                        title={r.docs_count ? 'Shih faturat e këtij artikulli' : ''}
-                      >{r.docs_count}{r.docs_count > 0 && <span className="ml-1 text-[10px]">📄</span>}</button>
+                      {isMarketing ? (
+                        <button
+                          type="button"
+                          onClick={() => onNavigate?.('marketing')}
+                          className="px-2 py-0.5 rounded-md text-xs font-semibold text-purple-600 hover:bg-purple-50"
+                          title="Hap Fletën e Marketingut"
+                        >{r.docs_count}<span className="ml-1 text-[10px]">📣</span></button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDocsRow(r)}
+                          disabled={!r.docs_count}
+                          className="px-2 py-0.5 rounded-md text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:text-slate-400 disabled:hover:bg-transparent"
+                          title={r.docs_count ? 'Shih faturat e këtij artikulli' : ''}
+                        >{r.docs_count}{r.docs_count > 0 && <span className="ml-1 text-[10px]">📄</span>}</button>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
               {totals && (
                 <tfoot className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
                   {totalsByMaterial?.flori?.qty > 0 && (
                     <tr className="text-xs bg-amber-50 dark:bg-amber-900/30 border-b border-amber-100">
-                      <td colSpan={4} className="px-3 py-1.5 text-right text-amber-800 dark:text-amber-200 font-semibold">🟡 Flori:</td>
+                      <td colSpan={5} className="px-3 py-1.5 text-right text-amber-800 dark:text-amber-200 font-semibold">🟡 Flori:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-amber-900">{fmtQty(totalsByMaterial.flori.qty)}</td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-amber-800 dark:text-amber-200">
@@ -574,7 +619,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                   )}
                   {totalsByMaterial?.diamant?.qty > 0 && (
                     <tr className="text-xs bg-sky-50 border-b border-sky-100">
-                      <td colSpan={4} className="px-3 py-1.5 text-right text-sky-800 font-semibold">💎 Diamant:</td>
+                      <td colSpan={5} className="px-3 py-1.5 text-right text-sky-800 font-semibold">💎 Diamant:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-sky-900">{fmtQty(totalsByMaterial.diamant.qty)}</td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-sky-800">
@@ -588,7 +633,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                   )}
                   {totalsByMaterial?.tjeter?.qty > 0 && (
                     <tr className="text-xs bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-                      <td colSpan={4} className="px-3 py-1.5 text-right text-slate-600 dark:text-slate-300 font-semibold">— Pa material:</td>
+                      <td colSpan={5} className="px-3 py-1.5 text-right text-slate-600 dark:text-slate-300 font-semibold">— Pa material:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(totalsByMaterial.tjeter.qty)}</td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
@@ -601,7 +646,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     </tr>
                   )}
                   <tr className="font-bold text-xs bg-slate-100 dark:bg-slate-800 border-t border-slate-300 dark:border-slate-700">
-                    <td colSpan={4} className="px-3 py-2 text-right text-slate-500 dark:text-slate-400 uppercase tracking-wide">TOTALI në LEK (kombinuar):</td>
+                    <td colSpan={5} className="px-3 py-2 text-right text-slate-500 dark:text-slate-400 uppercase tracking-wide">TOTALI SHITJE në LEK (kombinuar):</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(totals.qty)}</td>
                     <td></td>
                     <td className="px-3 py-2 text-right tabular-nums text-orange-600">
@@ -616,7 +661,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     const t = totalsByCurrency[cur]
                     return (
                       <tr key={cur} className={`font-bold text-xs bg-emerald-50 dark:bg-emerald-900/30 ${idx === 0 ? 'border-t-2 border-emerald-300' : 'border-t border-emerald-200'}`}>
-                        <td colSpan={4} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL ({cur}):</td>
+                        <td colSpan={5} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL SHITJE ({cur}):</td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(t.qty)}</td>
                         <td></td>
                         <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
