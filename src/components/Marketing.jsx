@@ -288,7 +288,7 @@ function ContractsSection({ date, dateFrom, dateTo }) {
   const [newContractFor, setNewContractFor] = useState(null)
   const [newDraft, setNewDraft] = useState({ name: '', total_amount_eur: '', notes: '', start_date: date })
   const [entryDraft, setEntryDraft] = useState({
-    date, type: 'cash', amount_eur: '', description: '',
+    date, type: 'cash', amount_eur: '', description: '', payment_method: 'cash',
     product: null, product_qty: '1', unit_price: '', vat_rate: '',
   })
   const [busy, setBusy] = useState(false)
@@ -429,6 +429,7 @@ function ContractsSection({ date, dateFrom, dateTo }) {
             date: savedDate, type: 'cash',
             amount_eur: parseFloat(entryDraft.amount_eur) || 0,
             description: entryDraft.description || '',
+            payment_method: entryDraft.payment_method === 'bank' ? 'bank' : 'cash',
           }
       const res = await fetch(`/api/marketing-contracts/${contractId}/entries`, {
         method: 'POST',
@@ -439,6 +440,7 @@ function ContractsSection({ date, dateFrom, dateTo }) {
       // Ruaj datën e zgjedhur për shtimin pasues (mund të regjistrosh disa zëra për të njëjtën datë të kaluar).
       setEntryDraft({
         date: savedDate, type: entryDraft.type, amount_eur: '', description: '',
+        payment_method: entryDraft.payment_method || 'cash',
         product: null, product_qty: '1', unit_price: '', vat_rate: '',
       })
       setAddEntryFor(null)
@@ -471,6 +473,42 @@ function ContractsSection({ date, dateFrom, dateTo }) {
         body: JSON.stringify({ status: newStatus }),
       })
       if (!res.ok) { alert('Gabim'); return }
+      await Promise.all([loadPeople(), loadContracts(expandedPersonId), expandedId === contract.id ? loadDetail(contract.id) : Promise.resolve()])
+    } finally { setBusy(false) }
+  }
+
+  const [editingBudgetId, setEditingBudgetId] = useState(null)
+  const [editingBudgetValue, setEditingBudgetValue] = useState('')
+
+  const startEditBudget = (contract) => {
+    setEditingBudgetId(contract.id)
+    setEditingBudgetValue(String(contract.total_amount_eur ?? ''))
+  }
+
+  const cancelEditBudget = () => {
+    setEditingBudgetId(null)
+    setEditingBudgetValue('')
+  }
+
+  const saveEditBudget = async (contract) => {
+    const newTotal = parseFloat(editingBudgetValue) || 0
+    const used = parseFloat(contract.used_eur) || 0
+    if (newTotal < used - 0.005) {
+      const ok = await showConfirm(
+        `Buxheti i ri (€${newTotal.toFixed(2)}) është nën shumën e përdorur (€${used.toFixed(2)}). Vazhdo gjithsesi?`,
+        { title: 'Buxhet nën përdorim', confirmLabel: 'Vazhdo', danger: true }
+      )
+      if (!ok) return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/marketing-contracts/${contract.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ total_amount_eur: newTotal }),
+      })
+      if (!res.ok) { alert('Gabim'); return }
+      cancelEditBudget()
       await Promise.all([loadPeople(), loadContracts(expandedPersonId), expandedId === contract.id ? loadDetail(contract.id) : Promise.resolve()])
     } finally { setBusy(false) }
   }
@@ -613,10 +651,34 @@ function ContractsSection({ date, dateFrom, dateTo }) {
                     </div>
                   </div>
                   <div className="mt-2">
-                    <div className="flex items-center justify-between text-[11px] font-semibold mb-1">
-                      <span className="text-slate-600 dark:text-slate-300">
+                    <div className="flex items-center justify-between text-[11px] font-semibold mb-1 gap-2 flex-wrap">
+                      <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1 flex-wrap">
                         Përdorur: <span className="text-blue-700 dark:text-blue-300">€{fmtEur(used)}</span>
-                        {' / '}Buxheti: <span className="text-slate-800 dark:text-slate-100">€{fmtEur(total)}</span>
+                        {' / '}Buxheti:
+                        {editingBudgetId === c.id ? (
+                          <>
+                            <input
+                              type="number" step="0.01" min="0"
+                              value={editingBudgetValue}
+                              onChange={e => setEditingBudgetValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveEditBudget(c)
+                                else if (e.key === 'Escape') cancelEditBudget()
+                              }}
+                              autoFocus
+                              className="input-field-sm text-right w-24 py-0.5"
+                            />
+                            <button onClick={() => saveEditBudget(c)} className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[11px]" title="Ruaj">✓</button>
+                            <button onClick={cancelEditBudget} className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 text-[11px]" title="Anulo">✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-slate-800 dark:text-slate-100">€{fmtEur(total)}</span>
+                            {!isClosed && (
+                              <button onClick={() => startEditBudget(c)} className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline ml-0.5" title="Edito buxhetin">✎</button>
+                            )}
+                          </>
+                        )}
                       </span>
                       <span className={`${remaining > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600'}`}>
                         Mbetet: €{fmtEur(remaining)} ({(100 - pct).toFixed(0)}%)
@@ -661,7 +723,9 @@ function ContractsSection({ date, dateFrom, dateTo }) {
                               <td className="py-1 px-1">
                                 {e.type === 'product'
                                   ? <span className="badge bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 text-[10px]">📦 Produkt</span>
-                                  : <span className="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px]">💵 Cash EUR</span>}
+                                  : e.payment_method === 'bank'
+                                    ? <span className="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px]">🏦 Bankë EUR</span>
+                                    : <span className="badge bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-[10px]">💵 Cash EUR</span>}
                               </td>
                               <td className="py-1 px-1 text-slate-700 dark:text-slate-200">
                                 {e.type === 'product' ? (
@@ -885,12 +949,25 @@ function ContractsSection({ date, dateFrom, dateTo }) {
                   </div>
                 </div>
                 {entryDraft.type === 'cash' ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
                     <div>
                       <label className="form-label text-[10px]">Shuma (EUR)</label>
                       <MoneyInput value={entryDraft.amount_eur}
                         onChange={v => setEntryDraft(d => ({ ...d, amount_eur: v }))}
                         className="input-field-sm" placeholder="0.00" />
+                    </div>
+                    <div>
+                      <label className="form-label text-[10px]">Mënyra e pagesës</label>
+                      <div className="flex gap-0.5 rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-white dark:bg-slate-900">
+                        <button type="button"
+                          onClick={() => setEntryDraft(d => ({ ...d, payment_method: 'cash' }))}
+                          className={`flex-1 text-[11px] px-2 py-1 rounded font-semibold ${entryDraft.payment_method === 'cash' ? 'bg-amber-500 text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >💵 Cash</button>
+                        <button type="button"
+                          onClick={() => setEntryDraft(d => ({ ...d, payment_method: 'bank' }))}
+                          className={`flex-1 text-[11px] px-2 py-1 rounded font-semibold ${entryDraft.payment_method === 'bank' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >🏦 Bankë</button>
+                      </div>
                     </div>
                     <div className="md:col-span-2">
                       <label className="form-label text-[10px]">Përshkrimi</label>

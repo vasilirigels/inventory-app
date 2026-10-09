@@ -3754,15 +3754,22 @@ async function buildApplyProductPricesStmts(items) {
       updates.push('category = ?');
       params.push(materialMap[it.material]);
     }
-    // Nga fatura e blerjes, promocioni vetëm shtohet — heqja bëhet nga faqja
-    // Produkte Promocion ose Products (për të mos rrëzuar padashur promocionet
-    // ekzistuese kur admin ripërdor një produkt në një faturë të re).
+    // Nga fatura e blerjes, promocioni normalisht vetëm shtohet — që import-i
+    // ose addimi i ri i një produkti të mos rrëzojë promo ekzistuese padashur.
+    // Përjashtim: nëse admin preku UI-n e promo-s (checkbox/field/bulk), atëhere
+    // sinkronizojme plotësisht (shtim OSE heqje) — flag `_promo_touched` nga
+    // front-end-i e sinjalizon këtë.
     if (it.is_promotion) {
       updates.push('is_promotion = ?');
       params.push(1);
       const pct = Math.max(0, Math.min(100, parseFloat(it.promo_discount_pct) || 0));
       updates.push('promo_discount_pct = ?');
       params.push(pct);
+    } else if (it._promo_touched) {
+      updates.push('is_promotion = ?');
+      params.push(0);
+      updates.push('promo_discount_pct = ?');
+      params.push(0);
     }
     // Blerja në gram HAS + kursi EUR/gram HAS: përditësohen te produkti me
     // vlerat e blerjes së fundit (user preference). Ruajmë vetëm kur ka vlerë
@@ -8902,8 +8909,9 @@ app.get('/api/marketing-entries/:date', async (req, res) => {
 app.post('/api/marketing-entries', async (req, res) => {
   try {
     const { date, category_id, description, currency, amount, exchange_rate,
-            product_id, product_qty } = req.body || {};
+            product_id, product_qty, payment_method } = req.body || {};
     if (!date) return res.status(400).json({ error: 'date required' });
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
 
     // Marketing "in kind" — një produkt merret nga inventari (dhuratë/mostër/promo).
     // Nuk krijohet faturë shitjeje (pra nuk hyn te xhiro), por stoku ulet dhe
@@ -8931,14 +8939,14 @@ app.post('/api/marketing-entries', async (req, res) => {
       const rate = parseFloat(exchange_rate) > 0 ? parseFloat(exchange_rate) : 1;
       await run(
         `INSERT INTO marketing_expenses (date, category_id, description, currency, amount, exchange_rate,
-           amount_lek, amount_eur, amount_usd, product_id, product_qty)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           amount_lek, amount_eur, amount_usd, product_id, product_qty, payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           date, category_id || null,
           description || '',
           cur, amt, rate,
           0, amt, 0,
-          pid, qty,
+          pid, qty, 'cash',
         ]
       );
       await run('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, pid]);
@@ -8963,8 +8971,8 @@ app.post('/api/marketing-entries', async (req, res) => {
     if (cur !== 'LEK' && rate <= 0) return res.status(400).json({ error: 'exchange_rate required for foreign currency' });
     await run(
       `INSERT INTO marketing_expenses (date, category_id, description, currency, amount, exchange_rate,
-         amount_lek, amount_eur, amount_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         amount_lek, amount_eur, amount_usd, payment_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date,
         category_id || null,
@@ -8973,6 +8981,7 @@ app.post('/api/marketing-entries', async (req, res) => {
         cur === 'LEK' ? amt : 0,
         cur === 'EUR' ? amt : 0,
         cur === 'USD' ? amt : 0,
+        pm,
       ]
     );
     const row = await queryOne(
@@ -8995,7 +9004,8 @@ app.put('/api/marketing-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { date, category_id, description, currency, amount, exchange_rate,
-            product_id, product_qty } = req.body || {};
+            product_id, product_qty, payment_method } = req.body || {};
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
     const existing = await queryOne(
       'SELECT date, product_id, product_qty FROM marketing_expenses WHERE id = ?', [id]
     );
@@ -9054,7 +9064,7 @@ app.put('/api/marketing-entries/:id', async (req, res) => {
         `UPDATE marketing_expenses SET date = ?, category_id = ?, description = ?,
            currency = ?, amount = ?, exchange_rate = ?,
            amount_lek = ?, amount_eur = ?, amount_usd = ?,
-           product_id = ?, product_qty = ?
+           product_id = ?, product_qty = ?, payment_method = ?
          WHERE id = ?`,
         [
           date || existing.date, category_id || null, description || '',
@@ -9062,7 +9072,9 @@ app.put('/api/marketing-entries/:id', async (req, res) => {
           cur === 'LEK' ? amt : 0,
           cur === 'EUR' ? amt : 0,
           cur === 'USD' ? amt : 0,
-          newPid, newQty, id,
+          newPid, newQty,
+          isProduct ? 'cash' : pm,
+          id,
         ]
       );
       return res.json(await queryOne(
@@ -9084,7 +9096,8 @@ app.put('/api/marketing-entries/:id', async (req, res) => {
     await run(
       `UPDATE marketing_expenses SET date = ?, category_id = ?, description = ?,
          currency = ?, amount = ?, exchange_rate = ?,
-         amount_lek = ?, amount_eur = ?, amount_usd = ?
+         amount_lek = ?, amount_eur = ?, amount_usd = ?,
+         payment_method = ?
        WHERE id = ?`,
       [
         date || existing.date,
@@ -9094,6 +9107,7 @@ app.put('/api/marketing-entries/:id', async (req, res) => {
         cur === 'LEK' ? amt : 0,
         cur === 'EUR' ? amt : 0,
         cur === 'USD' ? amt : 0,
+        pm,
         id,
       ]
     );
@@ -9332,10 +9346,14 @@ app.put('/api/marketing-contracts/:id', async (req, res) => {
     const existing = await queryOne('SELECT * FROM marketing_contracts WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
     const { name, total_amount_eur, notes, status } = req.body || {};
-    const newStatus = status === 'closed' ? 'closed' : 'open';
+    // Nëse `status` nuk dërgohet, ruaj atë ekzistuesin — përndryshe edit-i i
+    // sasisë/notes do rikthente çdo kontratë në 'open' pa dëshirë.
+    const newStatus = status === 'closed' ? 'closed'
+                   : status === 'open'   ? 'open'
+                   : (existing.status || 'open');
     const closedAt = newStatus === 'closed' && existing.status !== 'closed'
       ? "strftime('%Y-%m-%d %H:%M:%f','now')"
-      : (newStatus === 'open' ? 'NULL' : 'closed_at');
+      : (newStatus === 'open' && existing.status === 'closed' ? 'NULL' : 'closed_at');
     await run(
       `UPDATE marketing_contracts
          SET name = ?, total_amount_eur = ?, notes = ?, status = ?, closed_at = ${closedAt}
@@ -9376,9 +9394,10 @@ app.post('/api/marketing-contracts/:id/entries', async (req, res) => {
     const { id } = req.params;
     const contract = await queryOne('SELECT * FROM marketing_contracts WHERE id = ?', [id]);
     if (!contract) return res.status(404).json({ error: 'contract not found' });
-    const { date, type, amount_eur, product_id, product_qty, description } = req.body || {};
+    const { date, type, amount_eur, product_id, product_qty, description, payment_method } = req.body || {};
     if (!date) return res.status(400).json({ error: 'date required' });
     if (type !== 'product' && type !== 'cash') return res.status(400).json({ error: 'type must be product or cash' });
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
     if (type === 'product') {
       const pid = parseInt(product_id);
       const qty = Math.max(1, parseInt(product_qty) || 1);
@@ -9393,8 +9412,8 @@ app.post('/api/marketing-contracts/:id/entries', async (req, res) => {
         ? +provided.toFixed(2)
         : +((parseFloat(prod.sell_price) || 0) * qty * (1 + (parseFloat(prod.vat_rate) || 0) / 100)).toFixed(2);
       await run(
-        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, product_id, product_qty, description)
-         VALUES (?, ?, 'product', ?, ?, ?, ?)`,
+        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, product_id, product_qty, description, payment_method)
+         VALUES (?, ?, 'product', ?, ?, ?, ?, 'cash')`,
         [id, date, amt, pid, qty, description || '']
       );
       await run('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, pid]);
@@ -9402,9 +9421,9 @@ app.post('/api/marketing-contracts/:id/entries', async (req, res) => {
       const amt = parseFloat(amount_eur) || 0;
       if (amt <= 0) return res.status(400).json({ error: 'amount_eur must be > 0' });
       await run(
-        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, description)
-         VALUES (?, ?, 'cash', ?, ?)`,
-        [id, date, +amt.toFixed(2), description || '']
+        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, description, payment_method)
+         VALUES (?, ?, 'cash', ?, ?, ?)`,
+        [id, date, +amt.toFixed(2), description || '', pm]
       );
     }
     const row = await queryOne(

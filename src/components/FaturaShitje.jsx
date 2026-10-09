@@ -2223,9 +2223,12 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                           // Zbritja € interpretohet si "eur off nga finali me TVSH".
                           // discount_percent aplikohet mbi bazen pa-TVSH (te computeLine),
                           // ndaj konvertojme: pct = eur / (base × (1 + vat/100)) × 100.
+                          // Mos e rrumbullakosim pct — përndryshe roundtrip-i e sheh
+                          // input-in si të ndryshuar dhe e rizgjedh (user shkruan 10 →
+                          // bëhet 10.09). Full precision bën echo-n ekzakt.
                           const vatFactor = 1 + (parseFloat(it.vat_rate) || 0) / 100
                           const pct = Math.max(0, Math.min(100, (eur / (base * vatFactor)) * 100))
-                          setItem(idx, { discount_percent: +pct.toFixed(2) })
+                          setItem(idx, { discount_percent: pct })
                         }}
                         disabled={lockItemChanges}
                         className="input-field-sm text-right disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:text-slate-400"

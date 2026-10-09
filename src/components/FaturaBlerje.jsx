@@ -1465,6 +1465,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   const [allRates, setAllRates] = useState({ LEK: 1 })
   const [showImport, setShowImport] = useState(false)
   const [bulkPromoPct, setBulkPromoPct] = useState('20')
+  const [bulkPromoPrice, setBulkPromoPrice] = useState('')
   const [bulkMultiplier, setBulkMultiplier] = useState('')
   const [bulkSellRate, setBulkSellRate]     = useState('')
   const [materialCategories, setMaterialCategories] = useState([])
@@ -1518,10 +1519,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRate, items.length])
 
-  // Blerje Flori — llogarit auto vetëm çmimin e shitjes:
+  // Blerje Flori — llogarit auto vetëm çmimin e shitjes BAZË (pa promo):
   //   sell_price = has_gram × multiplier × kursi_shitje × (1 + tvsh/100)
   //                 (sell_rate — per rresht; fallback te has_rate)
-  // has_gram, kodi, gram, has_rate merren nga importi/user-i pa formulë.
+  // Promo-ja NUK përfshihet këtu — ruhet si pct i veçantë dhe aplikohet nga
+  // Produkte Promocion / FaturaShitje; përndryshe do kishim zbritje dyfishe.
   useEffect(() => {
     if (forcedCategory !== 'flori') return
     setItems(prev => {
@@ -1674,6 +1676,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
         const vat = n(out.vat_rate) || 0
         const dsc = n(out.sell_discount_percent) || 0
         if (cp <= 0 || mul <= 0) return out
+        // Pa promo këtu — ruhet si pct i veçantë dhe aplikohet nga Produkte
+        // Promocion / FaturaShitje (përndryshe do bëhet zbritje dyfishe).
         const newSell = +(cp * mul * (1 + vat / 100) * (1 - dsc / 100)).toFixed(2)
         if (Math.abs(newSell - n(out.sell_price)) < 0.005) return out
         changed = true
@@ -2499,12 +2503,22 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                         const autoTitle = floriAuto ? 'Auto: has_gram × Shumëzues × Kursi × (1 + TVSH%)'
                                         : diamAuto  ? 'Auto: Cmim Blerje × Shumëzues × (1 + TVSH%)'
                                                     : undefined
+                        const promoPct = it.is_promotion ? (n(it.promo_discount_pct) || 0) : 0
+                        const base = n(it.sell_price)
+                        const postPromo = promoPct > 0 ? +(base * (1 - promoPct / 100)).toFixed(2) : null
                         return (
-                          <MoneyInput value={it.sell_price}
-                            onChange={v => setItem(idx, { sell_price: v })}
-                            disabled={auto}
-                            className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 ${auto ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
-                            {...(autoTitle ? { title: autoTitle } : {})} />
+                          <>
+                            <MoneyInput value={it.sell_price}
+                              onChange={v => setItem(idx, { sell_price: v })}
+                              disabled={auto}
+                              className={`input-field-sm text-right font-semibold text-emerald-800 dark:text-emerald-200 ${auto ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' : ''}`}
+                              {...(autoTitle ? { title: autoTitle } : {})} />
+                            {postPromo != null && (
+                              <div className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold text-right mt-0.5" title={`Çmimi me promo: ${base.toFixed(2)} × (1 − ${promoPct.toFixed(2)}%)`}>
+                                → {postPromo.toFixed(2)} <span className="opacity-60">(−{promoPct.toFixed(2)}%)</span>
+                              </div>
+                            )}
+                          </>
                         )
                       })()}
                     </td>
@@ -2535,6 +2549,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                           onChange={e => setItem(idx, {
                             is_promotion: e.target.checked,
                             promo_discount_pct: e.target.checked ? (n(it.promo_discount_pct) || 0) : 0,
+                            _promo_touched: true,
                           })}
                           className="w-4 h-4 accent-rose-600 disabled:opacity-30"
                           title={it.product_id
@@ -2545,7 +2560,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                           type="number" step="0.01" min="0" max="100"
                           value={it.is_promotion ? (it.promo_discount_pct ?? 0) : ''}
                           disabled={!it.is_promotion}
-                          onChange={e => setItem(idx, { promo_discount_pct: e.target.value })}
+                          onChange={e => setItem(idx, { promo_discount_pct: e.target.value, _promo_touched: true })}
                           className="input-field-sm text-right w-14 disabled:bg-slate-100 disabled:text-slate-300"
                           placeholder="%"
                           title="Zbritja % për këtë produkt gjatë promocionit"
@@ -2697,7 +2712,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                     title: 'Vër në promocion', confirmLabel: 'Apliko',
                   }))) return
                   setItems(prev => prev.map(it => it.product_id
-                    ? { ...it, is_promotion: true, promo_discount_pct: pct }
+                    ? { ...it, is_promotion: true, promo_discount_pct: pct, _promo_touched: true }
                     : it))
                 }}
                 className="text-xs bg-rose-600 hover:bg-rose-500 text-white font-semibold px-2 py-1.5 rounded-lg"
@@ -2711,12 +2726,79 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                     title: 'Hiq nga promocioni', confirmLabel: 'Hiq', danger: true,
                   }))) return
                   setItems(prev => prev.map(it => it.is_promotion
-                    ? { ...it, is_promotion: false, promo_discount_pct: 0 }
+                    ? { ...it, is_promotion: false, promo_discount_pct: 0, _promo_touched: true }
                     : it))
                 }}
                 className="text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-300 px-2 py-1.5 rounded-lg"
                 title="Hiq promocionin nga të gjithë rreshtat e faturës aktuale"
               >Hiq</button>
+              <span className="text-[10px] text-rose-700 font-semibold uppercase pl-2 border-l border-slate-200 dark:border-slate-700 ml-1">Me Çmim:</span>
+              <input
+                type="number" step="0.01" min="0"
+                value={bulkPromoPrice}
+                onChange={e => setBulkPromoPrice(e.target.value)}
+                className="input-field-sm text-right w-20"
+                placeholder="çmim final"
+                title="Çmim final i njëjtë për të gjitha produktet (promo% llogaritet auto)"
+              />
+              <button
+                onClick={async () => {
+                  const target = parseFloat(bulkPromoPrice) || 0
+                  if (target <= 0) { alert('Vendos një çmim > 0'); return }
+                  const linked = items.filter(it => it.product_id)
+                  if (linked.length === 0) { alert('Asnjë rresht me produkt të lidhur. Zgjidh një produkt ekzistues për çdo rresht.'); return }
+                  // Llogarit base-in e secilit rresht (çmimi pa promo) për të
+                  // nxjerrë sa % duhet promo-ja për të arritur target-in.
+                  const baseOf = (it) => {
+                    const vat = n(it.vat_rate) || 0
+                    if (forcedCategory === 'flori') {
+                      const hg = n(it.has_gram), mul = n(it.multiplier)
+                      const hr = n(it.has_rate), sr = n(it.sell_rate)
+                      const sellR = sr > 0 ? sr : hr
+                      return hg > 0 && mul > 0 && sellR > 0 ? hg * mul * sellR * (1 + vat / 100) : 0
+                    }
+                    if (forcedCategory === 'diamant') {
+                      const cp = n(it.cost_price), mul = n(it.multiplier)
+                      const dsc = n(it.sell_discount_percent) || 0
+                      return cp > 0 && mul > 0 ? cp * mul * (1 + vat / 100) * (1 - dsc / 100) : 0
+                    }
+                    return n(it.sell_price)
+                  }
+                  let apply = 0, skipHigh = 0, skipNoBase = 0
+                  for (const it of linked) {
+                    const b = baseOf(it)
+                    if (b <= 0) { skipNoBase++; continue }
+                    if (target > b + 0.005) { skipHigh++; continue }
+                    apply++
+                  }
+                  if (apply === 0) {
+                    alert(`Asnjë rresht i aplikueshëm. (${skipHigh} me çmim bazë nën target, ${skipNoBase} pa çmim bazë)`)
+                    return
+                  }
+                  const warn = (skipHigh > 0 ? `\n⚠️ ${skipHigh} rresht(a) do kapërcehen (çmimi bazë nën target).` : '')
+                              + (skipNoBase > 0 ? `\n⚠️ ${skipNoBase} rresht(a) pa çmim bazë.` : '')
+                  if (!(await showConfirm(`Vendos çmim ${target} për ${apply} produkt(e) dhe kaloji në promocion?${warn}`, {
+                    title: 'Vendos çmim final', confirmLabel: 'Apliko',
+                  }))) return
+                  setItems(prev => prev.map(it => {
+                    if (!it.product_id) return it
+                    const b = baseOf(it)
+                    if (b <= 0 || target > b + 0.005) return it
+                    // Ruaj sell_price=base dhe pct=sa duhet për të arritur target
+                    // kur aplikohet. Produkte Promocion aplikon pct një herë mbi
+                    // base → final = target (pa zbritje dyfishe).
+                    const pct = Math.max(0, Math.min(100, (1 - target / b) * 100))
+                    return {
+                      ...it,
+                      is_promotion: true,
+                      promo_discount_pct: pct,
+                      _promo_touched: true,
+                    }
+                  }))
+                }}
+                className="text-xs bg-rose-600 hover:bg-rose-500 text-white font-semibold px-2 py-1.5 rounded-lg"
+                title="Vendos të njëjtin çmim final për të gjitha produktet dhe kaloji në promocion"
+              >💶 Vendos çmim</button>
             </div>
           </div>
           <p className="text-[10px] text-slate-500 dark:text-slate-400">

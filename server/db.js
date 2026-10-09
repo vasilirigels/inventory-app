@@ -671,6 +671,13 @@ const MIGRATIONS = [
   // product_qty në kohën e krijimit dhe rikthehet në kohën e fshirjes.
   "ALTER TABLE marketing_expenses ADD COLUMN product_id INTEGER",
   "ALTER TABLE marketing_expenses ADD COLUMN product_qty INTEGER DEFAULT 0",
+  // Mënyra e pagesës për shpenzim marketingu cash — 'cash' ose 'bank'.
+  // Vetëm informative, nuk prek Arkën e ditës. Produktet nga inventari
+  // (product_id > 0) nuk kanë relevancë për payment_method.
+  "ALTER TABLE marketing_expenses ADD COLUMN payment_method TEXT DEFAULT 'cash'",
+  // Mënyra e pagesës për zërat cash brenda kontratave të marketingut.
+  // Vetëm informative. Produktet (type='product') nuk kanë relevancë.
+  "ALTER TABLE marketing_contract_entries ADD COLUMN payment_method TEXT DEFAULT 'cash'",
 
   // Splits pagese për Fatura Blerje — pasqyrim i invoice_payment_splits për
   // shitje. Lejon që një blerje të paguhet me disa metoda (cash + bankë) dhe
