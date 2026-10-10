@@ -1785,6 +1785,29 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// Produkte ku has_gram ndryshon nga HAS i rreshtit TË FUNDIT të faturës së
+// blerjes. Kthen VETËM mospërputhjet (lehtë për UI → shfaq badge "⚠️ HAS").
+app.get('/api/products/has-drift', async (req, res) => {
+  try {
+    const rows = await cached('products:has-drift', 60_000, () => queryAll(
+      `SELECT p.id,
+              p.has_gram  AS product_has,
+              latest.has_gram AS fatura_has
+         FROM products p
+         JOIN (
+           SELECT pit.product_id, pit.has_gram,
+                  ROW_NUMBER() OVER (PARTITION BY pit.product_id ORDER BY pi.date DESC, pit.id DESC) AS rn
+             FROM purchase_items pit
+             JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+            WHERE pit.product_id IS NOT NULL AND pit.has_gram > 0
+         ) latest ON latest.product_id = p.id AND latest.rn = 1
+        WHERE ABS(COALESCE(p.has_gram, 0) - COALESCE(latest.has_gram, 0)) > 0.0001
+          AND COALESCE(p.active, 1) = 1`
+    ));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // updated_at is a millisecond timestamp used for optimistic locking on
 // concurrent product edits. INSERT and UPDATE both stamp `now`, so a client
 // that PUTs with a stale value gets a 409 and can re-fetch.

@@ -955,7 +955,7 @@ function NewProductRow({ rowData, onChange, onSave, onCancel }) {
 // Çdo qelizë e rreshtit të produktit është input i editueshëm — si te
 // Fatura Blerje. Ndryshimet ruhen me debounce (500ms) me PUT /api/products/:id.
 // Formula flori aplikohet auto kur ndryshojnë kodi/gram/has_rate/multiplier/sell_rate.
-function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultiplierApply }) {
+function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultiplierApply, faturaHas }) {
   const readOnly = isViewer()
   const initForm = () => ({
     barcode:               p.barcode || '',
@@ -1108,10 +1108,30 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
 
   // Debounced auto-save — 600ms pas ndalimit të shkrimit.
   // Skip-o krejtësisht për rolin viewer që s'triggerohet toast-i i interceptor-it.
+  // Nëse user ndryshon has_gram-in në vlerë ndryshe nga fatura (dhe origjinalja
+  // ishte në përputhje me faturën), kërko konfirmim para se të ruajë — që të
+  // mos krijohen drift-e të padëshiruara.
   useEffect(() => {
     if (initialMount.current) { initialMount.current = false; return }
     if (readOnly) return
-    const t = setTimeout(performSave, 600)
+    const t = setTimeout(async () => {
+      const newHas = parseFloat(formRef.current.has_gram) || 0
+      const origHas = parseFloat(p.has_gram) || 0
+      const changed = Math.abs(newHas - origHas) > 0.0001
+      if (changed && typeof faturaHas === 'number' && Math.abs(newHas - faturaHas) > 0.0001 && Math.abs(origHas - faturaHas) < 0.0001) {
+        // Para këtij ndryshimi, HAS ishte në përputhje me faturën. User tani
+        // po krijon drift — konfirmoje para ruajtjes.
+        const ok = await showConfirm(
+          `HAS u ndryshua në ${newHas}, por fatura e fundit e blerjes ka ${faturaHas}. Vazhdo ruajtjen?`,
+          { title: '⚠ HAS do të dalë ndryshe nga fatura', confirmLabel: 'Po, ruaj' }
+        )
+        if (!ok) {
+          setForm(f => ({ ...f, has_gram: String(origHas) }))
+          return
+        }
+      }
+      performSave()
+    }, 600)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form])
@@ -1128,6 +1148,9 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
         )}
         {!saving && !saveError && isDirty && (
           <span className="ml-1 text-[10px] text-amber-500" title="Ndryshim i paruajtur">●</span>
+        )}
+        {typeof faturaHas === 'number' && Math.abs((parseFloat(form.has_gram) || 0) - faturaHas) > 0.0001 && (
+          <span className="ml-1 text-[10px]" title={`HAS i produktit (${parseFloat(form.has_gram) || 0}) ndryshon nga fatura e fundit (${faturaHas})`}>⚠</span>
         )}
       </td>
       {(() => {
@@ -1177,12 +1200,28 @@ function EditableProductRow({ p, onSaved, onEdit, onDelete, onBarcode, onMultipl
           placeholder="585" />
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
-        <input type="number" step="0.001" min="0" value={form.has_gram}
-          onChange={e => set('has_gram', e.target.value)}
-          disabled={form.category === 'Diamant'}
-          title={form.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : undefined}
-          className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
-          placeholder="0.000" />
+        {(() => {
+          const curVal = parseFloat(form.has_gram) || 0
+          const faturaVal = typeof faturaHas === 'number' ? faturaHas : null
+          const drift = faturaVal != null && Math.abs(curVal - faturaVal) > 0.0001
+          return (
+            <div className="flex items-center gap-1">
+              <input type="number" step="0.001" min="0" value={form.has_gram}
+                onChange={e => set('has_gram', e.target.value)}
+                disabled={form.category === 'Diamant'}
+                title={form.category === 'Diamant' ? 'E çaktivizuar për kategorinë Diamant' : (drift ? `HAS i produktit (${curVal}) ndryshon nga fatura e fundit (${faturaVal}). Kliko ⚠ për të sinkronizuar.` : undefined)}
+                className={`input-field-sm text-right font-semibold text-amber-700 dark:text-amber-300 flex-1 min-w-0 ${form.category === 'Diamant' ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''} ${drift ? 'ring-2 ring-amber-400 dark:ring-amber-500' : ''}`}
+                placeholder="0.000" />
+              {drift && !readOnly && (
+                <button type="button"
+                  onClick={() => set('has_gram', String(faturaVal))}
+                  title={`Sinkronizo me faturën: ${faturaVal}`}
+                  className="px-1 text-amber-600 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-100 font-bold text-xs leading-none shrink-0"
+                >⚠</button>
+              )}
+            </div>
+          )
+        })()}
       </td>
       <td className="px-1 py-1 bg-amber-50/40 dark:bg-amber-900/10">
         <div className="flex items-center gap-1">
@@ -1731,13 +1770,29 @@ export default function Products() {
     } catch (e) { alert(e.message || 'Gabim') }
   }
 
+  // Map productId → has_gram i rreshtit TË FUNDIT të faturës së blerjes
+  // (vetëm për produktet ku ndryshon nga products.has_gram). Përdoret për të
+  // treguar badge "⚠ HAS" te rreshti dhe tooltip-in te edit.
+  const [hasDrift, setHasDrift] = useState(new Map())
+  const loadHasDrift = useCallback(async () => {
+    try {
+      const data = await fetch('/api/products/has-drift').then(r => r.json())
+      const map = new Map()
+      if (Array.isArray(data)) {
+        for (const r of data) map.set(r.id, { productHas: r.product_has, faturaHas: r.fatura_has })
+      }
+      setHasDrift(map)
+    } catch (e) { console.error(e) }
+  }, [])
+
   const load = useCallback(async () => {
     try {
       const data = await fetch('/api/products').then(r => r.json())
       setProducts(Array.isArray(data) ? data : [])
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [])
+    loadHasDrift()
+  }, [loadHasDrift])
 
   useEffect(() => { load() }, [load])
 
@@ -2292,6 +2347,7 @@ export default function Products() {
               ))}
               {filtered.map(p => (
                 <EditableProductRow key={p.id} p={p}
+                  faturaHas={hasDrift.get(p.id)?.faturaHas}
                   onSaved={load}
                   onEdit={() => setModal(p)}
                   onDelete={() => setConfirmDel(p)}
