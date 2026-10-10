@@ -463,25 +463,30 @@ async function downloadTemplate() {
 // Zgjedhësi i fushave për export në Excel. Ruaj zgjedhjen në localStorage që
 // të kujtohet herën tjetër.
 const EXPORT_FIELDS = [
-  { key: 'nr',         label: 'Nr' },
-  { key: 'barcode',    label: 'Barkodi' },
-  { key: 'name',       label: 'Pershkrimi' },
-  { key: 'category',   label: 'Kategoria' },
-  { key: 'brand',      label: 'Brendi' },
-  { key: 'sku',        label: 'SKU' },
-  { key: 'stock',      label: 'Sasia' },
-  { key: 'min_stock',  label: 'Stok Minimal' },
-  { key: 'gram',       label: 'Gram' },
-  { key: 'kodi',       label: 'Kodi (flori)' },
-  { key: 'has_gram',   label: 'Has (gram)' },
-  { key: 'has_rate',   label: 'Kursi Blerje' },
-  { key: 'sell_rate',  label: 'Kursi Shitje' },
-  { key: 'multiplier', label: 'Shumëzues' },
-  { key: 'cost_price', label: 'Cmim Blerje (€)' },
-  { key: 'sell_price', label: 'Cmim Shitje (€)' },
-  { key: 'vat_rate',   label: 'TVSH %' },
-  { key: 'promo',      label: 'Në promocion' },
-  { key: 'promo_pct',  label: 'Zbritje Promo %' },
+  { key: 'nr',             label: 'Nr' },
+  { key: 'last_purchase_date', label: 'Data Blerje' },
+  { key: 'barcode',        label: 'Barkodi' },
+  { key: 'name',           label: 'Pershkrimi' },
+  { key: 'category',       label: 'Kategoria' },
+  { key: 'brand',          label: 'Brendi' },
+  { key: 'sku',            label: 'SKU' },
+  { key: 'stock',          label: 'Sasia' },
+  { key: 'min_stock',      label: 'Stok Minimal' },
+  { key: 'gram',           label: 'Gram' },
+  { key: 'kodi',           label: 'Kodi (flori)' },
+  { key: 'has_gram',       label: 'Cmim Blerje Has' },
+  { key: 'has_rate',       label: 'Kursi Blerje' },
+  { key: 'cost_price',     label: 'Cmim Kosto ($)' },
+  { key: 'multiplier',     label: 'Shumëzues' },
+  { key: 'sell_price_has', label: 'Cmim Shitje Has' },
+  { key: 'sell_rate',      label: 'Kursi Shitje' },
+  { key: 'purchase_price_no_vat', label: 'Cmimi PA' },
+  { key: 'vat_rate',       label: 'TVSH %' },
+  { key: 'sell_price',     label: 'Cmim Shitje (€)' },
+  { key: 'profit_pct',     label: 'Fitim %' },
+  { key: 'margin_pct',     label: 'Marzh %' },
+  { key: 'promo',          label: 'Në promocion' },
+  { key: 'promo_pct',      label: 'Zbritje Promo %' },
 ]
 const EXPORT_LS_KEY = 'products_export_fields_v1'
 const DEFAULT_EXPORT_KEYS = ['nr', 'barcode', 'name', 'category', 'brand', 'sku', 'cost_price', 'sell_price', 'stock', 'min_stock']
@@ -1999,25 +2004,45 @@ export default function Products() {
     // Përkufizim i fushave — çelës, etiketa e kolonës, extraktori dhe gjerësia.
     // Renditja këtu është renditja që del në Excel.
     const FIELDS = [
-      { key: 'nr',         label: 'Nr',                get: p => productNo(p.id),                       w: 10 },
-      { key: 'barcode',    label: 'Barkodi',           get: p => p.barcode || '',                        w: 16 },
-      { key: 'name',       label: 'Pershkrimi',        get: p => p.name || '',                           w: 30 },
-      { key: 'category',   label: 'Kategoria',         get: p => p.category || '',                       w: 14 },
-      { key: 'brand',      label: 'Brendi',            get: p => p.brand || '',                          w: 14 },
-      { key: 'sku',        label: 'SKU',               get: p => p.sku || '',                            w: 12 },
-      { key: 'stock',      label: 'Sasia',             get: p => p.stock || 0,                           w: 8 },
-      { key: 'min_stock',  label: 'Stok Minimal',      get: p => p.min_stock || 5,                       w: 12 },
-      { key: 'gram',       label: 'Gram',              get: p => p.gram || 0,                            w: 10 },
-      { key: 'kodi',       label: 'Kodi',              get: p => p.kodi || '',                           w: 8 },
-      { key: 'has_gram',   label: 'Has (gram)',        get: p => p.has_gram || 0,                        w: 12 },
-      { key: 'has_rate',   label: 'Kursi Blerje',      get: p => p.has_rate || 0,                        w: 14 },
-      { key: 'sell_rate',  label: 'Kursi Shitje',      get: p => p.sell_rate || 0,                       w: 14 },
-      { key: 'multiplier', label: 'Shumëzues',         get: p => p.multiplier || 0,                      w: 12 },
-      { key: 'cost_price', label: 'Cmim Blerje (€)',   get: p => p.cost_price || 0,                      w: 16 },
-      { key: 'sell_price', label: 'Cmim Shitje (€)',   get: p => p.sell_price || 0,                      w: 16 },
-      { key: 'vat_rate',   label: 'TVSH %',            get: p => p.vat_rate ?? 0,                        w: 8 },
-      { key: 'promo',      label: 'Në promocion',      get: p => p.is_promotion ? 'Po' : '',             w: 12 },
-      { key: 'promo_pct',  label: 'Zbritje Promo %',   get: p => p.is_promotion ? (p.promo_discount_pct || 0) : '', w: 14 },
+      { key: 'nr',             label: 'Nr',                get: p => productNo(p.id),                       w: 10 },
+      { key: 'last_purchase_date', label: 'Data Blerje',   get: p => p.last_purchase_date || '',           w: 12 },
+      { key: 'barcode',        label: 'Barkodi',           get: p => p.barcode || '',                        w: 16 },
+      { key: 'name',           label: 'Pershkrimi',        get: p => p.name || '',                           w: 30 },
+      { key: 'category',       label: 'Kategoria',         get: p => p.category || '',                       w: 14 },
+      { key: 'brand',          label: 'Brendi',            get: p => p.brand || '',                          w: 14 },
+      { key: 'sku',            label: 'SKU',               get: p => p.sku || '',                            w: 12 },
+      { key: 'stock',          label: 'Sasia',             get: p => p.stock || 0,                           w: 8 },
+      { key: 'min_stock',      label: 'Stok Minimal',      get: p => p.min_stock || 5,                       w: 12 },
+      { key: 'gram',           label: 'Gram',              get: p => p.gram || 0,                            w: 10 },
+      { key: 'kodi',           label: 'Kodi',              get: p => p.kodi || '',                           w: 8 },
+      { key: 'has_gram',       label: 'Cmim Blerje Has',   get: p => p.has_gram || 0,                        w: 14 },
+      { key: 'has_rate',       label: 'Kursi Blerje',      get: p => p.has_rate || 0,                        w: 14 },
+      { key: 'cost_price',     label: 'Cmim Kosto ($)',    get: p => p.cost_price || 0,                      w: 14 },
+      { key: 'multiplier',     label: 'Shumëzues',         get: p => p.multiplier || 0,                      w: 12 },
+      // Cmim Shitje Has = has_gram × multiplier (si te tabela e inventarit).
+      { key: 'sell_price_has', label: 'Cmim Shitje Has',   get: p => {
+          const hg = parseFloat(p.has_gram) || 0
+          const m  = parseFloat(p.multiplier) || 0
+          return hg > 0 && m > 0 ? +(hg * m).toFixed(2) : 0
+        }, w: 14 },
+      { key: 'sell_rate',      label: 'Kursi Shitje',      get: p => p.sell_rate || 0,                       w: 14 },
+      { key: 'purchase_price_no_vat', label: 'Cmimi PA',   get: p => p.purchase_price_no_vat || 0,           w: 12 },
+      { key: 'vat_rate',       label: 'TVSH %',            get: p => p.vat_rate ?? 0,                        w: 8 },
+      { key: 'sell_price',     label: 'Cmim Shitje (€)',   get: p => p.sell_price || 0,                      w: 16 },
+      // Fitim % = (sell - cost) / cost × 100
+      { key: 'profit_pct',     label: 'Fitim %',           get: p => {
+          const c = parseFloat(p.cost_price) || 0
+          const s = parseFloat(p.sell_price) || 0
+          return c > 0 ? +(((s - c) / c) * 100).toFixed(2) : 0
+        }, w: 10 },
+      // Marzh % = (sell - cost) / sell × 100
+      { key: 'margin_pct',     label: 'Marzh %',           get: p => {
+          const c = parseFloat(p.cost_price) || 0
+          const s = parseFloat(p.sell_price) || 0
+          return s > 0 ? +(((s - c) / s) * 100).toFixed(2) : 0
+        }, w: 10 },
+      { key: 'promo',          label: 'Në promocion',      get: p => p.is_promotion ? 'Po' : '',             w: 12 },
+      { key: 'promo_pct',      label: 'Zbritje Promo %',   get: p => p.is_promotion ? (p.promo_discount_pct || 0) : '', w: 14 },
     ]
     const active = FIELDS.filter(f => selectedKeys.includes(f.key))
     if (active.length === 0) return
