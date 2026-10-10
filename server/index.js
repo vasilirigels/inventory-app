@@ -9112,19 +9112,22 @@ app.post('/api/marketing-entries', async (req, res) => {
         ? +providedAmt.toFixed(2)
         : +((sellPrice || costPrice) * qty).toFixed(2);
       const rate = parseFloat(exchange_rate) > 0 ? parseFloat(exchange_rate) : 1;
-      await run(
-        `INSERT INTO marketing_expenses (date, category_id, description, currency, amount, exchange_rate,
-           amount_lek, amount_eur, amount_usd, product_id, product_qty, payment_method)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          date, category_id || null,
-          description || '',
-          cur, amt, rate,
-          0, amt, 0,
-          pid, qty, 'cash',
-        ]
-      );
-      await run('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, pid]);
+      // Atomik: INSERT + UPDATE stock në të njëjtin batch (shih komentin te
+      // POST /api/marketing-contracts/:id/entries).
+      await batchWrite([
+        { sql: `INSERT INTO marketing_expenses (date, category_id, description, currency, amount, exchange_rate,
+                  amount_lek, amount_eur, amount_usd, product_id, product_qty, payment_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            date, category_id || null,
+            description || '',
+            cur, amt, rate,
+            0, amt, 0,
+            pid, qty, 'cash',
+          ] },
+        { sql: 'UPDATE products SET stock = stock - ? WHERE id = ?',
+          args: [qty, pid] },
+      ]);
       const row = await queryOne(
         `SELECT m.*, c.name AS category_name,
                 p.name AS product_name, p.barcode AS product_barcode,
@@ -9301,13 +9304,15 @@ app.delete('/api/marketing-entries/:id', async (req, res) => {
     const existing = await queryOne(
       'SELECT product_id, product_qty FROM marketing_expenses WHERE id = ?', [id]
     );
-    await run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
-    // Nëse ishte një produkt nga inventari, riktheje stokun te produkti.
+    // Atomik: DELETE + rikthim stock-u në të njëjtin batch nëse ishte produkt.
     if (existing?.product_id && existing.product_qty > 0) {
-      await run(
-        'UPDATE products SET stock = stock + ? WHERE id = ?',
-        [existing.product_qty, existing.product_id]
-      );
+      await batchWrite([
+        { sql: 'DELETE FROM marketing_expenses WHERE id = ?', args: [id] },
+        { sql: 'UPDATE products SET stock = stock + ? WHERE id = ?',
+          args: [existing.product_qty, existing.product_id] },
+      ]);
+    } else {
+      await run('DELETE FROM marketing_expenses WHERE id = ?', [id]);
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -9586,12 +9591,16 @@ app.post('/api/marketing-contracts/:id/entries', async (req, res) => {
       const amt = provided > 0
         ? +provided.toFixed(2)
         : +((parseFloat(prod.sell_price) || 0) * qty * (1 + (parseFloat(prod.vat_rate) || 0) / 100)).toFixed(2);
-      await run(
-        `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, product_id, product_qty, description, payment_method)
-         VALUES (?, ?, 'product', ?, ?, ?, ?, 'cash')`,
-        [id, date, amt, pid, qty, description || '']
-      );
-      await run('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, pid]);
+      // Atomik: INSERT + UPDATE stock në të njëjtin batch, që serveri të mos
+      // mund të dështojë në mes (siç ndodhi me 7 produkte më parë ku stock-u
+      // nuk u zbrit edhe pse zëri u krijua).
+      await batchWrite([
+        { sql: `INSERT INTO marketing_contract_entries (contract_id, date, type, amount_eur, product_id, product_qty, description, payment_method)
+                VALUES (?, ?, 'product', ?, ?, ?, ?, 'cash')`,
+          args: [id, date, amt, pid, qty, description || ''] },
+        { sql: 'UPDATE products SET stock = stock - ? WHERE id = ?',
+          args: [qty, pid] },
+      ]);
     } else {
       const amt = parseFloat(amount_eur) || 0;
       if (amt <= 0) return res.status(400).json({ error: 'amount_eur must be > 0' });
@@ -9620,12 +9629,15 @@ app.delete('/api/marketing-contract-entries/:id', async (req, res) => {
       [id]
     );
     if (!existing) return res.status(404).json({ error: 'not found' });
-    await run('DELETE FROM marketing_contract_entries WHERE id = ?', [id]);
     if (existing.type === 'product' && existing.product_id && existing.product_qty > 0) {
-      await run(
-        'UPDATE products SET stock = stock + ? WHERE id = ?',
-        [existing.product_qty, existing.product_id]
-      );
+      // Atomik: DELETE + rikthim stock-u në të njëjtin batch.
+      await batchWrite([
+        { sql: 'DELETE FROM marketing_contract_entries WHERE id = ?', args: [id] },
+        { sql: 'UPDATE products SET stock = stock + ? WHERE id = ?',
+          args: [existing.product_qty, existing.product_id] },
+      ]);
+    } else {
+      await run('DELETE FROM marketing_contract_entries WHERE id = ?', [id]);
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
