@@ -1,6 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { loadXLSX } from '../lib/xlsx.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import ExportFieldsModal from './ExportFieldsModal.jsx'
+
+const PURCHASE_EXPORT_FIELDS = [
+  { key: 'barcode',            label: 'Barkodi' },
+  { key: 'sku',                label: 'SKU' },
+  { key: 'name',               label: 'Artikulli' },
+  { key: 'category',           label: 'Kategoria' },
+  { key: 'qty',                label: 'Sasia' },
+  { key: 'unit_price_usd',     label: 'Çm. Blerje ($)' },
+  { key: 'discount_usd',       label: 'Zbritje ($)' },
+  { key: 'value_no_vat_usd',   label: 'Vlera pa TVSH ($)' },
+  { key: 'vat_usd',            label: 'TVSH ($)' },
+  { key: 'value_with_vat_usd', label: 'Vlera me TVSH ($)' },
+  { key: 'docs_count',         label: 'Nr. Dokumentash' },
+]
+const PURCHASE_EXPORT_LS_KEY = 'purchase_report_export_fields_v1'
+const PURCHASE_DEFAULT_KEYS = PURCHASE_EXPORT_FIELDS.map(f => f.key)
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -196,6 +213,7 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [docsRow, setDocsRow] = useState(null)
+  const [showExport, setShowExport] = useState(false)
 
   const load = useCallback(async () => {
     if (!from || !to) return
@@ -231,36 +249,44 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
     // eslint-disable-next-line
   }, [filter])
 
-  const exportXlsx = async () => {
+  const runExport = async (selectedKeys) => {
     const XLSX = await loadXLSX()
-    const out = rows.map(r => ({
-      Barkodi: r.barcode || '',
-      SKU: r.sku || '',
-      Artikulli: r.name || '',
-      Kategoria: r.category || '',
-      'Sasia': r.qty,
-      'Çm. Blerje ($)': r.unit_price_usd,
-      'Zbritje ($)': r.discount_usd,
-      'Vlera pa TVSH ($)': r.value_no_vat_usd,
-      'TVSH ($)': r.vat_usd,
-      'Vlera me TVSH ($)': r.value_with_vat_usd,
-      'Nr. Dokumentash': r.docs_count,
-    }))
+    const FIELD_WIDTHS = {
+      barcode: 14, sku: 12, name: 32, category: 14, qty: 10,
+      unit_price_usd: 14, discount_usd: 14, value_no_vat_usd: 16,
+      vat_usd: 14, value_with_vat_usd: 16, docs_count: 12,
+    }
+    const active = PURCHASE_EXPORT_FIELDS.filter(f => selectedKeys.includes(f.key))
+    if (active.length === 0) return
+    const getters = {
+      barcode: r => r.barcode || '',
+      sku: r => r.sku || '',
+      name: r => r.name || '',
+      category: r => r.category || '',
+      qty: r => r.qty,
+      unit_price_usd: r => r.unit_price_usd,
+      discount_usd: r => r.discount_usd,
+      value_no_vat_usd: r => r.value_no_vat_usd,
+      vat_usd: r => r.vat_usd,
+      value_with_vat_usd: r => r.value_with_vat_usd,
+      docs_count: r => r.docs_count,
+    }
+    const out = rows.map(r => Object.fromEntries(active.map(f => [f.label, getters[f.key](r)])))
     if (totals) {
-      out.push({
-        Barkodi: '', SKU: '', Artikulli: 'TOTALI', Kategoria: '',
-        'Sasia': totals.qty,
-        'Çm. Blerje ($)': '',
-        'Zbritje ($)': totals.discount_usd,
-        'Vlera pa TVSH ($)': totals.value_no_vat_usd,
-        'TVSH ($)': totals.vat_usd,
-        'Vlera me TVSH ($)': totals.value_with_vat_usd,
-        'Nr. Dokumentash': '',
-      })
+      const totalRow = Object.fromEntries(active.map(f => {
+        if (f.key === 'name')               return [f.label, 'TOTALI']
+        if (f.key === 'qty')                return [f.label, totals.qty]
+        if (f.key === 'discount_usd')       return [f.label, totals.discount_usd]
+        if (f.key === 'value_no_vat_usd')   return [f.label, totals.value_no_vat_usd]
+        if (f.key === 'vat_usd')            return [f.label, totals.vat_usd]
+        if (f.key === 'value_with_vat_usd') return [f.label, totals.value_with_vat_usd]
+        return [f.label, '']
+      }))
+      out.push(totalRow)
     }
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(out)
-    ws['!cols'] = [14, 12, 32, 14, 10, 14, 14, 16, 14, 16, 12].map(w => ({ wch: w }))
+    ws['!cols'] = active.map(f => ({ wch: FIELD_WIDTHS[f.key] || 14 }))
     XLSX.utils.book_append_sheet(wb, ws, 'Raport Blerje Artikuj')
     XLSX.writeFile(wb, `raport_blerje_artikuj_${from}_${to}.xlsx`)
   }
@@ -274,10 +300,22 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
             Burimet: Fatura Blerje + Magazina Hyrje · Të gjitha vlerat janë në USD ($) (Magazina Hyrje është pa TVSH)
           </p>
         </div>
-        <button onClick={exportXlsx} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
+        <button onClick={() => setShowExport(true)} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
           📥 Eksporto Excel
         </button>
       </div>
+
+      {showExport && (
+        <ExportFieldsModal
+          title="Export Raport Blerje — Artikuj"
+          subtitle={`${rows.length} artikuj · zgjidh cilat fusha të përfshihen`}
+          fields={PURCHASE_EXPORT_FIELDS}
+          defaultKeys={PURCHASE_DEFAULT_KEYS}
+          lsKey={PURCHASE_EXPORT_LS_KEY}
+          onClose={() => setShowExport(false)}
+          onExport={async (keys) => { await runExport(keys); setShowExport(false) }}
+        />
+      )}
 
       <DateRangeFilter
         from={from}

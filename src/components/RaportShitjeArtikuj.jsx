@@ -1,6 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { loadXLSX } from '../lib/xlsx.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
+import ExportFieldsModal from './ExportFieldsModal.jsx'
+
+const SALES_EXPORT_FIELDS = [
+  { key: 'source',             label: 'Lloji' },
+  { key: 'barcode',            label: 'Barkodi' },
+  { key: 'sku',                label: 'SKU' },
+  { key: 'name',               label: 'Artikulli' },
+  { key: 'category',           label: 'Kategoria' },
+  { key: 'material',           label: 'Materiali' },
+  { key: 'qty',                label: 'Sasia' },
+  { key: 'unit_price_lek',     label: 'Çm. Shitje (LEK)' },
+  { key: 'discount_lek',       label: 'Zbritje (LEK)' },
+  { key: 'value_no_vat_lek',   label: 'Vlera pa TVSH (LEK)' },
+  { key: 'vat_lek',            label: 'TVSH (LEK)' },
+  { key: 'value_with_vat_lek', label: 'Vlera me TVSH (LEK)' },
+  { key: 'docs_count',         label: 'Nr. Faturash' },
+]
+const SALES_EXPORT_LS_KEY = 'sales_report_export_fields_v1'
+const SALES_DEFAULT_KEYS = SALES_EXPORT_FIELDS.map(f => f.key)
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -185,6 +204,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [docsRow, setDocsRow] = useState(null)
+  const [showExport, setShowExport] = useState(false)
   const [viewMode, setViewMode] = useState('detailed')  // 'aggregated' | 'detailed'
 
   const load = useCallback(async () => {
@@ -225,78 +245,88 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     // eslint-disable-next-line
   }, [filter])
 
-  const exportXlsx = async () => {
+  const runExport = async (selectedKeys) => {
     const XLSX = await loadXLSX()
     const matLabel = (m) => m === 'flori' ? 'Flori' : m === 'diamant' ? 'Diamant' : ''
-    const out = rows.map(r => ({
-      Lloji: r.source === 'marketing' ? 'Marketing' : 'Shitje',
-      Barkodi: r.barcode || '',
-      SKU: r.sku || '',
-      Artikulli: r.name || '',
-      Kategoria: r.category || '',
-      Materiali: matLabel(r.material),
-      'Sasia': r.qty,
-      'Çm. Shitje (LEK)': r.unit_price_lek,
-      'Zbritje (LEK)': r.discount_lek,
-      'Vlera pa TVSH (LEK)': r.value_no_vat_lek,
-      'TVSH (LEK)': r.vat_lek,
-      'Vlera me TVSH (LEK)': r.value_with_vat_lek,
-      'Nr. Faturash': r.docs_count,
-    }))
+    const FIELD_WIDTHS = {
+      source: 12, barcode: 14, sku: 12, name: 32, category: 14, material: 10,
+      qty: 10, unit_price_lek: 14, discount_lek: 14, value_no_vat_lek: 16,
+      vat_lek: 14, value_with_vat_lek: 16, docs_count: 10,
+    }
+    const getters = {
+      source: r => r.source === 'marketing' ? 'Marketing' : 'Shitje',
+      barcode: r => r.barcode || '',
+      sku: r => r.sku || '',
+      name: r => r.name || '',
+      category: r => r.category || '',
+      material: r => matLabel(r.material),
+      qty: r => r.qty,
+      unit_price_lek: r => r.unit_price_lek,
+      discount_lek: r => r.discount_lek,
+      value_no_vat_lek: r => r.value_no_vat_lek,
+      vat_lek: r => r.vat_lek,
+      value_with_vat_lek: r => r.value_with_vat_lek,
+      docs_count: r => r.docs_count,
+    }
+    const active = SALES_EXPORT_FIELDS.filter(f => selectedKeys.includes(f.key))
+    if (active.length === 0) return
+    const out = rows.map(r => Object.fromEntries(active.map(f => [f.label, getters[f.key](r)])))
+
+    // Rreshtat NËN-TOTAL / TOTAL — ndërtohen në mënyrë gjenerike për fushat
+    // aktive. Vendos emrin te 'name' nëse është aktiv; përndryshe te fusha e
+    // parë tekstuale që ekziston.
+    const makeTotalRow = (labelText, totalData) => {
+      const row = Object.fromEntries(active.map(f => {
+        const v = totalData?.[f.key]
+        return [f.label, (v === undefined || v === null) ? '' : v]
+      }))
+      // Shkruaj etiketën te një kolonë e dukshme
+      const labelKey = active.find(f => f.key === 'name') || active.find(f => f.key === 'barcode') || active[0]
+      if (labelKey) row[labelKey.label] = labelText
+      return row
+    }
     if (totalsByMaterial?.flori?.qty > 0) {
-      out.push({
-        Barkodi: '', SKU: '', Artikulli: 'NËN-TOTAL FLORI', Kategoria: '', Materiali: 'Flori',
-        'Sasia': totalsByMaterial.flori.qty,
-        'Çm. Shitje (LEK)': '',
-        'Zbritje (LEK)': totalsByMaterial.flori.discount_lek,
-        'Vlera pa TVSH (LEK)': totalsByMaterial.flori.value_no_vat_lek,
-        'TVSH (LEK)': totalsByMaterial.flori.vat_lek,
-        'Vlera me TVSH (LEK)': totalsByMaterial.flori.value_with_vat_lek,
-        'Nr. Faturash': '',
-      })
+      out.push(makeTotalRow('NËN-TOTAL FLORI', {
+        material: 'Flori', qty: totalsByMaterial.flori.qty,
+        discount_lek: totalsByMaterial.flori.discount_lek,
+        value_no_vat_lek: totalsByMaterial.flori.value_no_vat_lek,
+        vat_lek: totalsByMaterial.flori.vat_lek,
+        value_with_vat_lek: totalsByMaterial.flori.value_with_vat_lek,
+      }))
     }
     if (totalsByMaterial?.diamant?.qty > 0) {
-      out.push({
-        Barkodi: '', SKU: '', Artikulli: 'NËN-TOTAL DIAMANT', Kategoria: '', Materiali: 'Diamant',
-        'Sasia': totalsByMaterial.diamant.qty,
-        'Çm. Shitje (LEK)': '',
-        'Zbritje (LEK)': totalsByMaterial.diamant.discount_lek,
-        'Vlera pa TVSH (LEK)': totalsByMaterial.diamant.value_no_vat_lek,
-        'TVSH (LEK)': totalsByMaterial.diamant.vat_lek,
-        'Vlera me TVSH (LEK)': totalsByMaterial.diamant.value_with_vat_lek,
-        'Nr. Faturash': '',
-      })
+      out.push(makeTotalRow('NËN-TOTAL DIAMANT', {
+        material: 'Diamant', qty: totalsByMaterial.diamant.qty,
+        discount_lek: totalsByMaterial.diamant.discount_lek,
+        value_no_vat_lek: totalsByMaterial.diamant.value_no_vat_lek,
+        vat_lek: totalsByMaterial.diamant.vat_lek,
+        value_with_vat_lek: totalsByMaterial.diamant.value_with_vat_lek,
+      }))
     }
     if (totals) {
-      out.push({
-        Barkodi: '', SKU: '', Artikulli: 'TOTALI në LEK (kombinuar)', Kategoria: '', Materiali: '',
-        'Sasia': totals.qty,
-        'Çm. Shitje (LEK)': '',
-        'Zbritje (LEK)': totals.discount_lek,
-        'Vlera pa TVSH (LEK)': totals.value_no_vat_lek,
-        'TVSH (LEK)': totals.vat_lek,
-        'Vlera me TVSH (LEK)': totals.value_with_vat_lek,
-        'Nr. Faturash': '',
-      })
+      out.push(makeTotalRow('TOTALI në LEK (kombinuar)', {
+        qty: totals.qty,
+        discount_lek: totals.discount_lek,
+        value_no_vat_lek: totals.value_no_vat_lek,
+        vat_lek: totals.vat_lek,
+        value_with_vat_lek: totals.value_with_vat_lek,
+      }))
     }
     if (totalsByCurrency) {
       for (const cur of Object.keys(totalsByCurrency).sort()) {
         const t = totalsByCurrency[cur]
-        out.push({
-          Barkodi: '', SKU: '', Artikulli: `TOTAL (${cur})`, Kategoria: '', Materiali: '',
-          'Sasia': t.qty,
-          'Çm. Shitje (LEK)': '',
-          'Zbritje (LEK)': t.discount,
-          'Vlera pa TVSH (LEK)': t.value_no_vat,
-          'TVSH (LEK)': t.vat,
-          'Vlera me TVSH (LEK)': t.value_with_vat,
-          'Nr. Faturash': '',
-        })
+        out.push(makeTotalRow(`TOTAL (${cur})`, {
+          qty: t.qty,
+          discount_lek: t.discount,
+          value_no_vat_lek: t.value_no_vat,
+          vat_lek: t.vat,
+          value_with_vat_lek: t.value_with_vat,
+        }))
       }
     }
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(out)
-    ws['!cols'] = [12, 14, 12, 32, 14, 10, 10, 14, 14, 16, 14, 16, 10].map(w => ({ wch: w }))
+    ws['!cols'] = active.map(f => ({ wch: FIELD_WIDTHS[f.key] || 14 }))
     XLSX.utils.book_append_sheet(wb, ws, 'Raport Shitje Artikuj')
     XLSX.writeFile(wb, `raport_shitje_artikuj_${from}_${to}.xlsx`)
   }
@@ -310,10 +340,22 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
             Burimi: Fatura Shitje · Kolonat për çdo artikull janë në LEK (të konvertuara me kursin e çdo fature) · Totalet finale sipas monedhës origjinale
           </p>
         </div>
-        <button onClick={exportXlsx} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
+        <button onClick={() => setShowExport(true)} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
           📥 Eksporto Excel
         </button>
       </div>
+
+      {showExport && (
+        <ExportFieldsModal
+          title="Export Raport Shitje — Artikuj"
+          subtitle={`${rows.length} artikuj · zgjidh cilat fusha të përfshihen`}
+          fields={SALES_EXPORT_FIELDS}
+          defaultKeys={SALES_DEFAULT_KEYS}
+          lsKey={SALES_EXPORT_LS_KEY}
+          onClose={() => setShowExport(false)}
+          onExport={async (keys) => { await runExport(keys); setShowExport(false) }}
+        />
+      )}
 
       <DateRangeFilter
         from={from}
