@@ -2371,7 +2371,8 @@ app.get('/api/invoices/:id', async (req, res) => {
       'SELECT id, method, currency, amount, exchange_rate FROM invoice_payment_splits WHERE invoice_id = ? ORDER BY id ASC',
       [id]
     );
-    const paySum = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [id])?.s || 0;
+    const paySumRow = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?', [id]);
+    const paySum = paySumRow?.s || 0;
     const raw = (invoice.amount_paid || 0) - paySum;
     const initial_amount_paid = +(invoice.is_credit_note ? raw : Math.max(0, raw)).toFixed(2);
     res.json({ ...invoice, items, payment_splits, initial_amount_paid });
@@ -2621,10 +2622,11 @@ app.put('/api/invoices/:id', async (req, res) => {
         formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? totals.total_with_vat : 0;
       }
     }
-    const existingPaySum = await queryOne(
+    const existingPaySumRow = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?',
       [id]
-    )?.s || 0;
+    );
+    const existingPaySum = existingPaySumRow?.s || 0;
     const amountPaidU = +(formInitialPaid + existingPaySum).toFixed(2);
     // Për fatura kreditore lejo `amount_due` negativ (shop i detyrohet klientit
     // ose po redukton borxhin origjinal). Për fatura të zakonshme mbaje ≥ 0.
@@ -4006,7 +4008,8 @@ app.get('/api/purchase-invoices/:id', async (req, res) => {
         ORDER BY pi.id ASC`,
       [req.params.id]
     );
-    const paySum = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?', [req.params.id])?.s || 0;
+    const paySumRow = await queryOne('SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?', [req.params.id]);
+    const paySum = paySumRow?.s || 0;
     const initial_amount_paid = +Math.max(0, (inv.amount_paid || 0) - paySum).toFixed(2);
     const payment_splits = await queryAll(
       'SELECT id, method, currency, amount, exchange_rate FROM purchase_invoice_payment_splits WHERE purchase_id = ? ORDER BY id ASC',
@@ -4188,10 +4191,11 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? tot : 0;
       }
     }
-    const existingPaySum = await queryOne(
+    const existingPaySumRow = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?',
       [id]
-    )?.s || 0;
+    );
+    const existingPaySum = existingPaySumRow?.s || 0;
     const amountPaidU = +(formInitialPaid + existingPaySum).toFixed(2);
     const amountDueU = Math.max(0, +(tot - amountPaidU).toFixed(2));
 
