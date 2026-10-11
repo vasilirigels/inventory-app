@@ -3295,7 +3295,9 @@ app.get('/api/client-debts', async (req, res) => {
     const onlyPaid = req.query.onlyPaid === '1' || req.query.onlyPaid === 'true';
     // Any invoice with unpaid balance counts as debt — pavarësisht payment_method.
     // Tolerance 0.005 to guard against float residuals leaving 0.00... amount_due behind.
-    // onlyPaid=1 → shfaq VETËM faturat e paguara plotësisht (historik).
+    // onlyPaid=1 → historik i BORXHEVE të shlyera: fatura që janë paguar plotësisht
+    //   DHE kanë të paktën një `invoice_payment` (pra ishin borxh/mikse dhe janë
+    //   shlyer më vonë). Shitjet cash direkte nuk përfshihen (nuk kanë payments).
     // Refaktor për Turso row-reads: në vend të 3 subquery-ve të korreluar për
     // çdo rresht fature (last_payment_date, last_payment_amount, payment_count),
     // përdorim një CTE që agregron payments-in një herë të vetme dhe pastaj
@@ -3321,7 +3323,8 @@ app.get('/api/client-debts', async (req, res) => {
       WHERE COALESCE(i.cancelled, 0) = 0`;
     if (onlyPaid) {
       sql += ` AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) <= 0.005
-               AND COALESCE(i.total_with_vat, 0) > 0.005`;
+               AND COALESCE(i.total_with_vat, 0) > 0.005
+               AND COALESCE(p.payment_count, 0) > 0`;
     } else {
       sql += ` AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005`;
     }
@@ -10392,6 +10395,86 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
       rows, totals, by_currency_totals,
       eur_rate: +eurRate.toFixed(4),
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ============================================================
+// INVESTIMI — Ortakëria, kapitali, borxhet mes ortakëve
+// ============================================================
+// Një endpoint i vetëm që kthen gjithçka që i duhet faqes Investimi:
+//   - investments: kontributet në kapital
+//   - debts: borxhet mes ortakëve + pagesat përkatëse
+//   - summary: totale (kontribut i agreguar për partner, borxhi fillestar/mbetja)
+app.get('/api/investimi', async (_req, res) => {
+  try {
+    const investments = await queryAll(
+      `SELECT id, partner_name, amount_eur, date, note, created_at
+         FROM partner_investments ORDER BY date ASC, id ASC`
+    );
+    const debts = await queryAll(
+      `SELECT id, debtor, creditor, initial_amount_eur, reason, date, created_at
+         FROM partner_debts ORDER BY date ASC, id ASC`
+    );
+    const payments = await queryAll(
+      `SELECT id, debt_id, amount_eur, date, note, created_at
+         FROM partner_debt_payments ORDER BY date ASC, id ASC`
+    );
+    const debtsEnriched = debts.map(d => {
+      const list = payments.filter(p => p.debt_id === d.id);
+      const paid = list.reduce((s, p) => s + (p.amount_eur || 0), 0);
+      return {
+        ...d,
+        paid_eur: +paid.toFixed(2),
+        remaining_eur: +((d.initial_amount_eur || 0) - paid).toFixed(2),
+        payments: list,
+      };
+    });
+    const partners = {};
+    for (const inv of investments) {
+      partners[inv.partner_name] = (partners[inv.partner_name] || 0) + (inv.amount_eur || 0);
+    }
+    res.json({ investments, debts: debtsEnriched, partners });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/investimi/investments', async (req, res) => {
+  try {
+    const { partner_name, amount_eur, date, note } = req.body || {};
+    if (!partner_name || !date) return res.status(400).json({ error: 'partner_name and date required' });
+    const r = await run(
+      `INSERT INTO partner_investments (partner_name, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
+      [partner_name, parseFloat(amount_eur) || 0, date, note || '']
+    );
+    res.json({ id: Number(r.lastInsertRowid), success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/investimi/investments/:id', async (req, res) => {
+  try {
+    await run(`DELETE FROM partner_investments WHERE id = ?`, [Number(req.params.id)]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/investimi/debt-payments', async (req, res) => {
+  try {
+    const { debt_id, amount_eur, date, note } = req.body || {};
+    const did = Number(debt_id);
+    const amt = parseFloat(amount_eur) || 0;
+    if (!did || !date) return res.status(400).json({ error: 'debt_id and date required' });
+    if (amt <= 0) return res.status(400).json({ error: 'amount_eur must be > 0' });
+    const r = await run(
+      `INSERT INTO partner_debt_payments (debt_id, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
+      [did, amt, date, note || '']
+    );
+    res.json({ id: Number(r.lastInsertRowid), success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/investimi/debt-payments/:id', async (req, res) => {
+  try {
+    await run(`DELETE FROM partner_debt_payments WHERE id = ?`, [Number(req.params.id)]);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

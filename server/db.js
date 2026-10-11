@@ -466,6 +466,42 @@ const SCHEMA = [
     note TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
+
+  // Investimi i ortakëve — kontributet në kapitalin fillestar të dyqanit.
+  // Biba 70% (kontribut 100,000 EUR), Diana 30% (kontribut 0 EUR, borxh ndaj Bibës).
+  // Rreshta të rinj mund të shtohen nëse ortakët shtojnë kapital më vonë.
+  `CREATE TABLE IF NOT EXISTS partner_investments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    partner_name TEXT NOT NULL,
+    amount_eur REAL NOT NULL DEFAULT 0,
+    date TEXT NOT NULL,
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  // Borxhet mes ortakëve — zakonisht Diana → Biba për pjesën e saj të kapitalit.
+  // initial_amount_eur mbahet si snapshot i fillimit; pagesat zbresin veçmas.
+  `CREATE TABLE IF NOT EXISTS partner_debts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    debtor TEXT NOT NULL,
+    creditor TEXT NOT NULL,
+    initial_amount_eur REAL NOT NULL DEFAULT 0,
+    reason TEXT DEFAULT '',
+    date TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  // Pagesat që ortaku-debitor bën për të shlyer borxhin te ortaku-kreditor.
+  // debt_id lidhet me partner_debts; shuma zbret nga mbetja.
+  `CREATE TABLE IF NOT EXISTS partner_debt_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    debt_id INTEGER NOT NULL,
+    amount_eur REAL NOT NULL DEFAULT 0,
+    date TEXT NOT NULL,
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (debt_id) REFERENCES partner_debts(id) ON DELETE CASCADE
+  )`,
 ];
 
 // Additive ALTERs — each may fail if column already exists, that's fine.
@@ -1132,6 +1168,27 @@ async function initDB() {
     `);
   } catch (e) {
     console.warn('marketing_people backfill skipped:', e.message);
+  }
+
+  // Seed partner_investments + partner_debts vetëm nëse janë bosh.
+  // Nëse user-i i fshin pastaj (p.sh. errësirë), ne nuk i rifusim automatikisht —
+  // seeding bëhet VETËM në instalimin e parë kur të dyja tabelat janë ende bosh.
+  try {
+    const invCount = await client.execute(`SELECT COUNT(*) AS n FROM partner_investments`);
+    const debtCount = await client.execute(`SELECT COUNT(*) AS n FROM partner_debts`);
+    if ((invCount.rows[0]?.n ?? 0) === 0 && (debtCount.rows[0]?.n ?? 0) === 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      await client.batch([
+        { sql: `INSERT INTO partner_investments (partner_name, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
+          args: ['Biba', 100000, today, 'Kapital fillestar (70% ortakëri)'] },
+        { sql: `INSERT INTO partner_investments (partner_name, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
+          args: ['Diana', 0, today, 'Kapital fillestar (30% ortakëri — pa pagesë fillestare)'] },
+        { sql: `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, reason, date) VALUES (?, ?, ?, ?, ?)`,
+          args: ['Diana', 'Biba', 30000, '30% ortakëri e financuar nga Biba', today] },
+      ], 'write');
+    }
+  } catch (e) {
+    console.warn('partner seed skipped:', e.message);
   }
 
   initialized = true;

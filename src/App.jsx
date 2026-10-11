@@ -47,6 +47,7 @@ const Komentet               = lazy(() => import('./components/Komentet.jsx'))
 const Riparimet              = lazy(() => import('./components/Riparimet.jsx'))
 const ShitjeOnline           = lazy(() => import('./components/ShitjeOnline.jsx'))
 const Porosi                 = lazy(() => import('./components/Porosi.jsx'))
+const Investimi              = lazy(() => import('./components/Investimi.jsx'))
 
 function PageFallback() {
   return (
@@ -186,6 +187,7 @@ function AppInner({ user }) {
       case 'detyrime':  return <DetyrimetKlienti onNavigate={navigateTo} />
       case 'analize-veprime': return <AnalizeVeprime onNavigate={navigateTo} />
       case 'detyrime-furnitor':       return <DetyrimetFurnitor onNavigate={navigateTo} />
+      case 'investimi':               return <Investimi />
       case 'analize-veprime-furnitor': return <AnalizeVeprimeFurnitor onNavigate={navigateTo} />
       case 'raport-shitje-artikuj': return <RaportShitjeArtikuj onNavigate={navigateTo} />
       case 'raport-blerje-artikuj': return <RaportBlerjeArtikuj onNavigate={navigateTo} />

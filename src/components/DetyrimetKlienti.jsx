@@ -858,7 +858,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
           <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate">
             {client
               ? (client.name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>)
-              : `${groupArr.length} klientë${onlyPaid ? ' (faturat e paguara)' : ' me borxh'}`}
+              : `${groupArr.length} klientë${onlyPaid ? ' (borxhe të shlyera)' : ' me borxh'}`}
           </h2>
           {client?.nipt && <p className="text-sm font-mono text-slate-500 dark:text-slate-400">NIPT: {client.nipt}</p>}
         </div>
@@ -868,7 +868,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between flex-wrap gap-3">
           <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-            {onlyPaid ? 'Faturat e Paguara (Historik)' : 'Faturat e Papaguara'} ({invoices.length})
+            {onlyPaid ? 'Borxhe të Shlyera (Historik)' : 'Faturat e Papaguara'} ({invoices.length})
           </h3>
           <div className="flex items-center gap-2">
             {!isSales() && (
@@ -913,7 +913,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
             <div className="text-5xl mb-3">✓</div>
             <p className="text-slate-500 dark:text-slate-400">
               {onlyPaid
-                ? (client ? 'Asnjë faturë e paguar për këtë klient.' : 'Asnjë faturë e paguar plotësisht.')
+                ? (client ? 'Asnjë borxh i shlyer për këtë klient.' : 'Asnjë borxh i shlyer në sistem.')
                 : (client ? 'Asnjë borxh i hapur për këtë klient.' : 'Asnjë borxh i hapur në sistem.')}
             </p>
           </div>
@@ -951,8 +951,6 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                       ? <span className="badge bg-purple-100 text-purple-700 dark:text-purple-300">💳 POS</span>
                       : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
                     const isCredit  = !!inv.is_credit_note
-                    const rate      = n(inv.exchange_rate) || 1
-                    const isForeign = (inv.currency || 'LEK') !== 'LEK'
                     return (
                       <tr key={inv.id} className={`border-b border-slate-100 dark:border-slate-800 ${isCredit ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
                         <td className="px-4 py-2 text-slate-700 dark:text-slate-200">{inv.date}</td>
@@ -968,19 +966,9 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                         <td className="px-4 py-2 text-center">{pmBadge}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
                           {fmt(inv.total_with_vat)}
-                          {isForeign && (
-                            <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                              = {fmt(n(inv.total_with_vat) * rate)} LEK
-                            </div>
-                          )}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <div className="tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{fmt(inv.amount_paid)}</div>
-                          {isForeign && n(inv.amount_paid) > 0.005 && (
-                            <div className="text-[10px] font-normal text-emerald-600/70 italic">
-                              = {fmt(n(inv.amount_paid) * rate)} LEK
-                            </div>
-                          )}
                           {n(inv.amount_paid) > 0 && (
                             <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                               {inv.last_payment_date || inv.date}
@@ -990,11 +978,6 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                         </td>
                         <td className={`px-4 py-2 text-right tabular-nums font-bold ${inv._due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
                           {inv._due > 0.005 ? fmt(inv._due) : '✓'}
-                          {isForeign && n(inv._due) > 0.005 && (
-                            <div className="text-[10px] font-normal text-red-500/80 italic">
-                              = {fmt(n(inv._due) * rate)} LEK
-                            </div>
-                          )}
                         </td>
                         <td className="px-4 py-2 text-center">
                           <button
