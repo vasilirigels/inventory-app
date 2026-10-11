@@ -2507,6 +2507,12 @@ app.post('/api/invoices', async (req, res) => {
         amountPaid = (pm === 'cash' || pm === 'pos') ? totals.total_with_vat : 0;
       }
     }
+    // Konsistencë: pm='debt' pa splits = asgjë nuk u pagua në krijim. Nëse frontend-i
+    // dërgon një amount_paid të vjetër (p.sh. nga kalimi cash→debt pa fshirë fushën),
+    // mos e beso — borxhi i mirëfilltë vjen nga invoice_payments te Detyrime Klienti.
+    if (pm === 'debt' && splits.length === 0) {
+      amountPaid = 0;
+    }
     const amountDue = Math.max(0, +(totals.total_with_vat - amountPaid).toFixed(2));
     const totalDiscount = +items.reduce((s, it) => {
       const gross = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price_no_vat) || 0);
@@ -2621,6 +2627,10 @@ app.put('/api/invoices/:id', async (req, res) => {
       } else {
         formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? totals.total_with_vat : 0;
       }
+    }
+    // Konsistencë: pm='debt' pa splits = asgjë nuk u pagua në krijim (shiko POST).
+    if (pmU === 'debt' && splitsU.length === 0) {
+      formInitialPaid = 0;
     }
     const existingPaySumRow = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_payments WHERE invoice_id = ?',
@@ -4057,6 +4067,10 @@ app.post('/api/purchase-invoices', async (req, res) => {
         amountPaidI = (pmI === 'cash' || pmI === 'pos') ? tot : 0;
       }
     }
+    // Konsistencë: pm='debt' pa splits = asgjë nuk u pagua.
+    if (pmI === 'debt' && splitsI.length === 0) {
+      amountPaidI = 0;
+    }
     const amountDueI = Math.max(0, +(tot - amountPaidI).toFixed(2));
 
     const doInsertPurchase = (invNo) => run(
@@ -4190,6 +4204,10 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
       } else {
         formInitialPaid = (pmU === 'cash' || pmU === 'pos') ? tot : 0;
       }
+    }
+    // Konsistencë: pm='debt' pa splits = asgjë nuk u pagua në krijim.
+    if (pmU === 'debt' && splitsU.length === 0) {
+      formInitialPaid = 0;
     }
     const existingPaySumRow = await queryOne(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM purchase_payments WHERE purchase_id = ?',
