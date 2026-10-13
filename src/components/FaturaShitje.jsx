@@ -1163,8 +1163,6 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                   : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
                 const isCancelled = !!inv.cancelled
                 const isCredit    = !!inv.is_credit_note
-                const rate        = n(inv.exchange_rate) || 1
-                const isForeign   = (inv.currency || 'LEK') !== 'LEK'
                 const rowCls = isCancelled
                   ? 'border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 line-through opacity-60'
                   : isCredit
@@ -1196,43 +1194,18 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt((n(inv.subtotal_no_vat) + n(inv.total_discount)) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className={`px-2 py-2 text-right tabular-nums ${n(inv.total_discount) > 0.005 ? 'text-orange-600 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                     {n(inv.total_discount) > 0.005 ? `-${fmt(inv.total_discount)}` : '—'}
-                    {isForeign && n(inv.total_discount) > 0.005 && (
-                      <div className="text-[10px] font-normal text-orange-500/80 italic">
-                        = -{fmt(n(inv.total_discount) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.subtotal_no_vat)}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(inv.subtotal_no_vat) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(inv.total_vat)}
-                    {isForeign && n(inv.total_vat) > 0.005 && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(inv.total_vat) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums font-bold text-slate-900 dark:text-white">
                     {fmt(inv.total_with_vat)}
-                    {isForeign && (
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 italic">
-                        = {fmt(n(inv.total_with_vat) * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   {isAdmin && (() => {
                     const cost   = n(inv.total_cost)
@@ -1266,11 +1239,6 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                   })()}
                   <td className="px-2 py-2 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmt(initPaid)}
-                    {isForeign && initPaid > 0.005 && (
-                      <div className="text-[10px] font-normal text-emerald-600/70 italic">
-                        = {fmt(initPaid * rate)} LEK
-                      </div>
-                    )}
                     {(() => {
                       const splits = parseSplitsSummary(inv.splits_summary)
                       if (splits.length === 0) return null
@@ -1307,11 +1275,6 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                   </td>
                   <td className={`px-2 py-2 text-right tabular-nums font-semibold ${due > 0.005 ? 'text-red-600' : due < -0.005 ? 'text-purple-700 dark:text-purple-300' : 'text-emerald-600'}`}>
                     {Math.abs(due) > 0.005 ? fmt(due) : '✓'}
-                    {isForeign && Math.abs(due) > 0.005 && (
-                      <div className={`text-[10px] font-normal italic ${due > 0.005 ? 'text-red-500/80' : 'text-purple-600/80'}`}>
-                        = {fmt(due * rate)} LEK
-                      </div>
-                    )}
                   </td>
                   {online && (() => {
                     const cur = inv.order_status || 'e_re'

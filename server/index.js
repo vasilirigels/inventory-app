@@ -6346,11 +6346,17 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         // paidNow bie te kesh_nga_shitjet automatikisht (xhiro − bank − pos − due).
       }
       else if (r.pm === 'cash') {
-        // Fatura pm='cash' zakonisht janë paguar plotësisht, por user mund të
-        // ketë vendosur manualisht një pjesë të papaguar (p.sh. amount_paid
-        // < total_with_vat). Ne trajtojmë atë pjesë si borxh që nuk hyri kesh.
+        // Pagesa fillestare merret nga paid_cash+paid_pos+paid_bank (snapshot
+        // historik që s'preket nga pagesat e vonshme), jo nga amount_paid.
+        // Përndryshe, kur amount_paid del jo konsistent me paid_* (p.sh. kur
+        // është editua faturë në versione të vjetra pa përditësim paralel i
+        // paid_cash), arka e ditës llogarit pagesë fillestare më të madhe se
+        // reale dhe borxhin më të vogël.
         xhiro_total[c] += r.total;
-        const paidNow = Math.max(0, Math.min(r.initial_paid || 0, r.total));
+        const paidNow = Math.max(0, Math.min(
+          (r.paid_cash || 0) + (r.paid_pos || 0) + (r.paid_bank || 0),
+          r.total
+        ));
         const due     = Math.max(0, r.total - paidNow);
         if (due > 0.005) amount_due[c] += due;
       }
