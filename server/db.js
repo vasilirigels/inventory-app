@@ -1067,6 +1067,15 @@ const MIGRATIONS = [
   )`,
   "ALTER TABLE marketing_contracts ADD COLUMN person_id INTEGER DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS idx_marketing_contracts_person ON marketing_contracts(person_id)",
+
+  // Terheqje nga kasaforta me efekt te Investimi — kur destination=
+  // 'biba_investment' (30% kalon si pagese borxhi te Diana) ose 'diana_debt'
+  // (shuma krijon borxh te ri Diana→Biba). source_withdrawal_id lejon
+  // cascade kur editon/fshin terheqjen.
+  "ALTER TABLE partner_debts ADD COLUMN source_withdrawal_id INTEGER DEFAULT 0",
+  "ALTER TABLE partner_debt_payments ADD COLUMN source_withdrawal_id INTEGER DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_partner_debts_src_wd ON partner_debts(source_withdrawal_id)",
+  "CREATE INDEX IF NOT EXISTS idx_partner_debt_payments_src_wd ON partner_debt_payments(source_withdrawal_id)",
 ];
 
 async function initDB() {

@@ -1005,7 +1005,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
             </div>
           )}
         </div>
-        <button onClick={onCreate} className="btn-primary">{online ? '+ Porosi e Re' : '+ Faturë e Re'}</button>
+        <button onClick={onCreate} className="btn-primary">{online ? '+ Shitje e Re' : '+ Faturë e Re'}</button>
       </div>
 
       {/* Filters */}
@@ -2056,50 +2056,6 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
           />
         </div>
       </div>
-
-      {/* Fushat për porosi online — kanali, adresa, tracking, statusi */}
-      {online && (
-        <div className="card border-purple-200 bg-purple-50/30">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xl">🛒</span>
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Detajet e Porosisë Online</h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div>
-              <label className="form-label">Kanali</label>
-              <select value={channel} onChange={e => setChannel(e.target.value)} className="input-field">
-                <option value="Instagram">📸 Instagram</option>
-                <option value="WhatsApp">💬 WhatsApp</option>
-                <option value="Facebook">📘 Facebook</option>
-                <option value="Telefon">📞 Telefon</option>
-                <option value="Website">🌐 Website</option>
-                <option value="Tjeter">Tjetër</option>
-              </select>
-            </div>
-            <div>
-              <label className="form-label">Statusi i Porosisë</label>
-              <select value={orderStatus} onChange={e => setOrderStatus(e.target.value)} className="input-field">
-                <option value="e_re">🆕 E re</option>
-                <option value="ne_pergatitje">📦 Në përgatitje</option>
-                <option value="derguar">🚚 Dërguar</option>
-                <option value="dorezuar">✓ Dorëzuar</option>
-                <option value="anuluar">❌ Anuluar</option>
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="form-label">Nr. i Ndjekjes (tracking)</label>
-              <input type="text" value={trackingNo} onChange={e => setTrackingNo(e.target.value)}
-                className="input-field font-mono" placeholder="opsional — kodi i dërgesës" />
-            </div>
-            <div className="md:col-span-4">
-              <label className="form-label">Adresa e Dërgimit</label>
-              <textarea value={shippingAddress} onChange={e => setShippingAddress(e.target.value)}
-                className="input-field resize-none" rows={2}
-                placeholder="Emri i marrësit, adresa, qyteti, telefoni për transportuesin..." />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Items table */}
       <div className="card p-0 overflow-hidden">

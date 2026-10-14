@@ -3407,6 +3407,10 @@ app.get('/api/client-debts', async (req, res) => {
       FROM invoices i
       LEFT JOIN pay_agg p ON p.invoice_id = i.id
       WHERE COALESCE(i.cancelled, 0) = 0`;
+    // Shites nuk duhet te shikoje faturat nga Shitje Brenda Stafit (is_online=1).
+    if (req.user?.role === 'sales') {
+      sql += ' AND COALESCE(i.is_online, 0) = 0';
+    }
     if (onlyPaid) {
       sql += ` AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) <= 0.005
                AND COALESCE(i.total_with_vat, 0) > 0.005
@@ -3453,6 +3457,10 @@ app.get('/api/client-activity', async (req, res) => {
     if (to)   { conds.push('date <= ?'); params.push(to); }
     // Exclude cancelled invoices; credit notes are included
     conds.push('COALESCE(cancelled, 0) = 0');
+    // Shites nuk duhet te shikoje faturat nga Shitje Brenda Stafit (is_online=1).
+    if (req.user?.role === 'sales') {
+      conds.push('COALESCE(is_online, 0) = 0');
+    }
     const invoices = await queryAll(
       `SELECT * FROM invoices WHERE ${conds.join(' AND ')} ORDER BY date ASC, id ASC`,
       params
@@ -3505,6 +3513,10 @@ app.get('/api/client-debts/summary', async (req, res) => {
     const params = [];
     if (from) { conds.push('date >= ?'); params.push(from); }
     if (to)   { conds.push('date <= ?'); params.push(to); }
+    // Shites nuk duhet te shikoje faturat nga Shitje Brenda Stafit (is_online=1).
+    if (req.user?.role === 'sales') {
+      conds.push('COALESCE(is_online, 0) = 0');
+    }
     const where = `WHERE ${conds.join(' AND ')}`;
     const sql = `
       SELECT
@@ -7459,6 +7471,11 @@ app.delete('/api/kasaforta/closeout/:date', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Destinacionet e lejuara te safe_withdrawals. Dy te fundit jane admin-only
+// dhe krijojne efekt anesor te Investimi (pagese borxhi ose borxh i ri).
+const SW_DESTS_ALL   = ['arka', 'bank', 'jashte', 'biba_investment', 'diana_debt'];
+const SW_DESTS_ADMIN = ['biba_investment', 'diana_debt'];
+
 app.get('/api/safe-withdrawals', async (req, res) => {
   try {
     let { from, to } = req.query;
@@ -7472,6 +7489,10 @@ app.get('/api/safe-withdrawals', async (req, res) => {
     let where = '1=1';
     if (from) { where += ' AND date >= ?'; params.push(from); }
     if (to)   { where += ' AND date <= ?'; params.push(to); }
+    // Shites nuk duhet te shikoje terheqjet admin-only (Biba Investim / Diana Borxh).
+    if (req.user?.role !== 'admin') {
+      where += ` AND (destination IS NULL OR destination NOT IN ('${SW_DESTS_ADMIN.join("','")}'))`;
+    }
     const lim = Math.min(parseInt(limit) || 200, 500);
     const rows = await queryAll(
       `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf,
@@ -7487,6 +7508,52 @@ app.get('/api/safe-withdrawals', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Efektet te Investimi kur destination eshte 'biba_investment' ose 'diana_debt'.
+// Kthen listen e statement-eve per batchWrite (atomike me INSERT/UPDATE/DELETE
+// te safe_withdrawals). source_withdrawal_id lidh rreshtin per cascade.
+async function investimiSideEffects(destination, amountEur, date, withdrawalId) {
+  const stmts = [];
+  if (destination === 'biba_investment') {
+    // 30% e shumes shkon si pagese borxhi te borxhi me i vjeter aktiv i Dianes.
+    const payment = Math.round(amountEur * 0.30 * 100) / 100;
+    if (payment <= 0) return stmts;
+    const debt = await queryOne(
+      `SELECT d.id,
+              (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) AS remaining
+         FROM partner_debts d
+        WHERE d.debtor = 'Diana' AND d.creditor = 'Biba'
+          AND (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) > 0.005
+        ORDER BY d.date ASC, d.id ASC
+        LIMIT 1`
+    );
+    if (!debt) {
+      const err = new Error('Nuk ka borxh aktiv Diana→Biba per te shlyer (30% nga terheqja Biba Investim)');
+      err.status = 400;
+      throw err;
+    }
+    stmts.push({
+      sql: `INSERT INTO partner_debt_payments (debt_id, amount_eur, date, note, source_withdrawal_id)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [debt.id, payment, date, `Nga Tërheqje Biba Investim (30% e ${amountEur.toFixed(2)} EUR)`, withdrawalId],
+    });
+  } else if (destination === 'diana_debt') {
+    if (amountEur <= 0) return stmts;
+    stmts.push({
+      sql: `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, reason, date, source_withdrawal_id)
+            VALUES ('Diana', 'Biba', ?, ?, ?, ?)`,
+      args: [amountEur, 'Tërheqje Diana nga kasaforta', date, withdrawalId],
+    });
+  }
+  return stmts;
+}
+
+async function clearInvestimiSideEffects(withdrawalId) {
+  await batchWrite([
+    { sql: 'DELETE FROM partner_debt_payments WHERE source_withdrawal_id = ?', args: [withdrawalId] },
+    { sql: 'DELETE FROM partner_debts WHERE source_withdrawal_id = ?', args: [withdrawalId] },
+  ]);
+}
+
 app.post('/api/safe-withdrawals', async (req, res) => {
   try {
     const d = req.body || {};
@@ -7501,27 +7568,37 @@ app.post('/api/safe-withdrawals', async (req, res) => {
     }
     if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
     const destination = String(d.destination || 'jashte').trim().toLowerCase();
-    if (!['arka', 'bank', 'jashte'].includes(destination)) {
-      return res.status(400).json({ error: "destination duhet të jetë 'arka' | 'bank' | 'jashte'" });
+    if (!SW_DESTS_ALL.includes(destination)) {
+      return res.status(400).json({ error: `destination duhet të jetë një nga: ${SW_DESTS_ALL.join(', ')}` });
+    }
+    if (SW_DESTS_ADMIN.includes(destination) && req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Vetëm admini mund të përdorë këtë destinacion' });
+    }
+    if (SW_DESTS_ADMIN.includes(destination) && amounts.eur <= 0) {
+      return res.status(400).json({ error: 'Për këtë destinacion duhet shumë > 0 në EUR' });
     }
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
     const cols = CURS_SW.map(c => `amount_${c}`);
     const vals = CURS_SW.map(c => amounts[c]);
-    await run(
+    const r = await run(
       `INSERT INTO safe_withdrawals (date, ${cols.join(', ')}, destination, person, note)
        VALUES (?, ${cols.map(() => '?').join(', ')}, ?, ?, ?)`,
       [date, ...vals, destination, person, note]
     );
+    const withdrawalId = Number(r.lastInsertRowid);
+    // Efektet te Investimi: pagese borxhi (Biba Investim) ose borxh i ri (Diana Borxh).
+    const sideStmts = await investimiSideEffects(destination, amounts.eur, date, withdrawalId);
+    if (sideStmts.length) await batchWrite(sideStmts);
     await syncSafeWithdrawTotals(date);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ success: true, id: withdrawalId });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 app.put('/api/safe-withdrawals/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = await queryOne('SELECT date FROM safe_withdrawals WHERE id = ?', [id]);
+    const existing = await queryOne('SELECT date, destination FROM safe_withdrawals WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'not found' });
     const d = req.body || {};
     const date = d.date || existing.date;
@@ -7534,29 +7611,47 @@ app.put('/api/safe-withdrawals/:id', async (req, res) => {
     }
     if (!anyPositive) return res.status(400).json({ error: 'shuma duhet të jetë > 0' });
     const destination = String(d.destination || 'jashte').trim().toLowerCase();
-    if (!['arka', 'bank', 'jashte'].includes(destination)) {
-      return res.status(400).json({ error: "destination duhet të jetë 'arka' | 'bank' | 'jashte'" });
+    if (!SW_DESTS_ALL.includes(destination)) {
+      return res.status(400).json({ error: `destination duhet të jetë një nga: ${SW_DESTS_ALL.join(', ')}` });
+    }
+    if (SW_DESTS_ADMIN.includes(destination) && req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Vetëm admini mund të përdorë këtë destinacion' });
+    }
+    // Nese destinacioni i vjeter ishte admin-only, vetem admin mund ta editoje.
+    if (SW_DESTS_ADMIN.includes(existing.destination || '') && req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Vetëm admini mund të editojë këtë tërheqje' });
+    }
+    if (SW_DESTS_ADMIN.includes(destination) && amounts.eur <= 0) {
+      return res.status(400).json({ error: 'Për këtë destinacion duhet shumë > 0 në EUR' });
     }
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
     const setParts = ['date = ?', ...CURS_SW.map(c => `amount_${c} = ?`), 'destination = ?', 'person = ?', 'note = ?'];
     const params = [date, ...CURS_SW.map(c => amounts[c]), destination, person, note, id];
     await run(`UPDATE safe_withdrawals SET ${setParts.join(', ')} WHERE id = ?`, params);
+    // Rikrijo efektet anesore: fshi te vjetrat, shto te rejat sipas destinacionit te ri.
+    await clearInvestimiSideEffects(Number(id));
+    const sideStmts = await investimiSideEffects(destination, amounts.eur, date, Number(id));
+    if (sideStmts.length) await batchWrite(sideStmts);
     await syncSafeWithdrawTotals(existing.date);
     if (date !== existing.date) await syncSafeWithdrawTotals(date);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 app.delete('/api/safe-withdrawals/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const row = await queryOne('SELECT date FROM safe_withdrawals WHERE id = ?', [id]);
+    const row = await queryOne('SELECT date, destination FROM safe_withdrawals WHERE id = ?', [id]);
     if (!row) return res.status(404).json({ error: 'not found' });
+    if (SW_DESTS_ADMIN.includes(row.destination || '') && req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Vetëm admini mund të fshijë këtë tërheqje' });
+    }
+    await clearInvestimiSideEffects(Number(id));
     await run('DELETE FROM safe_withdrawals WHERE id = ?', [id]);
     await syncSafeWithdrawTotals(row.date);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 // ============================================================
@@ -10554,6 +10649,32 @@ app.post('/api/investimi/investments', async (req, res) => {
 app.delete('/api/investimi/investments/:id', async (req, res) => {
   try {
     await run(`DELETE FROM partner_investments WHERE id = ?`, [Number(req.params.id)]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/investimi/debts', async (req, res) => {
+  try {
+    const { debtor, creditor, initial_amount_eur, reason, date } = req.body || {};
+    const amt = parseFloat(initial_amount_eur) || 0;
+    if (!debtor || !creditor || !date) return res.status(400).json({ error: 'debtor, creditor dhe date kerkohen' });
+    if (amt <= 0) return res.status(400).json({ error: 'initial_amount_eur duhet > 0' });
+    const r = await run(
+      `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, reason, date) VALUES (?, ?, ?, ?, ?)`,
+      [debtor, creditor, amt, reason || '', date]
+    );
+    res.json({ id: Number(r.lastInsertRowid), success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/investimi/debts/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    // Fshi edhe pagesat per kete borxh — pa to do te mbeteshin orfane.
+    await batchWrite([
+      { sql: 'DELETE FROM partner_debt_payments WHERE debt_id = ?', args: [id] },
+      { sql: 'DELETE FROM partner_debts WHERE id = ?', args: [id] },
+    ]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

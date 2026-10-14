@@ -27,7 +27,11 @@ const DEST_LABELS = {
   arka:   { label: 'Arkë',   desc: 'Paratë kalojnë në sirtarin e shitjes (hyjnë te Arka Ditore)' },
   bank:   { label: 'Bankë',  desc: 'Paratë kalojnë në llogari bankare (rrisin bilancin e bankës)' },
   jashte: { label: 'Jashtë', desc: 'Pagesë personi / arsye tjetër jashtë sistemit' },
+  biba_investment: { label: 'Tërheqje Biba Investim', desc: 'Admin: 30% e shumës EUR kalon si shlyerje borxhi te Diana (Investimi).', adminOnly: true },
+  diana_debt:      { label: 'Tërheqje Diana Borxh',   desc: 'Admin: shuma EUR kalon si borxh i ri Diana→Biba (Investimi).',       adminOnly: true },
 }
+
+const ADMIN_DESTS = ['biba_investment', 'diana_debt']
 
 export default function TerheqjaKasaforta({ date }) {
   const isAdmin = getUser()?.role === 'admin'
@@ -195,27 +199,34 @@ export default function TerheqjaKasaforta({ date }) {
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {CURS.map(c => (
-              <div key={c}>
-                <label className="form-label">Shuma {c}</label>
-                <MoneyInput
-                  value={amounts[c]}
-                  onChange={v => setAmounts(a => ({ ...a, [c]: String(v) }))}
-                  className="input-field text-right font-semibold"
-                  placeholder="0.00"
-                />
-              </div>
-            ))}
+            {CURS.map(c => {
+              const eurOnly = ADMIN_DESTS.includes(destination)
+              const disabled = eurOnly && c !== 'EUR'
+              return (
+                <div key={c} className={disabled ? 'opacity-50' : ''}>
+                  <label className="form-label">Shuma {c}</label>
+                  <MoneyInput
+                    value={disabled ? '' : amounts[c]}
+                    onChange={v => setAmounts(a => ({ ...a, [c]: String(v) }))}
+                    className="input-field text-right font-semibold"
+                    placeholder="0.00"
+                    disabled={disabled}
+                  />
+                </div>
+              )
+            })}
           </div>
           <div>
             <label className="form-label">Destinacioni</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {Object.entries(DEST_LABELS).map(([key, { label, desc }]) => (
+              {Object.entries(DEST_LABELS)
+                .filter(([, meta]) => !meta.adminOnly || isAdmin)
+                .map(([key, { label, desc, adminOnly }]) => (
                 <label
                   key={key}
                   className={`cursor-pointer rounded-lg border-2 px-3 py-2 transition ${
                     destination === key
-                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/30'
+                      ? (adminOnly ? 'border-rose-500 bg-rose-50 dark:bg-rose-900/30' : 'border-amber-500 bg-amber-50 dark:bg-amber-900/30')
                       : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
                 >
@@ -225,10 +236,17 @@ export default function TerheqjaKasaforta({ date }) {
                       name="destination"
                       value={key}
                       checked={destination === key}
-                      onChange={() => setDestination(key)}
+                      onChange={() => {
+                        setDestination(key)
+                        // Per destinacionet admin pastro valutat jo-EUR per te shmangur konfuzion.
+                        if (ADMIN_DESTS.includes(key)) {
+                          setAmounts(a => ({ ...a, LEK: '', USD: '', GBP: '', CHF: '' }))
+                        }
+                      }}
                       className="accent-amber-500"
                     />
                     <span className="font-semibold text-sm text-slate-800 dark:text-slate-100">{label}</span>
+                    {adminOnly && <span className="badge bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 text-[9px]">ADMIN</span>}
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 ml-6">{desc}</p>
                 </label>
@@ -346,6 +364,8 @@ export default function TerheqjaKasaforta({ date }) {
                         const meta = DEST_LABELS[dest] || DEST_LABELS.jashte
                         const cls = dest === 'arka' ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200'
                                   : dest === 'bank' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200'
+                                  : dest === 'biba_investment' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                                  : dest === 'diana_debt' ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200'
                                   : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
                         return <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold ${cls}`}>{meta.label}</span>
                       })()}

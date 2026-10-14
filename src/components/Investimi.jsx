@@ -26,6 +26,14 @@ export default function Investimi() {
   const [invDate, setInvDate]       = useState(today())
   const [invNote, setInvNote]       = useState('')
 
+  // Formular borxh i ri (p.sh. kur Diana merr shtese nga kapitali i Bibes)
+  const [showAddDebt, setShowAddDebt] = useState(false)
+  const [debtDebtor, setDebtDebtor]     = useState('Diana')
+  const [debtCreditor, setDebtCreditor] = useState('Biba')
+  const [debtAmount, setDebtAmount]     = useState('')
+  const [debtReason, setDebtReason]     = useState('')
+  const [debtDate, setDebtDate]         = useState(today())
+
   const load = async () => {
     setLoading(true)
     try {
@@ -96,6 +104,47 @@ export default function Investimi() {
     } catch (e) { flash('✗ ' + e.message) }
   }
 
+  const submitDebt = async (e) => {
+    e.preventDefault()
+    if (!debtDebtor.trim() || !debtCreditor.trim()) { flash('⚠ Vendos emrat (debtor + creditor)'); return }
+    if (debtDebtor.trim() === debtCreditor.trim())  { flash('⚠ Debtor dhe creditor duhen te ndryshem'); return }
+    if (n(debtAmount) <= 0) { flash('⚠ Vendos shume > 0'); return }
+    if (!debtDate)          { flash('⚠ Vendos datën'); return }
+    try {
+      const r = await fetch('/api/investimi/debts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          debtor: debtDebtor.trim(),
+          creditor: debtCreditor.trim(),
+          initial_amount_eur: n(debtAmount),
+          reason: debtReason,
+          date: debtDate,
+        }),
+      })
+      if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
+      setDebtAmount(''); setDebtReason(''); setDebtDate(today())
+      setDebtDebtor('Diana'); setDebtCreditor('Biba')
+      setShowAddDebt(false)
+      flash('✓ Borxhi u shtua')
+      await load()
+    } catch (e) { flash('✗ ' + e.message) }
+  }
+
+  const deleteDebt = async (debt) => {
+    const paid = (debt.paid_eur || 0) > 0.005
+    const warn = paid
+      ? `Ky borxh ka ${fmt(debt.paid_eur)} EUR pagesa të regjistruara. Fshirja do heqë edhe pagesat. Vazhdon?`
+      : 'Të fshihet ky borxh?'
+    const ok = await showConfirm(warn, { confirmLabel: 'Fshi', danger: true })
+    if (!ok) return
+    try {
+      const r = await fetch(`/api/investimi/debts/${debt.id}`, { method: 'DELETE' })
+      if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
+      flash('✓ Borxhi u fshi')
+      await load()
+    } catch (e) { flash('✗ ' + e.message) }
+  }
+
   if (loading) {
     return <div className="p-8 text-center text-slate-400">Duke ngarkuar…</div>
   }
@@ -128,10 +177,16 @@ export default function Investimi() {
               Kuota e secilit ortak = (kontribut i paguar në kapital) + (pjesë e financuar me borxh nga tjetri).
             </p>
           </div>
-          <button
-            onClick={() => setShowAddInv(v => !v)}
-            className="btn-secondary text-xs"
-          >{showAddInv ? '✕ Mbyll' : '+ Investim i Ri'}</button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => { setShowAddInv(v => !v); setShowAddDebt(false) }}
+              className="btn-secondary text-xs"
+            >{showAddInv ? '✕ Mbyll' : '+ Investim i Ri'}</button>
+            <button
+              onClick={() => { setShowAddDebt(v => !v); setShowAddInv(false) }}
+              className="btn-secondary text-xs"
+            >{showAddDebt ? '✕ Mbyll' : '+ Borxh i Ri'}</button>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -184,6 +239,35 @@ export default function Investimi() {
             </div>
           </form>
         )}
+
+        {showAddDebt && (
+          <form onSubmit={submitDebt} className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs">
+              <span className="block text-slate-500 mb-1">Debtor (merr borxh)</span>
+              <input value={debtDebtor} onChange={e => setDebtDebtor(e.target.value)} className="input-field w-full" />
+            </label>
+            <label className="text-xs">
+              <span className="block text-slate-500 mb-1">Creditor (jep borxh)</span>
+              <input value={debtCreditor} onChange={e => setDebtCreditor(e.target.value)} className="input-field w-full" />
+            </label>
+            <label className="text-xs">
+              <span className="block text-slate-500 mb-1">Shuma (EUR)</span>
+              <input type="number" step="0.01" value={debtAmount} onChange={e => setDebtAmount(e.target.value)} className="input-field w-full tabular-nums text-right" autoFocus />
+            </label>
+            <label className="text-xs">
+              <span className="block text-slate-500 mb-1">Data</span>
+              <input type="date" value={debtDate} onChange={e => setDebtDate(e.target.value)} className="input-field w-full" />
+            </label>
+            <label className="text-xs sm:col-span-2">
+              <span className="block text-slate-500 mb-1">Arsye (opsional)</span>
+              <input value={debtReason} onChange={e => setDebtReason(e.target.value)} className="input-field w-full" placeholder="p.sh. financim i pjesës së Dianës nga Biba" />
+            </label>
+            <div className="sm:col-span-2 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowAddDebt(false)} className="btn-secondary text-xs">Anulo</button>
+              <button type="submit" className="btn-primary text-xs">💾 Ruaj Borxhin</button>
+            </div>
+          </form>
+        )}
       </div>
 
       {/* ── Blloku 2: Borxhet mes ortakëve ── */}
@@ -196,12 +280,19 @@ export default function Investimi() {
               </h3>
               {debt.reason && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{debt.reason}</p>}
             </div>
-            {debt.remaining_eur > 0.005 && (
+            <div className="flex gap-2 flex-wrap">
+              {debt.remaining_eur > 0.005 && (
+                <button
+                  onClick={() => { setPayDebtId(debt.id); setPayDate(today()) }}
+                  className="btn-primary text-xs"
+                >+ Pagesë nga {debt.debtor}</button>
+              )}
               <button
-                onClick={() => { setPayDebtId(debt.id); setPayDate(today()) }}
-                className="btn-primary text-xs"
-              >+ Pagesë nga {debt.debtor}</button>
-            )}
+                onClick={() => deleteDebt(debt)}
+                className="btn-secondary text-xs text-rose-600 hover:text-rose-800"
+                title="Fshi borxhin"
+              >🗑 Fshi</button>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
