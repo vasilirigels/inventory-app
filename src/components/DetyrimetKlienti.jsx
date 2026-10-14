@@ -787,11 +787,12 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
   // Totalet e grupuara sipas monedhës origjinale — pa konvertim në LEK.
   const totalsByCur = invoices.reduce((acc, inv) => {
     const cur = inv.currency || 'LEK'
-    if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0 }
+    if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0, has: 0 }
     const due = n(inv.amount_due != null ? inv.amount_due : (inv.total_with_vat - inv.amount_paid))
     acc[cur].tot  += n(inv.total_with_vat)
     acc[cur].paid += n(inv.amount_paid)
     acc[cur].due  += due
+    acc[cur].has  += n(inv.total_has_gram)
     return acc
   }, {})
   const currenciesInList = Object.keys(totalsByCur).sort()
@@ -925,6 +926,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nr. Fature</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Paguar (Data)</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh</th>
@@ -935,7 +937,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
               {groupArr.map((g, gi) => (
                 <Fragment key={gi}>
                   <tr className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
-                    <td colSpan={8} className="px-4 py-2 font-bold text-blue-900">
+                    <td colSpan={9} className="px-4 py-2 font-bold text-blue-900">
                       👤 {g.name || <span className="italic text-slate-500 dark:text-slate-400">— pa klient —</span>}
                       {g.nipt && <span className="ml-2 text-xs font-mono text-slate-600 dark:text-slate-300">({g.nipt})</span>}
                       <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">· {g.list.length} fatura</span>
@@ -964,6 +966,9 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                         </td>
                         <td className="px-4 py-2 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
                         <td className="px-4 py-2 text-center">{pmBadge}</td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                          {n(inv.total_has_gram) > 0 ? `${n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                        </td>
                         <td className="px-4 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
                           {fmt(inv.total_with_vat)}
                         </td>
@@ -999,6 +1004,9 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                   <tr key={cur} className={`bg-blue-50 dark:bg-blue-900/30 ${idx > 0 ? 'border-t border-blue-200' : ''}`}>
                     <td colSpan={4} className="px-4 py-3 text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
                       💱 TOTAL ({cur})
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200">
+                      {(t.has || 0) > 0.0005 ? `${(t.has || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.tot)}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(t.paid)}</td>

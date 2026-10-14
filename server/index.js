@@ -2298,6 +2298,20 @@ function salesGramSubquery(material) {
   return { sql, params };
 }
 
+// Total HAS i artikujve të faturës (grama ari i marrë nga klienti si pagesë
+// in-kind). Marrë direkt nga invoice_items.has_gram, me të njëjtin filtër
+// materiali si total_gram (nëse ka).
+function salesHasSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND EXISTS (SELECT 1 FROM products xp5 WHERE xp5.id = xii4.product_id AND COALESCE(xp5.material,'') = ?)`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xii4.has_gram,0) * COALESCE(xii4.qty,0)), 0)
+     FROM invoice_items xii4
+     WHERE xii4.invoice_id = i.id ${matClause}) AS total_has_gram`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
 // Kosto totale e faturës (në monedhën e faturës) = SUM(qty * products.cost_price).
 // Përdoret për të llogaritur Fitim & Marzh në listën e faturave. Përputhet me
 // konvencionin e /api/inventory-summary → profitByCurrency (pa konvertim LEK).
@@ -2316,6 +2330,7 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
     const gram = salesGramSubquery(material);
+    const has = salesHasSubquery(material);
     const rows = await queryAll(
       `SELECT i.*,
          (i.amount_paid - COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id), 0)) AS initial_amount_paid,
@@ -2323,9 +2338,10 @@ app.get('/api/invoices/by-date/:date', async (req, res) => {
          (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
             FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary,
          ${gram.sql},
+         ${has.sql},
          ${salesCostSubquery()}
        FROM invoices i WHERE i.date = ? ${filter.sql} ${onl.sql} ORDER BY i.id ASC`,
-      [...gram.params, date, ...filter.params, ...onl.params]
+      [...gram.params, ...has.params, date, ...filter.params, ...onl.params]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2341,6 +2357,7 @@ app.get('/api/invoices/by-range', async (req, res) => {
     const filter = buildItemFilterSQL(material, category);
     const onl = buildOnlineFilter(online, status);
     const gram = salesGramSubquery(material);
+    const has = salesHasSubquery(material);
     // Cache 60s — Dashboard e thërret shpesh me të njëjtat parametra për 3-5 PC.
     // Query ka 4 subquery të korreluar për çdo faturë (i shtrenjtë). Invalidohet
     // automatikisht kur bëhet ndryshim te invoices, invoice_items, invoice_payments,
@@ -2353,9 +2370,10 @@ app.get('/api/invoices/by-range', async (req, res) => {
          (SELECT GROUP_CONCAT(method || ':' || COALESCE(currency,'') || ':' || COALESCE(amount,0), '|')
             FROM invoice_payment_splits WHERE invoice_id = i.id) AS splits_summary,
          ${gram.sql},
+         ${has.sql},
          ${salesCostSubquery()}
        FROM invoices i WHERE i.date BETWEEN ? AND ? ${filter.sql} ${onl.sql} ORDER BY i.date ASC, i.id ASC`,
-      [...gram.params, from, to, ...filter.params, ...onl.params]
+      [...gram.params, ...has.params, from, to, ...filter.params, ...onl.params]
     ));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -3403,7 +3421,9 @@ app.get('/api/client-debts', async (req, res) => {
       SELECT i.*,
         p.date   AS last_payment_date,
         p.amount AS last_payment_amount,
-        COALESCE(p.payment_count, 0) AS payment_count
+        COALESCE(p.payment_count, 0) AS payment_count,
+        (SELECT COALESCE(SUM(COALESCE(ii.has_gram,0) * COALESCE(ii.qty,0)), 0)
+           FROM invoice_items ii WHERE ii.invoice_id = i.id) AS total_has_gram
       FROM invoices i
       LEFT JOIN pay_agg p ON p.invoice_id = i.id
       WHERE COALESCE(i.cancelled, 0) = 0`;
@@ -4005,6 +4025,19 @@ function purchaseGramSubquery(material) {
   return { sql, params };
 }
 
+// Total HAS (grama ari i përdorur si pagesë in-kind) për artikujt e faturës,
+// me të njëjtin filtër materiali si total_gram.
+function purchaseHasSubquery(material) {
+  const matClause = (material && String(material).trim())
+    ? `AND EXISTS (SELECT 1 FROM products xp6 WHERE xp6.id = xpit6.product_id AND COALESCE(xp6.material,'') = ?)`
+    : '';
+  const sql = `(SELECT COALESCE(SUM(COALESCE(xpit6.has_gram,0) * COALESCE(xpit6.qty,0)), 0)
+     FROM purchase_items xpit6
+     WHERE xpit6.purchase_id = pi.id ${matClause}) AS total_has_gram`;
+  const params = matClause ? [String(material).trim()] : [];
+  return { sql, params };
+}
+
 // Totali i Cmim Blerje (me TVSH) dhe Cmim Shitje për artikujt e faturës,
 // filtruar sipas materialit — përdoret në listat Blerje Flori/Diamant për
 // të llogaritur Fitim %/Marzh % mesatar në rreshtin e totalit.
@@ -4048,6 +4081,7 @@ app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
     const { date } = req.params;
     const mat = buildPurchaseMaterialFilter(req.query.material);
     const gram = purchaseGramSubquery(req.query.material);
+    const has = purchaseHasSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
     const sell = purchaseSellTotalSubquery(req.query.material);
     const cnt = purchaseItemCountSubquery();
@@ -4055,13 +4089,14 @@ app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
          ${gram.sql},
+         ${has.sql},
          ${buy.sql},
          ${sell.sql},
          ${cnt.sql}
        FROM purchase_invoices pi
        WHERE pi.date = ? AND COALESCE(pi.type, 'purchase') = 'purchase' ${mat.sql}
        ORDER BY pi.id ASC`,
-      [...gram.params, ...buy.params, ...sell.params, ...cnt.params, date, ...mat.params]
+      [...gram.params, ...has.params, ...buy.params, ...sell.params, ...cnt.params, date, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4072,6 +4107,7 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const mat = buildPurchaseMaterialFilter(req.query.material);
     const gram = purchaseGramSubquery(req.query.material);
+    const has = purchaseHasSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
     const sell = purchaseSellTotalSubquery(req.query.material);
     const cnt = purchaseItemCountSubquery();
@@ -4079,13 +4115,14 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
       `SELECT pi.*,
          (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) AS initial_amount_paid,
          ${gram.sql},
+         ${has.sql},
          ${buy.sql},
          ${sell.sql},
          ${cnt.sql}
        FROM purchase_invoices pi
        WHERE pi.date BETWEEN ? AND ? AND COALESCE(pi.type, 'purchase') = 'purchase' ${mat.sql}
        ORDER BY pi.date ASC, pi.id ASC`,
-      [...gram.params, ...buy.params, ...sell.params, ...cnt.params, from, to, ...mat.params]
+      [...gram.params, ...has.params, ...buy.params, ...sell.params, ...cnt.params, from, to, ...mat.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

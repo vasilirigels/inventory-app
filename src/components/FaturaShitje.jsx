@@ -892,6 +892,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
     t.paid  += initPaid
     t.due   += initDue
     t.gram  = (t.gram || 0) + n(inv.total_gram)
+    t.has   = (t.has  || 0) + n(inv.total_has_gram)
     // Kosto & Fitim përjashtojnë faturat e anuluara; kthimet (credit notes)
     // futen me shenjë negative dhe balancohen natyrshëm.
     if (!inv.cancelled) {
@@ -1128,6 +1129,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                 <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
                 <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Gram</th>
+                <th className="px-2 py-2 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa Zbritje</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritja</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH</th>
@@ -1191,6 +1193,9 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                   <td className="px-2 py-2 text-center text-xs">{pmBadge}</td>
                   <td className="px-2 py-2 text-right tabular-nums font-semibold bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200">
                     {n(inv.total_gram) > 0 ? `${n(inv.total_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                    {n(inv.total_has_gram) > 0 ? `${n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
@@ -1332,11 +1337,14 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                 const t = totalsByCur[cur]
                 return (
                   <tr key={cur} className={idx > 0 ? 'border-t border-emerald-200' : ''}>
-                    <td colSpan={5} className="px-2 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                    <td colSpan={6} className="px-2 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                       💵 TOTAL ({cur}) <span className="text-[10px] font-normal text-emerald-600">— {t.count} {t.count === 1 ? 'faturë' : 'fatura'}</span>
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 text-base">
                       {(t.gram || 0) > 0.0005 ? `${(t.gram || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-base">
+                      {(t.has || 0) > 0.0005 ? `${(t.has || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.gross)}</td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-orange-600">

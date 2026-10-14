@@ -542,6 +542,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
     acc.paidUsd  += initPaid * toUsd
     acc.dueUsd   += initDue * toUsd
     acc.gram     += n(inv.total_gram)
+    acc.has      += n(inv.total_has_gram)
     acc.buy      += n(inv.total_buy_price)
     acc.sell     += n(inv.total_sell_price)
     acc.items    += n(inv.item_count)
@@ -549,7 +550,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
   }, {
     count: 0, gross: 0, sub: 0, disc: 0, vat: 0, tot: 0, paid: 0, due: 0,
     grossUsd: 0, discUsd: 0, subUsd: 0, vatUsd: 0, totUsd: 0, paidUsd: 0, dueUsd: 0,
-    gram: 0, buy: 0, sell: 0, items: 0,
+    gram: 0, has: 0, buy: 0, sell: 0, items: 0,
   })
 
   const showGram = !!materialFilter
@@ -633,6 +634,9 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                 {showGram && (
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Gram</th>
                 )}
+                {showGram && (
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
+                )}
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa Zbritje</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritja</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pa TVSH</th>
@@ -682,6 +686,11 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                       {n(inv.total_gram) > 0 ? `${n(inv.total_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
                     </td>
                   )}
+                  {showGram && (
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                      {n(inv.total_has_gram) > 0 ? `${n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
                   </td>
@@ -715,7 +724,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
             </tbody>
             <tfoot className="bg-emerald-50 dark:bg-emerald-900/30 border-t-2 border-emerald-300">
               <tr>
-                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                <td colSpan={6} className="px-4 py-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                   💵 TOTAL CASH (USD) <span className="text-[10px] font-normal text-emerald-600">— {totals.count} fatura, të konvertuara me kursin e çdo fature</span>
                 </td>
                 <td className="px-4 py-3 text-center tabular-nums font-extrabold bg-sky-100 dark:bg-sky-900/50 text-sky-800 dark:text-sky-200 text-base">
@@ -724,6 +733,11 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                 {showGram && (
                   <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 text-base">
                     {totals.gram > 0.0005 ? `${totals.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
+                  </td>
+                )}
+                {showGram && (
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-base">
+                    {totals.has > 0.0005 ? `${totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                   </td>
                 )}
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossUsd)}</td>
@@ -741,7 +755,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
               </tr>
               {showProfit && (
                 <tr className="border-t border-emerald-200 dark:border-emerald-800">
-                  <td colSpan={showGram ? 16 : 15} className="px-4 py-3">
+                  <td colSpan={showGram ? 17 : 15} className="px-4 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
                       <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                         📈 Mesatare — Fitim / Marzh <span className="text-[10px] font-normal text-emerald-600">(mbi Σ Cmim Blerje vs Σ Cmim Shitje)</span>

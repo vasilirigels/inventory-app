@@ -2032,7 +2032,10 @@ export default function Products() {
     ]
     const active = FIELDS.filter(f => selectedKeys.includes(f.key))
     if (active.length === 0) return
-    const rows = products.map(p => Object.fromEntries(active.map(f => [f.label, f.get(p)])))
+    // Respekto filtrat aktualë (kategoria, kërkimi, data, stoku) — perdor `filtered`
+    // dhe jo `products`. Perpara kesaj eksporti kthente te gjitha produktet
+    // pavaresisht se c'kishte zgjedhur user-i (p.sh. kategori=Diamant).
+    const rows = filtered.map(p => Object.fromEntries(active.map(f => [f.label, f.get(p)])))
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(rows)
     ws['!cols'] = active.map(f => ({ wch: f.w }))
@@ -2060,15 +2063,15 @@ export default function Products() {
     <div className="space-y-4">
 
       {/* ── Top bar ── */}
-      <div className="flex items-center gap-3">
-        <div className="flex-1 relative">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex-[2] relative min-w-[320px]">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm pointer-events-none">🔍</span>
           <input
             type="text"
             placeholder="Kërko emër, brand, SKU, barkod, GS-0001..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="input-field pl-9"
+            className="input-field pl-9 font-mono"
           />
         </div>
 
