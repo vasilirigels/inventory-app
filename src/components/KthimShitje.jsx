@@ -82,7 +82,10 @@ export default function KthimShitje() {
 
   // Llogaritjet e refund-it
   const tier = selected ? computeReturnTier(selected.days_since_sale) : null
-  const useManual = isAdmin && adminManualMode
+  // "Vlerë e plotë" — heq tarifën % dhe lejon rimbursim të plotë. Dikur ishte
+  // vetëm për admin; tani edhe shitesi mund ta aktivizojë kur klienti kthen
+  // mallin që duhet rimbursuar plotësisht pavarësisht ditëve nga shitja.
+  const useManual = adminManualMode
   const effectivePct = useManual ? 0 : (feePctOverride != null ? feePctOverride : (tier?.pct ?? 0))
   const effectiveUnitPrice = unitPriceOverride != null
     ? unitPriceOverride
@@ -278,20 +281,18 @@ export default function KthimShitje() {
             </button>
           </div>
 
-          {isAdmin && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-              <input
-                id="admin-manual-mode"
-                type="checkbox"
-                checked={adminManualMode}
-                onChange={e => { setAdminManualMode(e.target.checked); setManualRefund(null) }}
-                className="accent-amber-600"
-              />
-              <label htmlFor="admin-manual-mode" className="text-sm text-amber-900 dark:text-amber-100 cursor-pointer select-none">
-                🔓 <b>Admin:</b> hiq tarifën % dhe përcakto shumën e rimbursimit direkt
-              </label>
-            </div>
-          )}
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+            <input
+              id="admin-manual-mode"
+              type="checkbox"
+              checked={adminManualMode}
+              onChange={e => { setAdminManualMode(e.target.checked); setManualRefund(null) }}
+              className="accent-amber-600"
+            />
+            <label htmlFor="admin-manual-mode" className="text-sm text-amber-900 dark:text-amber-100 cursor-pointer select-none">
+              💯 <b>Kthim me vlerë të plotë</b> — hiq tarifën % dhe përcakto shumën e rimbursimit direkt
+            </label>
+          </div>
 
           {/* Data e kthimit — default sot; admini mund ta zhvendosë në një ditë tjetër. */}
           <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${
