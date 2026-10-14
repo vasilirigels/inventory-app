@@ -2424,13 +2424,61 @@ function aggregateSplits(splits, invoiceRate) {
   };
 }
 
-async function adjustStock(items, sign) {
+// Ndërto statement-et e stock-adjust pa i ekzekutuar — që thirrësi t'i përfshijë
+// në të njëjtin batchWrite me INSERT-et e invoice_items (atomik, transaksion).
+// Shih v1.2.57: para kësaj, UPDATE stock bëhej në lak të ndarë nga INSERT-et dhe
+// nëse Turso dështonte në mes, krijohej fatura por stock-u mbetej 1.
+function stockAdjustStatements(items, sign) {
+  const stmts = [];
   for (const it of items) {
     if (it.product_id && it.qty) {
       const delta = sign * (parseInt(it.qty) || 0);
       if (delta !== 0) {
-        await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+        stmts.push({
+          sql: 'UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?',
+          args: [delta, it.product_id],
+        });
       }
+    }
+  }
+  return stmts;
+}
+
+async function adjustStock(items, sign) {
+  const stmts = stockAdjustStatements(items, sign);
+  if (stmts.length) await batchWrite(stmts);
+}
+
+// Verifiko qe cdo artikull ka stock te mjaftueshem para shitjes/edit-it.
+// `qtyAdjust` = sasia qe mund te konsiderohet si "e disponueshme" shtese
+// (p.sh. te PUT, qty e vjeter e artikullit po restore-ohet para re-deduct).
+// Hedh gabim Error me mesazh perdoruesi (shqip) nese ndonje artikull nuk ka stock.
+async function assertSufficientStock(items, qtyAdjust = new Map()) {
+  // Grumbullo kerkesat per cdo product_id (nje artikull mund te shfaqet 2 here).
+  const need = new Map();
+  for (const it of items) {
+    if (!it.product_id || !it.qty) continue;
+    const q = parseInt(it.qty) || 0;
+    if (q <= 0) continue;
+    need.set(it.product_id, (need.get(it.product_id) || 0) + q);
+  }
+  if (need.size === 0) return;
+  const ids = [...need.keys()];
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await queryAll(
+    `SELECT id, name, barcode, stock FROM products WHERE id IN (${placeholders})`,
+    ids
+  );
+  const byId = new Map(rows.map(r => [r.id, r]));
+  for (const [pid, qty] of need) {
+    const p = byId.get(pid);
+    if (!p) continue;
+    const available = (p.stock || 0) + (qtyAdjust.get(pid) || 0);
+    if (available < qty) {
+      const label = p.barcode ? `${p.barcode} (${p.name})` : p.name;
+      const err = new Error(`Stok i pamjaftueshem per ${label}: duhen ${qty}, disponohen ${available}`);
+      err.status = 400;
+      throw err;
     }
   }
 }
@@ -2481,6 +2529,10 @@ app.post('/api/invoices', async (req, res) => {
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
     const totals = recomputeInvoiceTotals(items);
+    // Bllokim serveri: mos lejo shitje nese stock-u s'eshte i mjaftueshem.
+    // Para kesaj, SQL perdorte MAX(0, stock+?) qe klampoonte pa gabim —
+    // shitja kalonte edhe me stock=0 (duke lene bilancin negativ fizikisht).
+    await assertSufficientStock(items);
 
     const pm = ['cash', 'bank', 'debt', 'pos', 'mikse'].includes(d.payment_method) ? d.payment_method : 'cash';
     // Splits janë burimi i së vërtetës kur jepen — cilado qoftë payment_method.
@@ -2553,13 +2605,16 @@ app.post('/api/invoices', async (req, res) => {
     );
     const invoice = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const invoiceId = invoice?.id;
+    // Atomik: INSERT items + splits + UPDATE stock në të njëjtin batchWrite.
+    // Para kësaj, lak-u i ndarë lejonte: items inseruar po stock-u s'u zbrit.
+    const stmts = [];
     for (const it of items) {
-      await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
+      stmts.push({
+        sql: `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
           on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+        args: [
           invoiceId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
@@ -2567,20 +2622,21 @@ app.post('/api/invoices', async (req, res) => {
           parseFloat(it.sell_rate) || 0,
           parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
           it.is_gift ? 1 : 0,
-        ]
-      );
+        ],
+      });
     }
     for (const s of splits) {
-      await run(
-        `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
+      stmts.push({
+        sql: `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
          VALUES (?, ?, ?, ?, ?)`,
-        [invoiceId, s.method, s.currency, s.amount, s.exchange_rate]
-      );
+        args: [invoiceId, s.method, s.currency, s.amount, s.exchange_rate],
+      });
     }
-    await adjustStock(items, -1);
+    stmts.push(...stockAdjustStatements(items, -1));
+    if (stmts.length) await batchWrite(stmts);
     res.json({ success: true, id: invoiceId, invoice_no });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -2602,6 +2658,14 @@ app.put('/api/invoices/:id', async (req, res) => {
 
     const items = (d.items || []).map(it => ({ ...it, ...computeLineTotals(it) }));
     const totals = recomputeInvoiceTotals(items);
+    // Bllokim: stock i mjaftueshem per artikujt e rinj. Qty e vjeter restore-ohet
+    // (konsiderohet "shtese e disponueshme" per te njejtin product_id).
+    const qtyAdjust = new Map();
+    for (const oi of oldItems) {
+      if (!oi.product_id) continue;
+      qtyAdjust.set(oi.product_id, (qtyAdjust.get(oi.product_id) || 0) + (parseInt(oi.qty) || 0));
+    }
+    await assertSufficientStock(items, qtyAdjust);
 
     const pmU = ['cash', 'bank', 'debt', 'pos', 'mikse'].includes(d.payment_method) ? d.payment_method : 'cash';
     const splitsU = normalizeSplits(d.payment_splits);
@@ -2676,16 +2740,18 @@ app.put('/api/invoices/:id', async (req, res) => {
         id,
       ]
     );
-    // Restore stock from previous items, then re-deduct
-    await adjustStock(oldItems, +1);
-    await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
+    // Atomik: restore stock + DELETE items + INSERT items + splits + deduct stock
+    // në të njëjtin batchWrite. Nëse ndonjëri dështon, asgjë nuk ndryshon.
+    const stmts = [];
+    stmts.push(...stockAdjustStatements(oldItems, +1));
+    stmts.push({ sql: 'DELETE FROM invoice_items WHERE invoice_id = ?', args: [id] });
     for (const it of items) {
-      await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
+      stmts.push({
+        sql: `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
           on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+        args: [
           id, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           it.qty, parseFloat(it.gram) || 0, it.unit_price_no_vat, it.discount_percent,
           it.subtotal_no_vat, it.vat_rate, it.vat_amount, it.total_with_vat,
@@ -2693,21 +2759,22 @@ app.put('/api/invoices/:id', async (req, res) => {
           parseFloat(it.sell_rate) || 0,
           parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
           it.is_gift ? 1 : 0,
-        ]
-      );
+        ],
+      });
     }
-    await run('DELETE FROM invoice_payment_splits WHERE invoice_id = ?', [id]);
+    stmts.push({ sql: 'DELETE FROM invoice_payment_splits WHERE invoice_id = ?', args: [id] });
     for (const s of splitsU) {
-      await run(
-        `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
+      stmts.push({
+        sql: `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
          VALUES (?, ?, ?, ?, ?)`,
-        [id, s.method, s.currency, s.amount, s.exchange_rate]
-      );
+        args: [id, s.method, s.currency, s.amount, s.exchange_rate],
+      });
     }
-    await adjustStock(items, -1);
+    stmts.push(...stockAdjustStatements(items, -1));
+    if (stmts.length) await batchWrite(stmts);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -2736,11 +2803,14 @@ app.delete('/api/invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
-    await adjustStock(items, +1);
-    await run('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
-    await run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
-    await run('DELETE FROM invoice_payment_splits WHERE invoice_id = ?', [id]);
-    await run('DELETE FROM invoices WHERE id = ?', [id]);
+    // Atomik: restore stock + DELETE të gjithë rreshtat në të njëjtin batch.
+    await batchWrite([
+      ...stockAdjustStatements(items, +1),
+      { sql: 'DELETE FROM invoice_items WHERE invoice_id = ?', args: [id] },
+      { sql: 'DELETE FROM invoice_payments WHERE invoice_id = ?', args: [id] },
+      { sql: 'DELETE FROM invoice_payment_splits WHERE invoice_id = ?', args: [id] },
+      { sql: 'DELETE FROM invoices WHERE id = ?', args: [id] },
+    ]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2755,9 +2825,12 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
     if (!inv) return res.status(404).json({ error: 'not found' });
     if (inv.cancelled) return res.status(400).json({ error: 'Fatura është anuluar tashmë' });
     const items = await queryAll('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
-    await adjustStock(items, +1);
-    await run('DELETE FROM invoice_payments WHERE invoice_id = ?', [id]);
-    await run('UPDATE invoices SET cancelled = 1, amount_paid = 0, amount_due = 0 WHERE id = ?', [id]);
+    // Atomik: restore stock + DELETE payments + UPDATE cancelled.
+    await batchWrite([
+      ...stockAdjustStatements(items, +1),
+      { sql: 'DELETE FROM invoice_payments WHERE invoice_id = ?', args: [id] },
+      { sql: 'UPDATE invoices SET cancelled = 1, amount_paid = 0, amount_due = 0 WHERE id = ?', args: [id] },
+    ]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3174,13 +3247,23 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
     );
     const created = await queryOne('SELECT id FROM invoices WHERE date = ? AND invoice_no = ?', [date, invoice_no]);
     const newId = created?.id;
+    // Mirror payment splits me shuma negative dhe të shkallëzuara — vetëm kur
+    // kreditorja mbetet 'mikse' (jo kur user-i override me single-method).
+    const parentSplits = creditPm === 'mikse'
+      ? await queryAll(
+          'SELECT method, currency, amount, exchange_rate FROM invoice_payment_splits WHERE invoice_id = ?',
+          [id]
+        )
+      : [];
+    // Atomik: INSERT CN items + splits + kthe stokun — në të njëjtin batchWrite.
+    const stmts = [];
     for (const it of itemsToMirror) {
-      await run(
-        `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
+      stmts.push({
+        sql: `INSERT INTO invoice_items (invoice_id, product_id, serial_no, barcode, name, qty, gram, unit_price_no_vat,
           discount_percent, subtotal_no_vat, vat_rate, vat_amount, total_with_vat,
           on_promotion, promo_discount_pct, sell_rate, has_gram, multiplier, is_gift)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+        args: [
           newId, it.product_id || null, it.serial_no || '', it.barcode || '', it.name || '',
           -(it.qty || 0), -(parseFloat(it.gram) || 0), it.unit_price_no_vat || 0, it.discount_percent || 0,
           -(it.subtotal_no_vat || 0), it.vat_rate || 0,
@@ -3189,28 +3272,19 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
           parseFloat(it.sell_rate) || 0,
           parseFloat(it.has_gram) || 0, parseFloat(it.multiplier) || 0,
           it.is_gift ? 1 : 0,
-        ]
-      );
+        ],
+      });
     }
-    // Mirror payment splits me shuma negative dhe të shkallëzuara — vetëm kur
-    // kreditorja mbetet 'mikse' (jo kur user-i override me single-method).
-    if (creditPm === 'mikse') {
-      const parentSplits = await queryAll(
-        'SELECT method, currency, amount, exchange_rate FROM invoice_payment_splits WHERE invoice_id = ?',
-        [id]
-      );
-      for (const s of parentSplits) {
-        await run(
-          `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
+    for (const s of parentSplits) {
+      stmts.push({
+        sql: `INSERT INTO invoice_payment_splits (invoice_id, method, currency, amount, exchange_rate)
            VALUES (?, ?, ?, ?, ?)`,
-          [newId, s.method, s.currency, -s.amount * refundRatio, s.exchange_rate]
-        );
-      }
+        args: [newId, s.method, s.currency, -s.amount * refundRatio, s.exchange_rate],
+      });
     }
-    // Kthe stokun për vetëm ato copë që u kthyen.
-    // `qty` te itemsToMirror është pozitiv (sasia që u kthye); adjustStock
-    // përdor sign (+1) → stoku shtohet me qty pozitiv.
-    await adjustStock(itemsToMirror, +1);
+    // Kthe stokun për vetëm ato copë që u kthyen (qty pozitiv në itemsToMirror).
+    stmts.push(...stockAdjustStatements(itemsToMirror, +1));
+    if (stmts.length) await batchWrite(stmts);
     res.json({ success: true, id: newId, invoice_no, partial: isPartial });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
