@@ -187,7 +187,10 @@ export default function Komentet() {
             </div>
           ) : messages.map(m => {
             const mine = me && m.user_id === me.id
-            const canDelete = mine || me?.role === 'admin'
+            // Normalizim: role nga JWT mund të vijë me kapitalizim të ndryshëm.
+            const isAdmin = String(me?.role || '').toLowerCase() === 'admin'
+            // Vetem admin fshin — shitesi nuk mund te fshije asgje (as te vetën).
+            const canDelete = isAdmin
             return (
               <div key={m.id} className={`flex gap-2 ${mine ? 'flex-row-reverse' : ''}`}>
                 <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avatarColor(m.username)}`}>
@@ -212,8 +215,9 @@ export default function Komentet() {
                   {canDelete && (
                     <button
                       onClick={() => setConfirmDel(m)}
-                      className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-red-600 mt-1 px-1"
-                    >Fshi</button>
+                      className="text-[11px] mt-1 px-2 py-0.5 rounded text-red-600 dark:text-red-400 font-semibold border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/30"
+                      title="Fshi komentin (admin)"
+                    >🗑 Fshi</button>
                   )}
                 </div>
               </div>

@@ -579,12 +579,13 @@ app.post('/api/comments', async (req, res) => {
 
 app.delete('/api/comments/:id', async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    const row = await queryOne('SELECT user_id FROM comments WHERE id = ?', [id]);
-    if (!row) return res.status(404).json({ error: 'not_found' });
-    if (req.user.role !== 'admin' && row.user_id !== req.user.id) {
+    // Vetem admin fshin komente — shitesi s'ka te drejte, as per komentin e vet.
+    if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'forbidden' });
     }
+    const id = Number(req.params.id);
+    const row = await queryOne('SELECT id FROM comments WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'not_found' });
     await run('DELETE FROM comments WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
