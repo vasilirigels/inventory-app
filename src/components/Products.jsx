@@ -1926,7 +1926,13 @@ export default function Products() {
 
   const handleDelete = async id => {
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(err.message || 'Produkti nuk mund të fshihet.')
+        setConfirmDel(null)
+        return
+      }
       setConfirmDel(null)
       load()
     } catch (e) { console.error(e) }

@@ -2061,6 +2061,20 @@ app.post('/api/products/import', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    // Mbrojtje: mos lejo fshirjen kur produkti ka stok > 0 — përndryshe stoku
+    // "orfanizohet" (fshehet nga inventari por mbetet në DB). Nëse një kthim
+    // vjen më vonë për një produkt të fshirë me stock=0, endpoint-i i
+    // credit-note e ri-aktivizon automatikisht.
+    const p = await queryOne('SELECT stock FROM products WHERE id = ?', [id]);
+    if (!p) return res.status(404).json({ error: 'not_found' });
+    const stock = parseInt(p.stock) || 0;
+    if (stock > 0) {
+      return res.status(400).json({
+        error: 'has_stock',
+        message: `Produkti ka stok ${stock}. Zbrit stokun para se ta fshish.`,
+        stock,
+      });
+    }
     await run('UPDATE products SET active = 0 WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
@@ -3303,6 +3317,12 @@ app.post('/api/invoices/:id/credit-note', async (req, res) => {
     }
     // Kthe stokun për vetëm ato copë që u kthyen (qty pozitiv në itemsToMirror).
     stmts.push(...stockAdjustStatements(itemsToMirror, +1));
+    // Ri-aktivizo produktin nëse është fshirë ndërkohë (active=0): kthimi
+    // nënkupton që artikulli po rikthehet në inventar, pra duhet të jetë i dukshëm.
+    const returnedPids = [...new Set(itemsToMirror.map(it => it.product_id).filter(Boolean))];
+    for (const pid of returnedPids) {
+      stmts.push({ sql: 'UPDATE products SET active = 1 WHERE id = ?', args: [pid] });
+    }
     if (stmts.length) await batchWrite(stmts);
     res.json({ success: true, id: newId, invoice_no, partial: isPartial });
   } catch (err) { res.status(500).json({ error: err.message }); }
