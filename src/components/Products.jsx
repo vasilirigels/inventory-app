@@ -1945,12 +1945,13 @@ export default function Products() {
     if (cost <= 0) { alert('Produkti nuk ka çmim kosto.'); return }
     const newSell = +(cost * m).toFixed(2)
     try {
-      // Ruajmë edhe `multiplier` që të shfaqet te kolona dhe të reflektohet
-      // te çmimi i shitjes në formulën HAS (has_gram × multiplier × sell_rate).
-      await fetch(`/api/products/${p.id}`, {
+      // Patch i ngushtë: dërgon vetëm multiplier + sell_price. PUT i plotë
+      // {...p} do dërgonte edhe `stock` nga state-i (potencialisht stale) dhe
+      // do mbishkruante DB — bug i rrezikshëm për produkte të shitura ndërkohë.
+      await fetch(`/api/products/${p.id}/multiplier`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...p, multiplier: m, sell_price: newSell }),
+        body: JSON.stringify({ multiplier: m, sell_price: newSell }),
       })
       load()
     } catch (e) { console.error(e) }
@@ -1974,12 +1975,15 @@ export default function Products() {
     }))) return
     setBulkApplying(true)
     try {
+      // Patch i ngushtë: shih komentin te applyMultiplier — PUT i plotë te
+      // bulk op shkaktoi incidentin ku stock-u i produkteve të shitura u
+      // ri-vendos në 1 nga state-i stale.
       await Promise.all(eligible.map(p => {
         const newSell = +(parseFloat(p.cost_price) * m).toFixed(2)
-        return fetch(`/api/products/${p.id}`, {
+        return fetch(`/api/products/${p.id}/multiplier`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...p, multiplier: m, sell_price: newSell }),
+          body: JSON.stringify({ multiplier: m, sell_price: newSell }),
         })
       }))
       await load()

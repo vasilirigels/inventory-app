@@ -1950,6 +1950,29 @@ app.put('/api/products/:id/barcode', async (req, res) => {
   }
 });
 
+// Përditësim vetëm i multiplier-it + sell_price — përdoret nga pamja Produkte
+// te "Apliko ×" (në rresht ose në grup). Patch i ngushtë që shmang bug-un ku
+// PUT i plotë dërgonte `stock` stale nga state-i i UI-së dhe mbishkruante DB
+// (shih incidentin v1.2.71 ku stock-u i produkteve të shitura u rikthye në 1).
+app.put('/api/products/:id/multiplier', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const multiplier = parseFloat(req.body?.multiplier);
+    const sellPrice  = parseFloat(req.body?.sell_price);
+    if (!(multiplier > 0)) return res.status(400).json({ error: 'multiplier > 0 kërkohet' });
+    if (!(sellPrice  > 0)) return res.status(400).json({ error: 'sell_price > 0 kërkohet' });
+    const exists = await queryOne('SELECT id FROM products WHERE id = ?', [id]);
+    if (!exists) return res.status(404).json({ error: 'not found' });
+    await run(
+      `UPDATE products SET multiplier=?, sell_price=?, updated_at=${NOW_TS_SQL} WHERE id=?`,
+      [multiplier, sellPrice, id],
+    );
+    res.json({ success: true, multiplier, sell_price: sellPrice });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/products/:id/promotion', async (req, res) => {
   try {
     const { id } = req.params;
