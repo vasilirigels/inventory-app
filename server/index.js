@@ -1886,10 +1886,15 @@ app.put('/api/products/:id', async (req, res) => {
     const promoPct = d.is_promotion
       ? Math.max(0, Math.min(100, parseFloat(d.promo_discount_pct) || 0))
       : 0;
+    // VËREJTJE: `stock` NUK përditësohet nga këtu — stock-u menaxhohet VETËM
+    // nga shitja, blerja, kthimi, magazina, dhe PATCH /api/products/:id/stock.
+    // Përndryshe çdo edit (barkod, çmim, promocion, etj.) mund të dërgojë stock
+    // stale nga state-i i UI-së dhe të mbishkruajë DB-në — kjo shkaktoi
+    // incidentin ku produkte të shitura u rikthyen në inventar (shih v1.2.72).
     await run(
       `UPDATE products
        SET name=?, sku=?, barcode=?, category=?, brand=?, description=?,
-           cost_price=?, sell_price=?, stock=?, min_stock=?, vat_rate=?, unit=?,
+           cost_price=?, sell_price=?, min_stock=?, vat_rate=?, unit=?,
            is_promotion=?, promo_discount_pct=?, gram=?,
            serial_no=?, purchase_price_no_vat=?,
            has_gram=?, has_currency=?, has_rate=?, has_rate_currency=?,
@@ -1901,7 +1906,7 @@ app.put('/api/products/:id', async (req, res) => {
         d.name, d.sku || '', d.barcode || '',
         d.category || 'Tjeter', d.brand || '', d.description || '',
         d.cost_price || 0, d.sell_price || 0,
-        d.stock || 0, d.min_stock !== undefined ? d.min_stock : 5,
+        d.min_stock !== undefined ? d.min_stock : 5,
         d.vat_rate !== undefined && d.vat_rate !== '' ? parseFloat(d.vat_rate) : 20,
         d.unit || 'copë',
         d.is_promotion ? 1 : 0,
