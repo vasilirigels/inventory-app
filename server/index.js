@@ -8231,6 +8231,7 @@ app.get('/api/reports/sales-items', async (req, res) => {
          COALESCE(p.unit, 'copë') AS unit,
          ii.qty AS qty,
          COALESCE(ii.gram, 0) AS gram,
+         COALESCE(ii.has_gram, 0) AS has_gram,
          ii.unit_price_no_vat AS unit_price,
          ii.discount_percent  AS discount_percent,
          ii.subtotal_no_vat   AS subtotal_no_vat,
@@ -8261,6 +8262,7 @@ app.get('/api/reports/sales-items', async (req, res) => {
         sku: r.sku, category: r.category, material: r.material, unit: r.unit,
         qty,
         gram:                 +(r.gram || 0),
+        has:                  +(qty * (+r.has_gram || 0)).toFixed(3),
         unit_price:           +unitOrig.toFixed(2),
         discount_percent:     discPct,
         discount:             +discOrig.toFixed(2),
@@ -8287,6 +8289,7 @@ app.get('/api/reports/sales-items', async (req, res) => {
          COALESCE(p.unit, 'copë') AS unit,
          SUM(ii.qty) AS qty,
          SUM(COALESCE(ii.gram, 0)) AS gram,
+         SUM(ii.qty * COALESCE(ii.has_gram, 0)) AS has,
          SUM(ii.qty * ii.unit_price_no_vat * COALESCE(i.exchange_rate, 1)) AS gross_lek,
          SUM(ii.qty * ii.unit_price_no_vat * (ii.discount_percent / 100.0) * COALESCE(i.exchange_rate, 1)) AS discount_lek,
          SUM(ii.subtotal_no_vat * COALESCE(i.exchange_rate, 1)) AS value_no_vat_lek,
@@ -8314,6 +8317,7 @@ app.get('/api/reports/sales-items', async (req, res) => {
         sku: r.sku, category: r.category, material: r.material, unit: r.unit,
         qty,
         gram:              +(r.gram || 0),
+        has:               +(+r.has || 0).toFixed(3),
         unit_price_lek:    qty !== 0 ? +(gross / qty).toFixed(2) : 0,
         discount_lek:      +discount.toFixed(2),
         value_no_vat_lek:  +valNoVat.toFixed(2),
@@ -8323,10 +8327,11 @@ app.get('/api/reports/sales-items', async (req, res) => {
       };
     });
 
-    const emptyTotals = () => ({ qty: 0, gram: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
+    const emptyTotals = () => ({ qty: 0, gram: 0, has: 0, discount_lek: 0, value_no_vat_lek: 0, vat_lek: 0, value_with_vat_lek: 0 });
     const addInto = (a, r) => ({
       qty:                a.qty                + r.qty,
       gram:               a.gram               + (r.gram || 0),
+      has:                a.has                + (r.has || 0),
       discount_lek:       a.discount_lek       + r.discount_lek,
       value_no_vat_lek:   a.value_no_vat_lek   + r.value_no_vat_lek,
       vat_lek:            a.vat_lek            + r.vat_lek,
@@ -8346,6 +8351,7 @@ app.get('/api/reports/sales-items', async (req, res) => {
          COALESCE(i.currency, 'LEK') AS currency,
          SUM(ii.qty) AS qty,
          SUM(COALESCE(ii.gram, 0)) AS gram,
+         SUM(ii.qty * COALESCE(ii.has_gram, 0)) AS has,
          SUM(ii.qty * ii.unit_price_no_vat * (ii.discount_percent / 100.0)) AS discount,
          SUM(ii.subtotal_no_vat) AS value_no_vat,
          SUM(ii.vat_amount)      AS vat,
@@ -8363,6 +8369,7 @@ app.get('/api/reports/sales-items', async (req, res) => {
       totalsByCurrency[r.currency] = {
         qty:                +(+r.qty || 0),
         gram:               +(+r.gram || 0).toFixed(3),
+        has:                +(+r.has || 0).toFixed(3),
         discount:           +(+r.discount || 0).toFixed(2),
         value_no_vat:       +(+r.value_no_vat || 0).toFixed(2),
         vat:                +(+r.vat || 0).toFixed(2),

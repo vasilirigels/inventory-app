@@ -17,16 +17,18 @@ export function generateBarcode() {
 }
 
 // Render Code128 si SVG string i gatshëm për të futur në HTML.
+// Përmasat janë optimizuar për etiketat butterfly bizhuteri (zona qendrore
+// ~30mm × 11mm e dukshme pas mbështjelljes).
 function renderBarcodeSVG(JsBarcode, text) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   JsBarcode(svg, text, {
     format: 'CODE128',
-    width: 1.6,
-    height: 45,
+    width: 1.1,
+    height: 28,
     displayValue: true,
-    fontSize: 11,
-    margin: 2,
-    textMargin: 1,
+    fontSize: 8,
+    margin: 1,
+    textMargin: 0,
   })
   const wrap = document.createElement('div')
   wrap.appendChild(svg)
@@ -34,7 +36,9 @@ function renderBarcodeSVG(JsBarcode, text) {
 }
 
 // Printo një ose disa etiketa. Çdo etiketë zë një faqe të printer-it termik
-// (50×30mm). items: [{ barcode, sell_price }]
+// Zebra ZD220 — etiketa butterfly bizhuteri 70mm × 15mm (totali). Përmbajtja
+// (barkodi + çmimi) qendrohet në pjesën e ngushtë ~30mm × 11mm që mbetet e
+// dukshme kur etiketa mbështillet rreth artikullit. items: [{ barcode, sell_price }]
 export async function printLabels(items) {
   const usable = items.filter(it => it.barcode && String(it.barcode).trim())
   if (usable.length === 0) {
@@ -50,25 +54,30 @@ export async function printLabels(items) {
     const price = (parseFloat(it.sell_price) || 0).toLocaleString('sq-AL', {
       minimumFractionDigits: 2, maximumFractionDigits: 2,
     })
-    return `<div class="label">${svg}<div class="price">€ ${price}</div></div>`
+    return `<div class="label"><div class="inner">${svg}<div class="price">€ ${price}</div></div></div>`
   }).join('')
 
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Etiketa</title>
 <style>
-  @page { size: 50mm 30mm; margin: 0; }
+  @page { size: 70mm 15mm; margin: 0; }
   html, body { margin: 0; padding: 0; background: #fff; }
   .label {
-    width: 50mm; height: 30mm;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    box-sizing: border-box; padding: 1mm;
+    width: 70mm; height: 15mm;
+    display: flex; align-items: center; justify-content: center;
+    box-sizing: border-box;
     page-break-after: always;
     font-family: system-ui, -apple-system, sans-serif;
   }
   .label:last-child { page-break-after: auto; }
-  .label svg { max-width: 100%; }
-  .price { font-weight: 700; font-size: 12pt; margin-top: 1mm; letter-spacing: 0.3px; }
+  /* Zona qendrore e dukshme — pjesa tjetër (krahët) mbështillet prapa */
+  .inner {
+    width: 30mm; height: 13mm;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .inner svg { max-width: 100%; max-height: 9mm; }
+  .price { font-weight: 700; font-size: 6pt; margin-top: 0.3mm; letter-spacing: 0.2px; line-height: 1; }
 </style></head><body>${labels}</body></html>`
 
   // Iframe i fshehur në vend të window.open() — kjo e fundit bllokohet si popup

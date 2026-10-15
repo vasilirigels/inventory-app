@@ -11,6 +11,7 @@ const SALES_EXPORT_FIELDS = [
   { key: 'category',           label: 'Kategoria' },
   { key: 'material',           label: 'Materiali' },
   { key: 'qty',                label: 'Sasia' },
+  { key: 'has',                label: 'Has (gr)' },
   { key: 'unit_price_lek',     label: 'Çm. Shitje (LEK)' },
   { key: 'discount_lek',       label: 'Zbritje (LEK)' },
   { key: 'value_no_vat_lek',   label: 'Vlera pa TVSH (LEK)' },
@@ -25,7 +26,7 @@ function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
   const x = n(v)
   if (x === 0) return '—'
-  return x.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return Math.round(x).toLocaleString('sq-AL', { maximumFractionDigits: 0 })
 }
 function fmtQty(v) {
   const x = n(v)
@@ -250,7 +251,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     const matLabel = (m) => m === 'flori' ? 'Flori' : m === 'diamant' ? 'Diamant' : ''
     const FIELD_WIDTHS = {
       source: 12, barcode: 14, sku: 12, name: 32, category: 14, material: 10,
-      qty: 10, unit_price_lek: 14, discount_lek: 14, value_no_vat_lek: 16,
+      qty: 10, has: 10, unit_price_lek: 14, discount_lek: 14, value_no_vat_lek: 16,
       vat_lek: 14, value_with_vat_lek: 16, docs_count: 10,
     }
     const getters = {
@@ -261,6 +262,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
       category: r => r.category || '',
       material: r => matLabel(r.material),
       qty: r => r.qty,
+      has: r => r.has || 0,
       unit_price_lek: r => r.unit_price_lek,
       discount_lek: r => r.discount_lek,
       value_no_vat_lek: r => r.value_no_vat_lek,
@@ -288,6 +290,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     if (totalsByMaterial?.flori?.qty > 0) {
       out.push(makeTotalRow('NËN-TOTAL FLORI', {
         material: 'Flori', qty: totalsByMaterial.flori.qty,
+        has: totalsByMaterial.flori.has,
         discount_lek: totalsByMaterial.flori.discount_lek,
         value_no_vat_lek: totalsByMaterial.flori.value_no_vat_lek,
         vat_lek: totalsByMaterial.flori.vat_lek,
@@ -297,6 +300,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     if (totalsByMaterial?.diamant?.qty > 0) {
       out.push(makeTotalRow('NËN-TOTAL DIAMANT', {
         material: 'Diamant', qty: totalsByMaterial.diamant.qty,
+        has: totalsByMaterial.diamant.has,
         discount_lek: totalsByMaterial.diamant.discount_lek,
         value_no_vat_lek: totalsByMaterial.diamant.value_no_vat_lek,
         vat_lek: totalsByMaterial.diamant.vat_lek,
@@ -306,6 +310,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
     if (totals) {
       out.push(makeTotalRow('TOTALI në LEK (kombinuar)', {
         qty: totals.qty,
+        has: totals.has,
         discount_lek: totals.discount_lek,
         value_no_vat_lek: totals.value_no_vat_lek,
         vat_lek: totals.vat_lek,
@@ -317,6 +322,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
         const t = totalsByCurrency[cur]
         out.push(makeTotalRow(`TOTAL (${cur})`, {
           qty: t.qty,
+          has: t.has,
           discount_lek: t.discount,
           value_no_vat_lek: t.value_no_vat,
           vat_lek: t.vat,
@@ -445,6 +451,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Mon.</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Gram</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Shitje</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritje %</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera pa TVSH</th>
@@ -506,6 +513,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                         <td className="px-3 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200 font-semibold">
                           {r.gram > 0 ? `${r.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
                         </td>
+                        <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
+                          {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                           {fmt(r.unit_price)}
                         </td>
@@ -551,6 +561,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                           <td className="px-3 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200">
                             {t.gram > 0 ? `${t.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                           </td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
+                            {t.has > 0 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                          </td>
                           <td></td>
                           <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
                             {t.discount > 0.005 ? `-${fmt(t.discount)}` : '—'}
@@ -583,6 +596,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Materiali</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Shitje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera pa TVSH</th>
@@ -613,6 +627,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                       {fmtQty(r.qty)} <span className="text-[10px] text-slate-400 dark:text-slate-500">{r.unit}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
+                      {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.unit_price_lek)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.discount_lek > 0.005 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
@@ -649,6 +666,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     <tr className="text-xs bg-amber-50 dark:bg-amber-900/30 border-b border-amber-100">
                       <td colSpan={5} className="px-3 py-1.5 text-right text-amber-800 dark:text-amber-200 font-semibold">🟡 Flori:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-amber-900">{fmtQty(totalsByMaterial.flori.qty)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 font-semibold">
+                        {(totalsByMaterial.flori.has || 0) > 0.0005 ? totalsByMaterial.flori.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                      </td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-amber-800 dark:text-amber-200">
                         {totalsByMaterial.flori.discount_lek > 0.005 ? `-${fmt(totalsByMaterial.flori.discount_lek)}` : '—'}
@@ -663,6 +683,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     <tr className="text-xs bg-sky-50 border-b border-sky-100">
                       <td colSpan={5} className="px-3 py-1.5 text-right text-sky-800 font-semibold">💎 Diamant:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-sky-900">{fmtQty(totalsByMaterial.diamant.qty)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 font-semibold">
+                        {(totalsByMaterial.diamant.has || 0) > 0.0005 ? totalsByMaterial.diamant.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                      </td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-sky-800">
                         {totalsByMaterial.diamant.discount_lek > 0.005 ? `-${fmt(totalsByMaterial.diamant.discount_lek)}` : '—'}
@@ -677,6 +700,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     <tr className="text-xs bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
                       <td colSpan={5} className="px-3 py-1.5 text-right text-slate-600 dark:text-slate-300 font-semibold">— Pa material:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(totalsByMaterial.tjeter.qty)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 font-semibold">
+                        {(totalsByMaterial.tjeter.has || 0) > 0.0005 ? totalsByMaterial.tjeter.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                      </td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
                         {totalsByMaterial.tjeter.discount_lek > 0.005 ? `-${fmt(totalsByMaterial.tjeter.discount_lek)}` : '—'}
@@ -690,6 +716,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                   <tr className="font-bold text-xs bg-slate-100 dark:bg-slate-800 border-t border-slate-300 dark:border-slate-700">
                     <td colSpan={5} className="px-3 py-2 text-right text-slate-500 dark:text-slate-400 uppercase tracking-wide">TOTALI SHITJE në LEK (kombinuar):</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(totals.qty)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200">
+                      {(totals.has || 0) > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                    </td>
                     <td></td>
                     <td className="px-3 py-2 text-right tabular-nums text-orange-600">
                       {totals.discount_lek > 0.005 ? `-${fmt(totals.discount_lek)}` : '—'}
@@ -705,6 +734,9 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       <tr key={cur} className={`font-bold text-xs bg-emerald-50 dark:bg-emerald-900/30 ${idx === 0 ? 'border-t-2 border-emerald-300' : 'border-t border-emerald-200'}`}>
                         <td colSpan={5} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL SHITJE ({cur}):</td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(t.qty)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200">
+                          {(t.has || 0) > 0.0005 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                        </td>
                         <td></td>
                         <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
                           {t.discount > 0.005 ? `-${fmt(t.discount)}` : '—'}

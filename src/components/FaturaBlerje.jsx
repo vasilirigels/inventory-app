@@ -688,7 +688,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                   )}
                   {showGram && (
                     <td className="px-4 py-3 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
-                      {n(inv.total_has_gram) > 0 ? `${n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
+                      {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
                     </td>
                   )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
@@ -737,7 +737,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                 )}
                 {showGram && (
                   <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-base">
-                    {totals.has > 0.0005 ? `${totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
+                    {totals.has > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
                   </td>
                 )}
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossUsd)}</td>
