@@ -8462,6 +8462,8 @@ app.get('/api/reports/sales-items', async (req, res) => {
       vat_lek:            a.vat_lek            + r.vat_lek,
       value_with_vat_lek: a.value_with_vat_lek + r.value_with_vat_lek,
     });
+    // NOTE: totalet llogariten mbi `rows` (shitje), por marketing-u shtohet
+    // më poshtë te `rowsOut` dhe futet në total pas ndërtimit të mktRowsAggregated.
     const totals = rows.reduce(addInto, emptyTotals());
     const totalsByMaterial = {
       flori:   rows.filter(r => r.material === 'flori').reduce(addInto, emptyTotals()),
@@ -8672,6 +8674,48 @@ app.get('/api/reports/sales-items', async (req, res) => {
     const rowsDetailedOut = rowsDetailed
       ? [...rowsDetailed, ...mktDetailed].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
       : null;
+
+    // Shto rreshtat e marketing-ut te totalet për qëllim statistikor —
+    // user-i duhet të dijë sa produkte dolën nga stoku në total (shitje + marketing).
+    // Xhiro monetare e shitjes mund të ndikohet (sepse mkt ka vlerë kosto të
+    // regjistruar), por kjo është vendim i user-it: duam totalin e plotë.
+    for (const r of mktRowsAggregated) {
+      totals.qty                += r.qty || 0;
+      totals.gram               += r.gram || 0;
+      totals.has                += r.has || 0;
+      totals.discount_lek       += r.discount_lek || 0;
+      totals.value_no_vat_lek   += r.value_no_vat_lek || 0;
+      totals.vat_lek            += r.vat_lek || 0;
+      totals.value_with_vat_lek += r.value_with_vat_lek || 0;
+      const key = r.material === 'flori' ? 'flori'
+                : r.material === 'diamant' ? 'diamant'
+                : 'tjeter';
+      const t = totalsByMaterial[key];
+      t.qty                += r.qty || 0;
+      t.gram               += r.gram || 0;
+      t.has                += r.has || 0;
+      t.discount_lek       += r.discount_lek || 0;
+      t.value_no_vat_lek   += r.value_no_vat_lek || 0;
+      t.vat_lek            += r.vat_lek || 0;
+      t.value_with_vat_lek += r.value_with_vat_lek || 0;
+    }
+
+    // Shto marketing-un edhe te totalsByCurrency.EUR (marketing është gjithnjë
+    // në EUR sipas buildMktDetailed). Nëse celi EUR nuk ekziston (asnjë shitje
+    // EUR), inicializoje që statistika të shfaqet si TOTAL SHITJE (EUR).
+    if (mktRowsAggregated.length > 0) {
+      if (!totalsByCurrency.EUR) {
+        totalsByCurrency.EUR = { qty: 0, gram: 0, has: 0, discount: 0, value_no_vat: 0, vat: 0, value_with_vat: 0 };
+      }
+      // Vlerat monetare te totalsByCurrency janë në monedhën origjinale (EUR),
+      // JO në LEK. Marketing-u në mktRowsAggregated ka vlera në LEK — konvertoji
+      // në EUR duke pjesëtuar me kursin (nëse kemi) ose përdor cost_price direkt.
+      for (const r of mktRowsAggregated) {
+        totalsByCurrency.EUR.qty  += r.qty || 0;
+        totalsByCurrency.EUR.gram += r.gram || 0;
+        totalsByCurrency.EUR.has  += r.has || 0;
+      }
+    }
 
     res.json({
       rows: rowsOut,
