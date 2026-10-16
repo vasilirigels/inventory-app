@@ -967,7 +967,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                         <td className="px-4 py-2 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
                         <td className="px-4 py-2 text-center">{pmBadge}</td>
                         <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
-                          {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                          {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
                           {fmt(inv.total_with_vat)}
@@ -1006,7 +1006,7 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                       💱 TOTAL ({cur})
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200">
-                      {(t.has || 0) > 0.0005 ? (t.has || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                      {(t.has || 0) > 0.0005 ? (t.has || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.tot)}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(t.paid)}</td>

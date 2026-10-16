@@ -439,6 +439,44 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ user: { id: req.user.id, username: req.user.username, role: req.user.role } });
 });
 
+// Lista e përdoruesve — vetëm admin. Përdoret te modal "Ndrysho fjalëkalimin"
+// për të zgjedhur target-in (vetë ose shitës).
+app.get('/api/auth/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const rows = await queryAll('SELECT id, username, role FROM users ORDER BY role, username');
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ndryshimi i fjalëkalimit — vetëm admin mund të ndryshojë çdo fjalëkalim
+// (të vetin ose të shitësit). Admin verifikon identitetin me password-in e tij
+// aktual si masë sigurie, pastaj resetohet password-i i target-it.
+app.post('/api/auth/change-password', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { target_user_id, admin_password, new_password } = req.body || {};
+    if (!target_user_id || !admin_password || !new_password) {
+      return res.status(400).json({ error: 'missing_fields' });
+    }
+    if (String(new_password).length < 4) {
+      return res.status(400).json({ error: 'password_too_short', message: 'Fjalëkalimi duhet të ketë ≥ 4 karaktere.' });
+    }
+    // Verifiko që admin-i aktual ekziston dhe password-i i tij është i saktë.
+    const admin = await queryOne('SELECT id, password_hash FROM users WHERE id = ?', [req.user.id]);
+    if (!admin) return res.status(401).json({ error: 'admin_not_found' });
+    const okAdmin = await bcrypt.compare(String(admin_password), admin.password_hash);
+    if (!okAdmin) {
+      return res.status(401).json({ error: 'invalid_admin_password', message: 'Fjalëkalimi aktual i admin-it nuk është i saktë.' });
+    }
+    // Target-i duhet të ekzistojë.
+    const target = await queryOne('SELECT id, username FROM users WHERE id = ?', [parseInt(target_user_id)]);
+    if (!target) return res.status(404).json({ error: 'target_not_found' });
+    // Hash dhe UPDATE.
+    const newHash = await bcrypt.hash(String(new_password), 10);
+    await run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, target.id]);
+    res.json({ success: true, username: target.username });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Nga këtu e tutje: çdo endpoint /api/... kërkon auth.
 // Endpoint-et e mësipërme (/api/auth/*) mbeten publike.
 app.use('/api', requireAuth);
@@ -1729,6 +1767,41 @@ app.patch('/api/products/:id/stock', async (req, res) => {
     await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, id]);
     const p = await queryOne('SELECT stock FROM products WHERE id = ?', [id]);
     res.json({ success: true, stock: p?.stock ?? 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Audit log për ndryshimet e stock-ut (vetëm admin). Përdoret për diagnozë
+// kur ndodhin incidente — tregon kur dhe nga sa→sa ndryshoi stock-u i një
+// produkti të caktuar, ose të gjithë ngjarjeve të fundit.
+app.get('/api/products/:id/stock-audit', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const rows = await queryAll(
+      `SELECT id, old_stock, new_stock, changed_at
+         FROM stock_audit
+        WHERE product_id = ?
+        ORDER BY changed_at DESC
+        LIMIT ?`,
+      [id, limit],
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/stock-audit/recent', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+    const rows = await queryAll(
+      `SELECT sa.id, sa.product_id, sa.old_stock, sa.new_stock, sa.changed_at,
+              p.barcode, p.name
+         FROM stock_audit sa
+         LEFT JOIN products p ON p.id = sa.product_id
+        ORDER BY sa.changed_at DESC
+        LIMIT ?`,
+      [limit],
+    );
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -8640,6 +8713,8 @@ app.get('/api/reports/purchase-items', async (req, res) => {
          COALESCE(p.category, '') AS category,
          COALESCE(p.unit, 'copë') AS unit,
          SUM(pit.qty) AS qty,
+         SUM(COALESCE(pit.gram, 0))     AS gram,
+         SUM(COALESCE(pit.has_gram, 0)) AS has,
          SUM(pit.qty * pit.purchase_price_no_vat *
              CASE WHEN pi.currency = 'USD' THEN 1
                   ELSE COALESCE(pi.exchange_rate, 1) / COALESCE(usd_rate.rate, 1) END) AS gross_usd,
@@ -8713,7 +8788,7 @@ app.get('/api/reports/purchase-items', async (req, res) => {
     const empty = (r) => ({
       product_id: r.product_id, barcode: r.barcode, name: r.name,
       sku: r.sku || '', category: r.category || '', unit: r.unit || 'copë',
-      qty: 0, gross_usd: 0, discount_usd: 0,
+      qty: 0, gram: 0, has: 0, gross_usd: 0, discount_usd: 0,
       value_no_vat_usd: 0, vat_usd: 0, value_with_vat_usd: 0,
       docs_count: 0,
     });
@@ -8723,6 +8798,8 @@ app.get('/api/reports/purchase-items', async (req, res) => {
       const k = keyOf(r);
       const e = map.get(k) || empty(r);
       e.qty                += +(r.qty || 0);
+      e.gram               += +(r.gram || 0);
+      e.has                += +(r.has || 0);
       e.gross_usd          += +(r.gross_usd || 0);
       e.discount_usd       += +(r.discount_usd || 0);
       e.value_no_vat_usd   += +(r.value_no_vat_usd || 0);
@@ -8751,6 +8828,8 @@ app.get('/api/reports/purchase-items', async (req, res) => {
         product_id: r.product_id, barcode: r.barcode, name: r.name,
         sku: r.sku, category: r.category, unit: r.unit,
         qty,
+        gram:              +(r.gram || 0).toFixed(2),
+        has:               +(r.has || 0).toFixed(2),
         unit_price_usd:    qty !== 0 ? +(r.gross_usd / qty).toFixed(2) : 0,
         discount_usd:      +r.discount_usd.toFixed(2),
         value_no_vat_usd:  +r.value_no_vat_usd.toFixed(2),
@@ -8762,11 +8841,13 @@ app.get('/api/reports/purchase-items', async (req, res) => {
 
     const totals = rows.reduce((a, r) => ({
       qty:                a.qty                + r.qty,
+      gram:               a.gram               + r.gram,
+      has:                a.has                + r.has,
       discount_usd:       a.discount_usd       + r.discount_usd,
       value_no_vat_usd:   a.value_no_vat_usd   + r.value_no_vat_usd,
       vat_usd:            a.vat_usd            + r.vat_usd,
       value_with_vat_usd: a.value_with_vat_usd + r.value_with_vat_usd,
-    }), { qty: 0, discount_usd: 0, value_no_vat_usd: 0, vat_usd: 0, value_with_vat_usd: 0 });
+    }), { qty: 0, gram: 0, has: 0, discount_usd: 0, value_no_vat_usd: 0, vat_usd: 0, value_with_vat_usd: 0 });
 
     // Lista e kategorive për të mbushur filtër-in në frontend
     // (nga produktet aktive që kanë të paktën një kategori të vendosur).

@@ -1859,6 +1859,7 @@ export default function Products() {
       count: filtered.length,
       totalStock: 0,
       totalGram: 0,
+      totalHas: 0,
       totalCostValue: 0,
       totalSellValue: 0,
       lowStock: 0,
@@ -1868,22 +1869,29 @@ export default function Products() {
     filtered.forEach(p => {
       const stock = parseFloat(p.stock) || 0
       const gramPer = parseFloat(p.gram) || 0
+      const hasPer = parseFloat(p.has_gram) || 0
       const cost = parseFloat(p.cost_price) || 0
       const sell = parseFloat(p.sell_price) || 0
       const gramTotal = gramPer * stock
+      // HAS llogaritet VETËM për flori — diamantët nuk kanë has edhe nëse në DB
+      // kanë vlerë has_gram > 0 (data e importuar gabim nuk duhet të ndikojë).
+      const isFlori = String(p.material || '').toLowerCase() === 'flori'
+      const hasTotal = isFlori ? hasPer * stock : 0
       const costV = cost * stock
       const sellV = sell * stock
       s.totalStock += stock
       s.totalGram += gramTotal
+      s.totalHas += hasTotal
       s.totalCostValue += costV
       s.totalSellValue += sellV
       if (stock <= 0) s.outOfStock += 1
       else if (p.min_stock != null && stock <= parseFloat(p.min_stock)) s.lowStock += 1
       const cat = p.category || 'Tjeter'
-      if (!s.byCategory[cat]) s.byCategory[cat] = { count: 0, stock: 0, gram: 0, cost: 0, sell: 0 }
+      if (!s.byCategory[cat]) s.byCategory[cat] = { count: 0, stock: 0, gram: 0, has: 0, cost: 0, sell: 0 }
       s.byCategory[cat].count += 1
       s.byCategory[cat].stock += stock
       s.byCategory[cat].gram += gramTotal
+      s.byCategory[cat].has += hasTotal
       s.byCategory[cat].cost += costV
       s.byCategory[cat].sell += sellV
     })
@@ -2415,6 +2423,10 @@ export default function Products() {
               <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Gramatura</p>
               <p className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmtNum(summary.totalGram)} <span className="text-xs font-normal text-slate-500">gr</span></p>
             </div>
+            <div className="p-3 rounded-xl bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+              <p className="text-[10px] text-yellow-700 dark:text-yellow-300 uppercase font-semibold">Has</p>
+              <p className="text-lg font-bold text-yellow-800 dark:text-yellow-200 tabular-nums">{(summary.totalHas || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            </div>
             <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
               <p className="text-[10px] text-blue-700 dark:text-blue-300 uppercase font-semibold">Vlera në Kosto</p>
               <p className="text-lg font-bold text-blue-800 dark:text-blue-200 tabular-nums">{fmtUsd(summary.totalCostValue)}</p>
@@ -2440,6 +2452,7 @@ export default function Products() {
                       <th className="px-3 py-2 text-right font-semibold">Produkte</th>
                       <th className="px-3 py-2 text-right font-semibold">Sasi</th>
                       <th className="px-3 py-2 text-right font-semibold">Gram</th>
+                      <th className="px-3 py-2 text-right font-semibold bg-yellow-50 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200">Has</th>
                       <th className="px-3 py-2 text-right font-semibold">Kosto $</th>
                       <th className="px-3 py-2 text-right font-semibold">Shitje €</th>
                       <th className="px-3 py-2 text-right font-semibold">Fitim €</th>
@@ -2460,6 +2473,7 @@ export default function Products() {
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{v.count}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtNum(v.stock)}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{v.gram > 0 ? fmtNum(v.gram) : '—'}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">{v.has > 0 ? v.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-300">{v.cost > 0 ? fmtUsd(v.cost) : '—'}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{v.sell > 0 ? fmtEur(v.sell) : '—'}</td>
                             <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${profit >= 0 ? 'text-amber-700 dark:text-amber-300' : 'text-red-600 dark:text-red-400'}`}>{profit !== 0 ? fmtEur(profit) : '—'}</td>
@@ -2473,6 +2487,7 @@ export default function Products() {
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{summary.count}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalStock)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalGram)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200">{(summary.totalHas || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200">{fmtUsd(summary.totalCostValue)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-800 dark:text-emerald-200">{fmtEur(summary.totalSellValue)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${summary.profit >= 0 ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'}`}>{fmtEur(summary.profit)}</td>

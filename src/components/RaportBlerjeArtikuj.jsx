@@ -3,12 +3,38 @@ import { loadXLSX } from '../lib/xlsx.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import ExportFieldsModal from './ExportFieldsModal.jsx'
 
+// Fushat e eksportit — renditja ndjek Produkte Inventar (barkod → emër → …),
+// me metrikat e raportit (qty/gram/has/vlerat e blerjes) në fund.
 const PURCHASE_EXPORT_FIELDS = [
-  { key: 'barcode',            label: 'Barkodi' },
-  { key: 'sku',                label: 'SKU' },
-  { key: 'name',               label: 'Artikulli' },
-  { key: 'category',           label: 'Kategoria' },
-  { key: 'qty',                label: 'Sasia' },
+  // Fushat e produktit (renditja si te Produkte Inventar export)
+  { key: 'nr',             label: 'Nr' },
+  { key: 'last_purchase_date', label: 'Data Blerje' },
+  { key: 'barcode',        label: 'Barkodi' },
+  { key: 'name',           label: 'Pershkrimi' },
+  { key: 'category',       label: 'Kategoria' },
+  { key: 'brand',          label: 'Brendi' },
+  { key: 'sku',            label: 'SKU' },
+  { key: 'stock',          label: 'Sasia (stock)' },
+  { key: 'min_stock',      label: 'Stok Minimal' },
+  { key: 'prod_gram',      label: 'Gram (produkt)' },
+  { key: 'kodi',           label: 'Kodi (flori)' },
+  { key: 'has_gram',       label: 'Cmim Blerje Has' },
+  { key: 'has_rate',       label: 'Kursi Blerje' },
+  { key: 'cost_price',     label: 'Cmim Kosto ($)' },
+  { key: 'multiplier',     label: 'Shumëzues' },
+  { key: 'sell_price_has', label: 'Cmim Shitje Has' },
+  { key: 'sell_rate',      label: 'Kursi Shitje' },
+  { key: 'purchase_price_no_vat', label: 'Cmimi PA' },
+  { key: 'vat_rate',       label: 'TVSH %' },
+  { key: 'sell_price',     label: 'Cmim Shitje (€)' },
+  { key: 'profit_pct',     label: 'Fitim %' },
+  { key: 'margin_pct',     label: 'Marzh %' },
+  { key: 'promo',          label: 'Në promocion' },
+  { key: 'promo_pct',      label: 'Zbritje Promo %' },
+  // Metrikat e raportit (në fund)
+  { key: 'qty',                label: 'Sasia (blerë)' },
+  { key: 'gram',               label: 'Gram (blerë)' },
+  { key: 'has',                label: 'Has (blerë)' },
   { key: 'unit_price_usd',     label: 'Çm. Blerje ($)' },
   { key: 'discount_usd',       label: 'Zbritje ($)' },
   { key: 'value_no_vat_usd',   label: 'Vlera pa TVSH ($)' },
@@ -16,8 +42,8 @@ const PURCHASE_EXPORT_FIELDS = [
   { key: 'value_with_vat_usd', label: 'Vlera me TVSH ($)' },
   { key: 'docs_count',         label: 'Nr. Dokumentash' },
 ]
-const PURCHASE_EXPORT_LS_KEY = 'purchase_report_export_fields_v1'
-const PURCHASE_DEFAULT_KEYS = PURCHASE_EXPORT_FIELDS.map(f => f.key)
+const PURCHASE_EXPORT_LS_KEY = 'purchase_report_export_fields_v3'
+const PURCHASE_DEFAULT_KEYS = ['barcode', 'name', 'category', 'qty', 'gram', 'has', 'unit_price_usd', 'value_no_vat_usd', 'value_with_vat_usd']
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -214,6 +240,8 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
   const [searched, setSearched] = useState(false)
   const [docsRow, setDocsRow] = useState(null)
   const [showExport, setShowExport] = useState(false)
+  // Helper: numër seri produkti (si te Produkte Inventar).
+  const productNo = (id) => id ? `P${String(id).padStart(5, '0')}` : ''
 
   const load = useCallback(async () => {
     if (!from || !to) return
@@ -251,31 +279,88 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
 
   const runExport = async (selectedKeys) => {
     const XLSX = await loadXLSX()
+    // Ngarko produktet freskët para eksportit — që getter-at e fushave të
+    // produktit (has_gram, cost_price, brand, etj.) të kenë vlerat aktuale.
+    let productMap = new Map()
+    try {
+      const prods = await fetch('/api/products').then(r => r.json())
+      if (Array.isArray(prods)) productMap = new Map(prods.map(p => [p.id, p]))
+    } catch (_) { /* fallback: fushat e produktit do dalin bosh */ }
     const FIELD_WIDTHS = {
-      barcode: 14, sku: 12, name: 32, category: 14, qty: 10,
+      // Report metrics
+      qty: 10, gram: 10, has: 10,
       unit_price_usd: 14, discount_usd: 14, value_no_vat_usd: 16,
       vat_usd: 14, value_with_vat_usd: 16, docs_count: 12,
+      // Product fields (si në Inventar export)
+      nr: 10, last_purchase_date: 12, barcode: 14, name: 32, category: 14,
+      brand: 14, sku: 12, stock: 10, min_stock: 12, prod_gram: 10, kodi: 8,
+      has_gram: 14, has_rate: 14, cost_price: 14, multiplier: 12,
+      sell_price_has: 14, sell_rate: 14, purchase_price_no_vat: 12,
+      vat_rate: 8, sell_price: 16, profit_pct: 10, margin_pct: 10,
+      promo: 12, promo_pct: 14,
     }
     const active = PURCHASE_EXPORT_FIELDS.filter(f => selectedKeys.includes(f.key))
     if (active.length === 0) return
+    // Getters: raport-level nga `r` (rreshti i raportit), produkt-level nga `p` (produkti).
     const getters = {
-      barcode: r => r.barcode || '',
-      sku: r => r.sku || '',
-      name: r => r.name || '',
-      category: r => r.category || '',
-      qty: r => r.qty,
-      unit_price_usd: r => r.unit_price_usd,
-      discount_usd: r => r.discount_usd,
-      value_no_vat_usd: r => r.value_no_vat_usd,
-      vat_usd: r => r.vat_usd,
+      // Raport metrika
+      qty:                r => r.qty,
+      gram:               r => r.gram,
+      has:                r => r.has,
+      unit_price_usd:     r => r.unit_price_usd,
+      discount_usd:       r => r.discount_usd,
+      value_no_vat_usd:   r => r.value_no_vat_usd,
+      vat_usd:            r => r.vat_usd,
       value_with_vat_usd: r => r.value_with_vat_usd,
-      docs_count: r => r.docs_count,
+      docs_count:         r => r.docs_count,
+      // Produkt fusha — preferoj produktin aktual (map), fallback te rreshti.
+      nr:                 (r, p) => productNo(p?.id || r.product_id),
+      last_purchase_date: (r, p) => p?.last_purchase_date || '',
+      barcode:            (r, p) => p?.barcode || r.barcode || '',
+      name:               (r, p) => p?.name || r.name || '',
+      category:           (r, p) => p?.category || r.category || '',
+      brand:              (r, p) => p?.brand || '',
+      sku:                (r, p) => p?.sku || r.sku || '',
+      stock:              (_, p) => p?.stock ?? 0,
+      min_stock:          (_, p) => p?.min_stock ?? 5,
+      prod_gram:          (_, p) => p?.gram ?? 0,
+      kodi:               (_, p) => p?.kodi || '',
+      has_gram:           (_, p) => p?.has_gram ?? 0,
+      has_rate:           (_, p) => p?.has_rate ?? 0,
+      cost_price:         (_, p) => p?.cost_price ?? 0,
+      multiplier:         (_, p) => p?.multiplier ?? 0,
+      sell_price_has:     (_, p) => {
+        const hg = parseFloat(p?.has_gram) || 0
+        const m  = parseFloat(p?.multiplier) || 0
+        return hg > 0 && m > 0 ? +(hg * m).toFixed(2) : 0
+      },
+      sell_rate:          (_, p) => p?.sell_rate ?? 0,
+      purchase_price_no_vat: (_, p) => p?.purchase_price_no_vat ?? 0,
+      vat_rate:           (_, p) => p?.vat_rate ?? 0,
+      sell_price:         (_, p) => p?.sell_price ?? 0,
+      profit_pct:         (_, p) => {
+        const c = parseFloat(p?.cost_price) || 0
+        const s = parseFloat(p?.sell_price) || 0
+        return c > 0 ? +(((s - c) / c) * 100).toFixed(2) : 0
+      },
+      margin_pct:         (_, p) => {
+        const c = parseFloat(p?.cost_price) || 0
+        const s = parseFloat(p?.sell_price) || 0
+        return s > 0 ? +(((s - c) / s) * 100).toFixed(2) : 0
+      },
+      promo:              (_, p) => p?.is_promotion ? 'Po' : '',
+      promo_pct:          (_, p) => p?.is_promotion ? (p?.promo_discount_pct || 0) : '',
     }
-    const out = rows.map(r => Object.fromEntries(active.map(f => [f.label, getters[f.key](r)])))
+    const out = rows.map(r => {
+      const p = productMap.get(r.product_id)
+      return Object.fromEntries(active.map(f => [f.label, getters[f.key](r, p)]))
+    })
     if (totals) {
       const totalRow = Object.fromEntries(active.map(f => {
-        if (f.key === 'name')               return [f.label, 'TOTALI']
+        if (f.key === 'name' || f.key === 'barcode') return [f.label, f.key === 'name' ? 'TOTALI' : '']
         if (f.key === 'qty')                return [f.label, totals.qty]
+        if (f.key === 'gram')               return [f.label, totals.gram]
+        if (f.key === 'has')                return [f.label, totals.has]
         if (f.key === 'discount_usd')       return [f.label, totals.discount_usd]
         if (f.key === 'value_no_vat_usd')   return [f.label, totals.value_no_vat_usd]
         if (f.key === 'vat_usd')            return [f.label, totals.vat_usd]
@@ -300,8 +385,8 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
             Burimet: Fatura Blerje + Magazina Hyrje · Të gjitha vlerat janë në USD ($) (Magazina Hyrje është pa TVSH)
           </p>
         </div>
-        <button onClick={() => setShowExport(true)} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
-          📥 Eksporto Excel
+        <button onClick={() => setShowExport(true)} disabled={!rows.length} className="btn-secondary flex-shrink-0 disabled:opacity-40">
+          ⬇️ Export
         </button>
       </div>
 
@@ -367,6 +452,8 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Artikulli</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Kategoria</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Sasia</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 uppercase" title="Pesha totale (gram) e blerë">Gram</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold bg-yellow-50 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 uppercase" title="Pesha e florit të pastër (gram HAS)">Has</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Çm. Blerje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Zbritje</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Vlera pa TVSH</th>
@@ -383,6 +470,12 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
                     <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{r.category || '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
                       {fmtQty(r.qty)} <span className="text-[10px] text-slate-400 dark:text-slate-500">{r.unit}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-900/10 text-amber-800 dark:text-amber-200 font-semibold">
+                      {r.gram > 0 ? `${r.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}gr` : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
+                      {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.unit_price_usd)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.discount_usd > 0.005 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
@@ -408,6 +501,12 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
                   <tr className="font-bold text-xs">
                     <td colSpan={3} className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 uppercase tracking-wide">TOTALI ($):</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(totals.qty)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200">
+                      {(totals.gram || 0) > 0.0005 ? `${totals.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}gr` : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200">
+                      {(totals.has || 0) > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                    </td>
                     <td></td>
                     <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
                       {totals.discount_usd > 0.005 ? `-${fmt(totals.discount_usd)}` : '—'}

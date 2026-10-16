@@ -688,7 +688,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                   )}
                   {showGram && (
                     <td className="px-4 py-3 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
-                      {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                      {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                     </td>
                   )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-200">
@@ -737,7 +737,7 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                 )}
                 {showGram && (
                   <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-base">
-                    {totals.has > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                    {totals.has > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                   </td>
                 )}
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(totals.grossUsd)}</td>
@@ -1534,10 +1534,10 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   }, [hasRate, items.length])
 
   // Blerje Flori — llogarit auto vetëm çmimin e shitjes BAZË (pa promo):
-  //   sell_price = has_gram × multiplier × kursi_shitje × (1 + tvsh/100)
-  //                 (sell_rate — per rresht; fallback te has_rate)
-  // Promo-ja NUK përfshihet këtu — ruhet si pct i veçantë dhe aplikohet nga
-  // Produkte Promocion / FaturaShitje; përndryshe do kishim zbritje dyfishe.
+  //   sell_price = has_gram × multiplier × sell_rate × (1 + tvsh/100)
+  // Sell_rate vendoset VETËM manualisht nga user-i — pa fallback te has_rate.
+  // Nëse user-i s'ka vendosur sell_rate, sell_price NUK rillogaritet (lihet
+  // bosh ose siç është). Promo-ja NUK përfshihet këtu.
   useEffect(() => {
     if (forcedCategory !== 'flori') return
     setItems(prev => {
@@ -1545,13 +1545,11 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
       const next = prev.map(it => {
         const hg  = n(it.has_gram)
         const mul = n(it.multiplier)
-        const hr  = n(it.has_rate)
         const sr  = n(it.sell_rate)
         const vat = n(it.vat_rate) || 0
         if (hg <= 0 || mul <= 0) return it
-        const sellR   = sr > 0 ? sr : hr
-        if (sellR <= 0) return it
-        const newSell = +(hg * mul * sellR * (1 + vat / 100)).toFixed(2)
+        if (sr <= 0) return it   // user-i NUK ka vendosur Kursi Shitje → mos auto-llogarit
+        const newSell = +(hg * mul * sr * (1 + vat / 100)).toFixed(2)
         if (Math.abs(newSell - n(it.sell_price)) < 0.005) return it
         changed = true
         return { ...it, sell_price: newSell }

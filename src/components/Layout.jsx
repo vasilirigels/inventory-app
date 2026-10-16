@@ -3,6 +3,7 @@ import { clearSession } from '../lib/auth.js'
 import { useUnreadCommentsCount } from '../lib/unreadComments.js'
 import { useTheme } from '../lib/theme.js'
 import CommentToast from './CommentToast.jsx'
+import ChangePasswordModal from './ChangePasswordModal.jsx'
 
 // Faqet që role='sales' mund të shohë (veprimet ditore + raportet ditore).
 const SALES_ALLOWED_PAGES = new Set([
@@ -189,6 +190,8 @@ export default function Layout({
 }) {
   const isSales = user?.role === 'sales'
   const isViewer = user?.role === 'viewer'
+  const isAdmin = user?.role === 'admin'
+  const [showChangePw, setShowChangePw] = useState(false)
   // Kufi 30 ditë për shitësin — date navi te header s'lejon më prapa se kaq,
   // dhe butoni "‹" bllokohet kur data është në minimum.
   const salesMinDate = (() => {
@@ -372,13 +375,24 @@ export default function Layout({
                   {user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Vetëm shikim' : 'Shitës'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => { clearSession(); window.location.reload() }}
-                className="text-[10px] text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md font-medium
-                           dark:text-slate-400 dark:hover:text-white dark:bg-slate-800 dark:hover:bg-slate-700"
-                title="Dil"
-              >Dil</button>
+              <div className="flex items-center gap-1">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowChangePw(true)}
+                    className="text-[10px] text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-md font-medium
+                               dark:text-indigo-400 dark:hover:text-white dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50"
+                    title="Ndrysho fjalëkalimin"
+                  >🔑</button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { clearSession(); window.location.reload() }}
+                  className="text-[10px] text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md font-medium
+                             dark:text-slate-400 dark:hover:text-white dark:bg-slate-800 dark:hover:bg-slate-700"
+                  title="Dil"
+                >Dil</button>
+              </div>
             </div>
           )}
           <div className="flex items-center gap-2">
@@ -527,6 +541,13 @@ export default function Layout({
           {children}
         </main>
       </div>
+
+      {showChangePw && (
+        <ChangePasswordModal
+          currentUser={user}
+          onClose={() => setShowChangePw(false)}
+        />
+      )}
     </div>
   )
 }

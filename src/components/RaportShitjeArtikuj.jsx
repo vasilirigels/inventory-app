@@ -3,15 +3,39 @@ import { loadXLSX } from '../lib/xlsx.js'
 import DateRangeFilter from './DateRangeFilter.jsx'
 import ExportFieldsModal from './ExportFieldsModal.jsx'
 
+// Fushat e eksportit — renditja ndjek Produkte Inventar (barkod → emër → …),
+// me metrikat e raportit (qty/has/vlerat e shitjes) në fund.
 const SALES_EXPORT_FIELDS = [
+  // Fushat e produktit (renditja si te Produkte Inventar export)
+  { key: 'nr',             label: 'Nr' },
+  { key: 'last_purchase_date', label: 'Data Blerje' },
+  { key: 'barcode',        label: 'Barkodi' },
+  { key: 'name',           label: 'Pershkrimi' },
+  { key: 'category',       label: 'Kategoria' },
+  { key: 'material',       label: 'Materiali' },
+  { key: 'brand',          label: 'Brendi' },
+  { key: 'sku',            label: 'SKU' },
+  { key: 'stock',          label: 'Sasia (stock)' },
+  { key: 'min_stock',      label: 'Stok Minimal' },
+  { key: 'prod_gram',      label: 'Gram (produkt)' },
+  { key: 'kodi',           label: 'Kodi (flori)' },
+  { key: 'has_gram',       label: 'Cmim Blerje Has' },
+  { key: 'has_rate',       label: 'Kursi Blerje' },
+  { key: 'cost_price',     label: 'Cmim Kosto ($)' },
+  { key: 'multiplier',     label: 'Shumëzues' },
+  { key: 'sell_price_has', label: 'Cmim Shitje Has' },
+  { key: 'sell_rate',      label: 'Kursi Shitje' },
+  { key: 'purchase_price_no_vat', label: 'Cmimi PA' },
+  { key: 'vat_rate',       label: 'TVSH %' },
+  { key: 'sell_price',     label: 'Cmim Shitje (€)' },
+  { key: 'profit_pct',     label: 'Fitim %' },
+  { key: 'margin_pct',     label: 'Marzh %' },
+  { key: 'promo',          label: 'Në promocion' },
+  { key: 'promo_pct',      label: 'Zbritje Promo %' },
+  // Metrikat e raportit (në fund)
   { key: 'source',             label: 'Lloji' },
-  { key: 'barcode',            label: 'Barkodi' },
-  { key: 'sku',                label: 'SKU' },
-  { key: 'name',               label: 'Artikulli' },
-  { key: 'category',           label: 'Kategoria' },
-  { key: 'material',           label: 'Materiali' },
-  { key: 'qty',                label: 'Sasia' },
-  { key: 'has',                label: 'Has (gr)' },
+  { key: 'qty',                label: 'Sasia (shitur)' },
+  { key: 'has',                label: 'Has (shitur)' },
   { key: 'unit_price_lek',     label: 'Çm. Shitje (LEK)' },
   { key: 'discount_lek',       label: 'Zbritje (LEK)' },
   { key: 'value_no_vat_lek',   label: 'Vlera pa TVSH (LEK)' },
@@ -19,8 +43,8 @@ const SALES_EXPORT_FIELDS = [
   { key: 'value_with_vat_lek', label: 'Vlera me TVSH (LEK)' },
   { key: 'docs_count',         label: 'Nr. Faturash' },
 ]
-const SALES_EXPORT_LS_KEY = 'sales_report_export_fields_v1'
-const SALES_DEFAULT_KEYS = SALES_EXPORT_FIELDS.map(f => f.key)
+const SALES_EXPORT_LS_KEY = 'sales_report_export_fields_v3'
+const SALES_DEFAULT_KEYS = ['source', 'barcode', 'name', 'category', 'qty', 'has', 'unit_price_lek', 'value_no_vat_lek', 'value_with_vat_lek']
 
 function n(v) { return parseFloat(v) || 0 }
 function fmt(v) {
@@ -207,6 +231,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
   const [docsRow, setDocsRow] = useState(null)
   const [showExport, setShowExport] = useState(false)
   const [viewMode, setViewMode] = useState('detailed')  // 'aggregated' | 'detailed'
+  const productNo = (id) => id ? `P${String(id).padStart(5, '0')}` : ''
 
   const load = useCallback(async () => {
     if (!from || !to) return
@@ -249,18 +274,28 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
   const runExport = async (selectedKeys) => {
     const XLSX = await loadXLSX()
     const matLabel = (m) => m === 'flori' ? 'Flori' : m === 'diamant' ? 'Diamant' : ''
+    // Ngarko produktet freskët para eksportit — që getter-at e fushave të
+    // produktit (has_gram, cost_price, brand, etj.) të kenë vlerat aktuale.
+    let productMap = new Map()
+    try {
+      const prods = await fetch('/api/products').then(r => r.json())
+      if (Array.isArray(prods)) productMap = new Map(prods.map(p => [p.id, p]))
+    } catch (_) { /* fallback: fushat e produktit do dalin bosh */ }
     const FIELD_WIDTHS = {
-      source: 12, barcode: 14, sku: 12, name: 32, category: 14, material: 10,
-      qty: 10, has: 10, unit_price_lek: 14, discount_lek: 14, value_no_vat_lek: 16,
-      vat_lek: 14, value_with_vat_lek: 16, docs_count: 10,
+      // Raport metrika
+      source: 12, qty: 10, has: 10, unit_price_lek: 14, discount_lek: 14,
+      value_no_vat_lek: 16, vat_lek: 14, value_with_vat_lek: 16, docs_count: 10,
+      // Produkt fusha (si në Inventar export)
+      nr: 10, last_purchase_date: 12, barcode: 14, name: 32, category: 14,
+      material: 10, brand: 14, sku: 12, stock: 10, min_stock: 12, prod_gram: 10,
+      kodi: 8, has_gram: 14, has_rate: 14, cost_price: 14, multiplier: 12,
+      sell_price_has: 14, sell_rate: 14, purchase_price_no_vat: 12,
+      vat_rate: 8, sell_price: 16, profit_pct: 10, margin_pct: 10,
+      promo: 12, promo_pct: 14,
     }
     const getters = {
+      // Raport
       source: r => r.source === 'marketing' ? 'Marketing' : 'Shitje',
-      barcode: r => r.barcode || '',
-      sku: r => r.sku || '',
-      name: r => r.name || '',
-      category: r => r.category || '',
-      material: r => matLabel(r.material),
       qty: r => r.qty,
       has: r => r.has || 0,
       unit_price_lek: r => r.unit_price_lek,
@@ -269,10 +304,51 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
       vat_lek: r => r.vat_lek,
       value_with_vat_lek: r => r.value_with_vat_lek,
       docs_count: r => r.docs_count,
+      // Produkt (nga map; fallback te rreshti)
+      nr:                 (r, p) => productNo(p?.id || r.product_id),
+      last_purchase_date: (r, p) => p?.last_purchase_date || '',
+      barcode:            (r, p) => p?.barcode || r.barcode || '',
+      name:               (r, p) => p?.name || r.name || '',
+      category:           (r, p) => p?.category || r.category || '',
+      material:           (r, p) => matLabel(p?.material || r.material),
+      brand:              (r, p) => p?.brand || '',
+      sku:                (r, p) => p?.sku || r.sku || '',
+      stock:              (_, p) => p?.stock ?? 0,
+      min_stock:          (_, p) => p?.min_stock ?? 5,
+      prod_gram:          (_, p) => p?.gram ?? 0,
+      kodi:               (_, p) => p?.kodi || '',
+      has_gram:           (_, p) => p?.has_gram ?? 0,
+      has_rate:           (_, p) => p?.has_rate ?? 0,
+      cost_price:         (_, p) => p?.cost_price ?? 0,
+      multiplier:         (_, p) => p?.multiplier ?? 0,
+      sell_price_has:     (_, p) => {
+        const hg = parseFloat(p?.has_gram) || 0
+        const m  = parseFloat(p?.multiplier) || 0
+        return hg > 0 && m > 0 ? +(hg * m).toFixed(2) : 0
+      },
+      sell_rate:          (_, p) => p?.sell_rate ?? 0,
+      purchase_price_no_vat: (_, p) => p?.purchase_price_no_vat ?? 0,
+      vat_rate:           (_, p) => p?.vat_rate ?? 0,
+      sell_price:         (_, p) => p?.sell_price ?? 0,
+      profit_pct:         (_, p) => {
+        const c = parseFloat(p?.cost_price) || 0
+        const s = parseFloat(p?.sell_price) || 0
+        return c > 0 ? +(((s - c) / c) * 100).toFixed(2) : 0
+      },
+      margin_pct:         (_, p) => {
+        const c = parseFloat(p?.cost_price) || 0
+        const s = parseFloat(p?.sell_price) || 0
+        return s > 0 ? +(((s - c) / s) * 100).toFixed(2) : 0
+      },
+      promo:              (_, p) => p?.is_promotion ? 'Po' : '',
+      promo_pct:          (_, p) => p?.is_promotion ? (p?.promo_discount_pct || 0) : '',
     }
     const active = SALES_EXPORT_FIELDS.filter(f => selectedKeys.includes(f.key))
     if (active.length === 0) return
-    const out = rows.map(r => Object.fromEntries(active.map(f => [f.label, getters[f.key](r)])))
+    const out = rows.map(r => {
+      const p = productMap.get(r.product_id)
+      return Object.fromEntries(active.map(f => [f.label, getters[f.key](r, p)]))
+    })
 
     // Rreshtat NËN-TOTAL / TOTAL — ndërtohen në mënyrë gjenerike për fushat
     // aktive. Vendos emrin te 'name' nëse është aktiv; përndryshe te fusha e
@@ -346,8 +422,8 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
             Burimi: Fatura Shitje · Kolonat për çdo artikull janë në LEK (të konvertuara me kursin e çdo fature) · Totalet finale sipas monedhës origjinale
           </p>
         </div>
-        <button onClick={() => setShowExport(true)} disabled={!rows.length} className="btn-secondary disabled:opacity-40">
-          📥 Eksporto Excel
+        <button onClick={() => setShowExport(true)} disabled={!rows.length} className="btn-secondary flex-shrink-0 disabled:opacity-40">
+          ⬇️ Export
         </button>
       </div>
 
@@ -514,7 +590,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                           {r.gram > 0 ? `${r.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
-                          {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                          {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                           {fmt(r.unit_price)}
@@ -562,7 +638,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                             {t.gram > 0 ? `${t.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
-                            {t.has > 0 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                            {t.has > 0 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                           </td>
                           <td></td>
                           <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">
@@ -629,7 +705,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       {fmtQty(r.qty)} <span className="text-[10px] text-slate-400 dark:text-slate-500">{r.unit}</span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">
-                      {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                      {r.has > 0 ? r.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(r.unit_price_lek)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.discount_lek > 0.005 ? 'text-orange-600' : 'text-slate-400 dark:text-slate-500'}`}>
@@ -667,7 +743,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       <td colSpan={5} className="px-3 py-1.5 text-right text-amber-800 dark:text-amber-200 font-semibold">🟡 Flori:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-amber-900">{fmtQty(totalsByMaterial.flori.qty)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 font-semibold">
-                        {(totalsByMaterial.flori.has || 0) > 0.0005 ? totalsByMaterial.flori.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                        {(totalsByMaterial.flori.has || 0) > 0.0005 ? totalsByMaterial.flori.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                       </td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-amber-800 dark:text-amber-200">
@@ -684,7 +760,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       <td colSpan={5} className="px-3 py-1.5 text-right text-sky-800 font-semibold">💎 Diamant:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-sky-900">{fmtQty(totalsByMaterial.diamant.qty)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 font-semibold">
-                        {(totalsByMaterial.diamant.has || 0) > 0.0005 ? totalsByMaterial.diamant.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                        {(totalsByMaterial.diamant.has || 0) > 0.0005 ? totalsByMaterial.diamant.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                       </td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-sky-800">
@@ -701,7 +777,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                       <td colSpan={5} className="px-3 py-1.5 text-right text-slate-600 dark:text-slate-300 font-semibold">— Pa material:</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(totalsByMaterial.tjeter.qty)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 font-semibold">
-                        {(totalsByMaterial.tjeter.has || 0) > 0.0005 ? totalsByMaterial.tjeter.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                        {(totalsByMaterial.tjeter.has || 0) > 0.0005 ? totalsByMaterial.tjeter.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                       </td>
                       <td></td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
@@ -717,7 +793,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                     <td colSpan={5} className="px-3 py-2 text-right text-slate-500 dark:text-slate-400 uppercase tracking-wide">TOTALI SHITJE në LEK (kombinuar):</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(totals.qty)}</td>
                     <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200">
-                      {(totals.has || 0) > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                      {(totals.has || 0) > 0.0005 ? totals.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                     </td>
                     <td></td>
                     <td className="px-3 py-2 text-right tabular-nums text-orange-600">
@@ -735,7 +811,7 @@ export default function RaportShitjeArtikuj({ onNavigate }) {
                         <td colSpan={5} className="px-3 py-2 text-right text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">💵 TOTAL SHITJE ({cur}):</td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-900 dark:text-white">{fmtQty(t.qty)}</td>
                         <td className="px-3 py-2 text-right tabular-nums bg-yellow-50/60 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200">
-                          {(t.has || 0) > 0.0005 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                          {(t.has || 0) > 0.0005 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                         </td>
                         <td></td>
                         <td className="px-3 py-2 text-right tabular-nums text-orange-700 dark:text-orange-300">

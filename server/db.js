@@ -897,6 +897,30 @@ const MIGRATIONS = [
         AND active != CASE WHEN NEW.stock > 0 THEN 1 ELSE 0 END;
    END`,
 
+  // Audit log për ndryshime stock-u — regjistron OLD.stock → NEW.stock të çdo
+  // produkti. Pa qëllim parandalimi; thjesht evidence për diagnozë kur ndodhin
+  // incidente stale-state (shih v1.2.71-73). Rezervuar një tabelë e thjeshtë
+  // pa indekse ekstra — INSERT çdo rresht është operacion i vetëm.
+  `CREATE TABLE IF NOT EXISTS stock_audit (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     product_id INTEGER NOT NULL,
+     old_stock INTEGER,
+     new_stock INTEGER,
+     changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_audit_product_time
+     ON stock_audit (product_id, changed_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_audit_time
+     ON stock_audit (changed_at DESC)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_stock_audit
+     AFTER UPDATE OF stock ON products
+     FOR EACH ROW
+     WHEN NEW.stock != OLD.stock
+   BEGIN
+     INSERT INTO stock_audit (product_id, old_stock, new_stock)
+     VALUES (NEW.id, OLD.stock, NEW.stock);
+   END`,
+
   `CREATE TABLE IF NOT EXISTS marketing_contract_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contract_id INTEGER NOT NULL,

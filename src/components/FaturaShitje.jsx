@@ -1195,7 +1195,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                     {n(inv.total_gram) > 0 ? `${n(inv.total_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
-                    {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : <span className="text-slate-300">—</span>}
+                    {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
                     {fmt(n(inv.subtotal_no_vat) + n(inv.total_discount))}
@@ -1344,7 +1344,7 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
                       {(t.gram || 0) > 0.0005 ? `${(t.gram || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}gr` : '—'}
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-base">
-                      {(t.has || 0) > 0.0005 ? (t.has || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—'}
+                      {(t.has || 0) > 0.0005 ? (t.has || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.gross)}</td>
                     <td className="px-2 py-2 text-right tabular-nums font-extrabold text-orange-600">
