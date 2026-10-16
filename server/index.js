@@ -1848,11 +1848,15 @@ app.get('/api/products', async (req, res) => {
     // Memory cache 30s: endpoint më hot i sistemit, thirret nga picker-i i
     // produkteve në çdo faturë + Products list + Inventory + shumë vende të
     // tjera. Cache invalidohet nga çdo POST/PUT/DELETE që prek 'products'.
-    const rows = await cached('products:all', 30_000, () => queryAll(
-      `SELECT * FROM products
-        WHERE active = 1
-        ORDER BY category, name`
-    ));
+    // ?all=1 → kthen TË GJITHA produktet (edhe active=0), përdoret nga eksporti
+    // i raporteve që duhet të lidhë rreshtat historikë me produktet e tyre,
+    // edhe nëse produkti u shit dhe u çaktivizua pas atij veprimi.
+    const all = String(req.query?.all || '') === '1';
+    const cacheKey = all ? 'products:all+inactive' : 'products:all';
+    const sql = all
+      ? `SELECT * FROM products ORDER BY category, name`
+      : `SELECT * FROM products WHERE active = 1 ORDER BY category, name`;
+    const rows = await cached(cacheKey, 30_000, () => queryAll(sql));
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

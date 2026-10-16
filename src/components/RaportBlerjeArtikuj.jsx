@@ -279,11 +279,12 @@ export default function RaportBlerjeArtikuj({ onNavigate }) {
 
   const runExport = async (selectedKeys) => {
     const XLSX = await loadXLSX()
-    // Ngarko produktet freskët para eksportit — që getter-at e fushave të
-    // produktit (has_gram, cost_price, brand, etj.) të kenë vlerat aktuale.
+    // Ngarko produktet freskët (edhe inactive=0) para eksportit — raporti i
+    // blerjes mund të ketë rreshta për produkte që janë shitur/çaktivizuar më
+    // vonë. ?all=1 i përfshin ata që productMap t'i kapë.
     let productMap = new Map()
     try {
-      const prods = await fetch('/api/products').then(r => r.json())
+      const prods = await fetch('/api/products?all=1').then(r => r.json())
       if (Array.isArray(prods)) productMap = new Map(prods.map(p => [p.id, p]))
     } catch (_) { /* fallback: fushat e produktit do dalin bosh */ }
     const FIELD_WIDTHS = {

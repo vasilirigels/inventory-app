@@ -2421,7 +2421,7 @@ export default function Products() {
             </div>
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
               <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Gramatura</p>
-              <p className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{fmtNum(summary.totalGram)} <span className="text-xs font-normal text-slate-500">gr</span></p>
+              <p className="text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{(summary.totalGram || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-slate-500">gr</span></p>
             </div>
             <div className="p-3 rounded-xl bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
               <p className="text-[10px] text-yellow-700 dark:text-yellow-300 uppercase font-semibold">Has</p>
@@ -2472,7 +2472,7 @@ export default function Products() {
                             </td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{v.count}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmtNum(v.stock)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{v.gram > 0 ? fmtNum(v.gram) : '—'}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{v.gram > 0 ? v.gram.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200 font-semibold">{v.has > 0 ? v.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-300">{v.cost > 0 ? fmtUsd(v.cost) : '—'}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{v.sell > 0 ? fmtEur(v.sell) : '—'}</td>
@@ -2486,7 +2486,7 @@ export default function Products() {
                       <td className="px-3 py-2 text-slate-700 dark:text-slate-200 uppercase">Totali</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{summary.count}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalStock)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{fmtNum(summary.totalGram)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">{(summary.totalGram || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right tabular-nums bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200">{(summary.totalHas || 0).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-blue-800 dark:text-blue-200">{fmtUsd(summary.totalCostValue)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-800 dark:text-emerald-200">{fmtEur(summary.totalSellValue)}</td>
