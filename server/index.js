@@ -3575,8 +3575,13 @@ app.get('/api/client-debts', async (req, res) => {
       sql += ' AND (i.customer_name LIKE ? OR i.customer_nipt LIKE ?)';
       params.push(`%${q}%`, `%${q}%`);
     }
-    if (from) { sql += ' AND i.date >= ?'; params.push(from); }
-    if (to)   { sql += ' AND i.date <= ?'; params.push(to); }
+    // Historik i shlyerave: filtri i periudhës aplikohet mbi datën e pagesës
+    // së fundit (p.date), jo mbi datën e faturës. Përndryshe faturat që janë
+    // mbyllur ditë/javë/muaj më vonë nuk shfaqen kur user-i filtron sipas
+    // datës së shlyerjes. Lista e papaguarave vazhdon të filtrohet mbi i.date.
+    const dateCol = onlyPaid ? 'p.date' : 'i.date';
+    if (from) { sql += ` AND ${dateCol} >= ?`; params.push(from); }
+    if (to)   { sql += ` AND ${dateCol} <= ?`; params.push(to); }
     sql += ' ORDER BY i.date DESC, i.id DESC';
     res.json(await queryAll(sql, params));
   } catch (err) { res.status(500).json({ error: err.message }); }
