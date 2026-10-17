@@ -5801,6 +5801,14 @@ app.get('/api/purchase-invoices/:id/payments', async (req, res) => {
     const { id } = req.params;
     const inv = await queryOne('SELECT * FROM purchase_invoices WHERE id = ?', [id]);
     if (!inv) return res.status(404).json({ error: 'not found' });
+    // Total HAS i faturës (SUM(has_gram × qty)) — nevojitet për të llogaritur
+    // kursin HAS të fiksuar nga fatura dhe HAS e paguar/mbetur proporcionalisht.
+    const hasRow = await queryOne(
+      `SELECT COALESCE(SUM(COALESCE(has_gram, 0) * COALESCE(qty, 0)), 0) AS total_has_gram
+         FROM purchase_items WHERE purchase_id = ?`,
+      [id]
+    );
+    const invoiceWithHas = { ...inv, total_has_gram: hasRow?.total_has_gram || 0 };
     const payments = await queryAll(
       'SELECT * FROM purchase_payments WHERE purchase_id = ? ORDER BY date ASC, id ASC',
       [id]
@@ -5808,7 +5816,7 @@ app.get('/api/purchase-invoices/:id/payments', async (req, res) => {
     const sumExtra = payments.reduce((s, p) => s + (p.amount || 0), 0);
     const initialPaid = +Math.max(0, (inv.amount_paid || 0) - sumExtra).toFixed(2);
     res.json({
-      invoice: inv,
+      invoice: invoiceWithHas,
       payments,
       initial_paid: initialPaid,
       initial_date: inv.date,

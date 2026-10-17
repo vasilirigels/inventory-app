@@ -169,6 +169,18 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     return +(due * invoiceRate / payRate).toFixed(2)
   })()
 
+  // HAS — kursi fiksohet nga fatura: hasRate = total / has (çmim për gram HAS
+  // në monedhën e faturës). Çdo pagesë zbret HAS proporcionalisht me pjesën
+  // monetare të paguar; nuk nevojitet asnjë input shtesë nga user-i.
+  const invHas    = n(inv.total_has_gram)
+  const hasRate   = invHas > 0 ? n(inv.total_with_vat) / invHas : 0
+  const invTotalM = n(inv.total_with_vat)
+  const hasPaid   = invTotalM > 0 && invHas > 0 ? invHas * n(inv.amount_paid) / invTotalM : 0
+  const hasDue    = Math.max(0, invHas - hasPaid)
+  const amtInInvCcy = parseFloat(amount) > 0 ? toInvoiceCcy(amount) : 0
+  const hasDeductPreview = invTotalM > 0 && invHas > 0 ? invHas * amtInInvCcy / invTotalM : 0
+  const fmtHas = (v) => v > 0.005 ? v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'
+
   const sendPayment = async (payload) => {
     setErr('')
     setSaving(true)
@@ -281,6 +293,26 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
             </div>
           </div>
 
+          {invHas > 0.005 && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="card py-3 text-center bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200">
+                <p className="text-[10px] text-yellow-700 dark:text-yellow-300 uppercase font-semibold">Has Totali (gr)</p>
+                <p className="text-xl font-bold text-yellow-800 dark:text-yellow-200 tabular-nums">{fmtHas(invHas)}</p>
+                <p className="text-[9px] text-yellow-600 dark:text-yellow-400 italic mt-0.5">kurs: {fmtHas(hasRate)} {inv.currency}/g</p>
+              </div>
+              <div className="card py-3 text-center bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200">
+                <p className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase font-semibold">Has Paguar (gr)</p>
+                <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmtHas(hasPaid)}</p>
+              </div>
+              <div className={`card py-3 text-center ${hasDue <= 0.005 ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200' : 'bg-red-50 dark:bg-red-900/30 border-red-200'}`}>
+                <p className={`text-[10px] uppercase font-semibold ${hasDue <= 0.005 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>Has Borxh (gr)</p>
+                <p className={`text-xl font-bold tabular-nums ${hasDue <= 0.005 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600'}`}>
+                  {hasDue <= 0.005 ? '✓ Mbyllur' : fmtHas(hasDue)}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div>
             <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Pagesat e Bëra</h4>
             <div className="space-y-2">
@@ -294,6 +326,11 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                   <div className="text-right">
                     <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Vlera</div>
                     <div className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(data.initial_paid)}</div>
+                    {invHas > 0.005 && invTotalM > 0 && (
+                      <div className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
+                        {fmtHas(invHas * data.initial_paid / invTotalM)} g HAS
+                      </div>
+                    )}
                     <div className="mt-1">{methodBadge(inv.payment_method)}</div>
                   </div>
                 </div>
@@ -309,6 +346,11 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                     <div>
                       <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Vlera</div>
                       <div className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(p.amount)}</div>
+                      {invHas > 0.005 && invTotalM > 0 && (
+                        <div className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
+                          {fmtHas(invHas * n(p.amount) / invTotalM)} g HAS
+                        </div>
+                      )}
                       <div className="mt-1">{methodBadge(p.payment_method)}</div>
                     </div>
                     <button onClick={() => removePayment(p.id)}
@@ -372,6 +414,11 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                   {payCurrency !== inv.currency && amount && payRate && (
                     <p className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">
                       = {fmt(toInvoiceCcy(amount))} {inv.currency}
+                    </p>
+                  )}
+                  {invHas > 0.005 && hasDeductPreview > 0.005 && (
+                    <p className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
+                      → zbret {fmtHas(hasDeductPreview)} g HAS (mbeten {fmtHas(Math.max(0, hasDue - hasDeductPreview))})
                     </p>
                   )}
                 </div>
@@ -523,14 +570,23 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
   }, { tot: 0, paid: 0, due: 0, totLek: 0, paidLek: 0, dueLek: 0 })
 
   // Totalet e grupuara sipas monedhës origjinale të faturës — pa konvertim në LEK.
+  // Has Paguar / Has Borxh janë proporcional me pjesën monetare të paguar/mbetur
+  // të faturës (kursi = total_fatura / total_has, i fiksuar nga vetë fatura).
   const totalsByCur = invoices.reduce((acc, inv) => {
     const cur = inv.currency || 'LEK'
-    if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0, has: 0 }
-    const due = n(inv.amount_due != null ? inv.amount_due : (inv.total_with_vat - inv.amount_paid))
-    acc[cur].tot  += n(inv.total_with_vat)
-    acc[cur].paid += n(inv.amount_paid)
-    acc[cur].due  += due
-    acc[cur].has  += n(inv.total_has_gram)
+    if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0, has: 0, hasPaid: 0, hasDue: 0 }
+    const total = n(inv.total_with_vat)
+    const paid  = n(inv.amount_paid)
+    const due   = n(inv.amount_due != null ? inv.amount_due : (total - paid))
+    const has   = n(inv.total_has_gram)
+    const ratioPaid = total > 0 ? paid / total : 0
+    const ratioDue  = total > 0 ? due  / total : 0
+    acc[cur].tot     += total
+    acc[cur].paid    += paid
+    acc[cur].due     += due
+    acc[cur].has     += has
+    acc[cur].hasPaid += has * ratioPaid
+    acc[cur].hasDue  += has * ratioDue
     return acc
   }, {})
   const currenciesInList = Object.keys(totalsByCur).sort()
@@ -610,7 +666,8 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
             </p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[1400px] text-sm">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data Fature</th>
@@ -618,6 +675,8 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesa</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Has Paguar</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300">Has Borxh</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Totali</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Paguar (Data)</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh</th>
@@ -628,7 +687,7 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
               {groupArr.map((g, gi) => (
                 <Fragment key={gi}>
                   <tr className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200">
-                    <td colSpan={9} className="px-4 py-2 font-bold text-blue-900">
+                    <td colSpan={11} className="px-4 py-2 font-bold text-blue-900">
                       🏭 {g.name || <span className="italic text-slate-500 dark:text-slate-400">— pa furnitor —</span>}
                       {g.nipt && <span className="ml-2 text-xs font-mono text-slate-600 dark:text-slate-300">({g.nipt})</span>}
                       <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">· {g.list.length} fatura</span>
@@ -657,9 +716,28 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                         </td>
                         <td className="px-4 py-2 text-center"><span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{inv.currency}</span></td>
                         <td className="px-4 py-2 text-center">{pmBadge}</td>
-                        <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
-                          {n(inv.total_has_gram) > 0 ? n(inv.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
-                        </td>
+                        {(() => {
+                          const invTotal = n(inv.total_with_vat)
+                          const invPaid  = n(inv.amount_paid)
+                          const invDue   = n(inv.amount_due != null ? inv.amount_due : (invTotal - invPaid))
+                          const invHas   = n(inv.total_has_gram)
+                          const hasPaid  = invTotal > 0 && invHas > 0 ? invHas * invPaid / invTotal : 0
+                          const hasDue   = invTotal > 0 && invHas > 0 ? invHas * invDue  / invTotal : 0
+                          const fmtHas   = (v) => v > 0.005 ? v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>
+                          return (
+                            <>
+                              <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                                {fmtHas(invHas)}
+                              </td>
+                              <td className="px-4 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
+                                {fmtHas(hasPaid)}
+                              </td>
+                              <td className="px-4 py-2 text-right tabular-nums font-bold bg-red-50/40 dark:bg-red-900/10 text-red-700 dark:text-red-300">
+                                {hasDue > 0.005 ? hasDue.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (invHas > 0.005 ? '✓' : <span className="text-slate-300">—</span>)}
+                              </td>
+                            </>
+                          )
+                        })()}
                         <td className="px-4 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
                           {fmt(inv.total_with_vat)}
                         </td>
@@ -699,6 +777,12 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100/60 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200">
                       {t.has > 0.005 ? t.has.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                     </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-emerald-100/60 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200">
+                      {t.hasPaid > 0.005 ? t.hasPaid.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-red-100/60 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+                      {t.hasDue > 0.005 ? t.hasDue.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (t.has > 0.005 ? '✓' : '—')}
+                    </td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold text-slate-800 dark:text-slate-100">{fmt(t.tot)}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(t.paid)}</td>
                     <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>
@@ -710,6 +794,7 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
               })}
             </tfoot>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -865,14 +950,16 @@ function SupplierPaymentsHistoryPanel({ supplier, onNavigate, refreshKey, dateRa
           <p className="text-slate-500 dark:text-slate-400">Asnjë pagesë e regjistruar për filtrat e zgjedhur.</p>
         </div>
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[1200px] text-sm">
           <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data e Faturës</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Furnitor</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Data e Pagesës</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shuma</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">Has Fatura</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Has Zbritur</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Mënyra</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Shënime</th>
@@ -902,6 +989,16 @@ function SupplierPaymentsHistoryPanel({ supplier, onNavigate, refreshKey, dateRa
                 <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
                   {n(r.total_has_gram) > 0 ? n(r.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
                 </td>
+                <td className="px-4 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
+                  {(() => {
+                    const invT = n(r.invoice_total)
+                    const invH = n(r.total_has_gram)
+                    const deducted = invT > 0 && invH > 0 ? invH * n(r.amount) / invT : 0
+                    return deducted > 0.005
+                      ? deducted.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : <span className="text-slate-300">—</span>
+                  })()}
+                </td>
                 <td className="px-4 py-2 text-center">
                   <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{r.currency || 'LEK'}</span>
                 </td>
@@ -929,11 +1026,12 @@ function SupplierPaymentsHistoryPanel({ supplier, onNavigate, refreshKey, dateRa
                   💱 TOTAL ({cur})
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(totalsByCur[cur])}</td>
-                <td colSpan={5}></td>
+                <td colSpan={6}></td>
               </tr>
             ))}
           </tfoot>
         </table>
+        </div>
       )}
       {editRow && (
         <EditPaymentModal
