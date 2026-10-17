@@ -5929,7 +5929,9 @@ app.get('/api/supplier-payments/history', async (req, res) => {
         pi.supplier_name AS supplier_name,
         pi.supplier_nipt AS supplier_nipt,
         pi.total_with_vat AS invoice_total,
-        pi.amount_paid AS invoice_paid
+        pi.amount_paid AS invoice_paid,
+        (SELECT COALESCE(SUM(COALESCE(pit.has_gram, 0) * COALESCE(pit.qty, 0)), 0)
+           FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS total_has_gram
       FROM purchase_payments p
       LEFT JOIN purchase_invoices pi ON pi.id = p.purchase_id
       ${whereP}
@@ -5963,7 +5965,9 @@ app.get('/api/supplier-payments/history', async (req, res) => {
         pi.supplier_name AS supplier_name,
         pi.supplier_nipt AS supplier_nipt,
         pi.total_with_vat AS invoice_total,
-        pi.amount_paid AS invoice_paid
+        pi.amount_paid AS invoice_paid,
+        (SELECT COALESCE(SUM(COALESCE(pit.has_gram, 0) * COALESCE(pit.qty, 0)), 0)
+           FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS total_has_gram
       FROM purchase_invoices pi
       WHERE ${condsI.join(' AND ')}
         AND (pi.amount_paid - COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE purchase_id = pi.id), 0)) > 0.005
@@ -5992,7 +5996,9 @@ app.get('/api/supplier-debts', async (req, res) => {
       SELECT pi.*,
         (SELECT date   FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_date,
         (SELECT amount FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
-        (SELECT COUNT(*) FROM purchase_payments WHERE purchase_id = pi.id) AS payment_count
+        (SELECT COUNT(*) FROM purchase_payments WHERE purchase_id = pi.id) AS payment_count,
+        (SELECT COALESCE(SUM(COALESCE(pit.has_gram, 0) * COALESCE(pit.qty, 0)), 0)
+           FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS total_has_gram
       FROM purchase_invoices pi
       WHERE COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0
         AND COALESCE(pi.type, 'purchase') = 'purchase'`;
