@@ -164,12 +164,29 @@ export default function ArkaDitore({ date, onNavigate }) {
   // në ato monedha (p.sh. cash që hyn nga jashtë sistemit).
   const inputCurs = CURS
 
+  // Neto: xhiro, bankë dhe POS zbresin automatikisht kthimet me bankë/POS.
+  // Returns_cash NUK zbritet këtu — mbetet si dalje e veçantë te daljet (është
+  // kesh real që del nga sirtari). Kjo mban Kesh nga Shitjet = Xhiro(neto) −
+  // Bankë(neto) − POS(neto) − Borxh identik me vlerën e backend-it.
+  const xhiroNet = Object.fromEntries(
+    CURS.map(c => [c, (data.xhiro_total?.[c] || 0) - (data.returns_bank?.[c] || 0) - (data.returns_pos?.[c] || 0)])
+  )
+  const paidBankNet = Object.fromEntries(
+    CURS.map(c => [c, (data.paid_bank?.[c] || 0) - (data.returns_bank?.[c] || 0)])
+  )
+  const paidPosNet = Object.fromEntries(
+    CURS.map(c => [c, (data.paid_pos?.[c] || 0) - (data.returns_pos?.[c] || 0)])
+  )
+  const nCredit = data.counts?.credit_notes || 0
+  const returnsBankPos = Object.fromEntries(
+    CURS.map(c => [c, (data.returns_bank?.[c] || 0) + (data.returns_pos?.[c] || 0)])
+  )
   const rows = [
     { label: 'Gjendje Fillestare (mbartje)',   src: 'opening_cash',      sign: '+', color: 'text-slate-700 dark:text-slate-200',   bg: 'bg-slate-50 dark:bg-slate-900',   detail: 'nga dita e mëparshme' },
-    { label: 'Xhiro Totale (Fatura Shitje)',   src: 'xhiro_total',       sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura` },
+    { label: 'Xhiro Totale (Fatura Shitje)',   values: xhiroNet,         sign: '+', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30', detail: `${data.counts.invoices} fatura${nCredit > 0 ? ` · neto pas ${nCredit} kthim(e) bankë/POS` : ''}` },
     { label: 'Marketingu Shitje',              src: 'marketing_in_kind',  sign: '+', color: 'text-pink-700 dark:text-pink-300', bg: 'bg-pink-50 dark:bg-pink-900/30', detail: `${data.counts?.marketing_in_kind || 0} produkte dhënë si marketing in-kind (vlera = kostoja për ditën)` },
-    { label: 'Pagesa me Bankë',                 src: 'paid_bank',         sign: '−', color: 'text-blue-700 dark:text-blue-300',    bg: 'bg-blue-50 dark:bg-blue-900/30',    detail: 'paid_bank' },
-    { label: 'Pagesa me POS',                   src: 'paid_pos',          sign: '−', color: 'text-indigo-700',  bg: 'bg-indigo-50 dark:bg-indigo-900/30',  detail: 'paid_pos' },
+    { label: 'Pagesa me Bankë',                 values: paidBankNet,     sign: '−', color: 'text-blue-700 dark:text-blue-300',    bg: 'bg-blue-50 dark:bg-blue-900/30',    detail: 'neto pas kthimeve me bankë' },
+    { label: 'Pagesa me POS',                   values: paidPosNet,      sign: '−', color: 'text-indigo-700',  bg: 'bg-indigo-50 dark:bg-indigo-900/30',  detail: 'neto pas kthimeve me POS' },
     { label: 'Borxh i Papaguar',                src: 'amount_due',        sign: '−', color: 'text-rose-700',    bg: 'bg-rose-50',    detail: 'mbetja e papaguar' },
     { label: 'Kesh nga Shitjet',                src: 'cash_from_sales',   sign: '=', color: 'text-emerald-800 dark:text-emerald-200', bg: 'bg-emerald-50/60', detail: 'Xhiro − Bankë − POS − Borxh (përfshin parapagimin nga borxhet)' },
     { label: 'Pagesë Borxhi',                   src: 'debt_repayments',   sign: '+', color: 'text-teal-700',    bg: 'bg-teal-50',    detail: `${data.counts.debt_repayments || 0} pagesa kesh nga fatura të vjetra (jo pjesë e xhiros)` },
@@ -177,7 +194,8 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Tërheqje nga Kasaforta',          src: 'safe_to_arka',      sign: '+', color: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-900/30', detail: `${data.counts?.safe_to_arka || 0} tërheqje me destinacion arkë` },
   ]
   const outRows = [
-    { label: 'Kthime Shitjesh (Kesh)',          src: 'returns_cash',      sign: '−', color: 'text-red-700 dark:text-red-300',      bg: 'bg-red-50 dark:bg-red-900/30',       detail: `${data.counts?.credit_notes || 0} kreditore · rimbursim kesh (dalje nga sirtari)` },
+    { label: 'Kthime Shitjesh (Kesh)',          src: 'returns_cash',      sign: '−', color: 'text-red-700 dark:text-red-300',      bg: 'bg-red-50 dark:bg-red-900/30',       detail: `${nCredit} kreditore · rimbursim kesh (dalje nga sirtari)` },
+    { label: 'Kthime Shitjesh (Bankë/POS)',     values: returnsBankPos,   sign: '−', color: 'text-slate-500 dark:text-slate-400', bg: 'bg-slate-50/40 dark:bg-slate-900/20', detail: `informativ · tashmë i zbritur nga Xhiro dhe Bankë/POS më sipër (nuk prek keshin)`, informative: true },
     { label: 'Shpenzime Ditore',                src: 'expenses_daily',    sign: '−', color: 'text-orange-700 dark:text-orange-300',  bg: 'bg-orange-50 dark:bg-orange-900/30',  detail: `${data.counts?.expenses_daily || 0} regjistrime` },
     { label: 'Shpenzime Transporti',            src: 'expenses_transport', sign: '−', color: 'text-cyan-700 dark:text-cyan-300',     bg: 'bg-cyan-50 dark:bg-cyan-900/30',       detail: `${data.counts?.expenses_transport || 0} pagesa (me/pa faturë)` },
     { label: 'Shpenzime Marketingu',            src: 'expenses_marketing', sign: '−', color: 'text-pink-700 dark:text-pink-300',     bg: 'bg-pink-50 dark:bg-pink-900/30',       detail: `${data.counts?.expenses_marketing || 0} zëra cash${(data.marketing_in_kind_eur || 0) > 0 ? ` + ${(data.marketing_in_kind_eur).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR in-kind (i njëjti që del si "Marketingu Shitje" sipër — efekti neto në arkë = 0)` : ''}` },
@@ -228,7 +246,7 @@ export default function ArkaDitore({ date, onNavigate }) {
                 </td>
                 {shownCurs.map(c => (
                   <td key={c} className={`px-3 py-2.5 text-right tabular-nums font-semibold ${r.color}`}>
-                    {fmtSigned(data[r.src]?.[c], r.sign)}
+                    {fmtSigned(r.values ? r.values[c] : data[r.src]?.[c], r.sign)}
                   </td>
                 ))}
               </tr>
@@ -270,7 +288,7 @@ export default function ArkaDitore({ date, onNavigate }) {
                 </td>
                 {shownCurs.map(c => (
                   <td key={c} className={`px-3 py-2.5 text-right tabular-nums font-semibold ${r.color}`}>
-                    {fmtSigned(data[r.src]?.[c], r.sign)}
+                    {fmtSigned(r.values ? r.values[c] : data[r.src]?.[c], r.sign)}
                   </td>
                 ))}
               </tr>
