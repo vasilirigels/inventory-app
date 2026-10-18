@@ -5947,6 +5947,7 @@ app.get('/api/supplier-payments/history', async (req, res) => {
         p.amount AS amount,
         p.payment_method AS payment_method,
         p.notes AS notes,
+        p.has_gram_paid AS has_gram_paid,
         pi.invoice_no AS invoice_no,
         pi.date AS invoice_date,
         pi.currency AS currency,

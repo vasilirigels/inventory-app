@@ -367,10 +367,23 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                       <div className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">Vlera</div>
                       <div className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(p.amount)}</div>
                       {invHas > 0.005 && invTotalM > 0 && (
-                        <div className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
-                          {fmtHas(p.has_gram_paid != null ? n(p.has_gram_paid) : invHas * n(p.amount) / invTotalM)} g HAS
-                          {p.has_gram_paid != null && <span className="ml-1 text-[9px] italic text-slate-500">(manual)</span>}
-                        </div>
+                        p.has_gram_paid != null ? (
+                          n(p.has_gram_paid) > 0.005 ? (
+                            <div className="text-[11px] font-bold text-yellow-800 dark:text-yellow-200 mt-0.5">
+                              {fmtHas(n(p.has_gram_paid))} g HAS
+                              <span className="ml-1 text-[9px] font-semibold not-italic text-emerald-600 dark:text-emerald-400">✓ i vendosur</span>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 italic mt-0.5">
+                              Pa HAS <span className="not-italic">(vetëm në para)</span>
+                            </div>
+                          )
+                        ) : (
+                          <div className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
+                            {fmtHas(invHas * n(p.amount) / invTotalM)} g HAS
+                            <span className="ml-1 text-[9px] italic text-slate-500">(auto)</span>
+                          </div>
+                        )
                       )}
                       <div className="mt-1">{methodBadge(p.payment_method)}</div>
                     </div>
@@ -925,6 +938,15 @@ function SupplierPaymentsHistoryPanel({ supplier, onNavigate, refreshKey, dateRa
   const [loading, setLoading] = useState(true)
   const [method, setMethod] = useState('') // '' = të gjitha
   const [editRow, setEditRow] = useState(null)
+  // Faturat që janë hapur (zgjeruar) për të parë secilin këst. Grupimi është
+  // sipas invoice_id — një faturë e paguar në disa këste shfaqet si një rresht
+  // që klikohet për të zgjeruar/kolapsuar listën e kësteve.
+  const [expanded, setExpanded] = useState(() => new Set())
+  const toggleExpand = (id) => setExpanded(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
 
   const load = useCallback(() => {
     setLoading(true)
@@ -1012,57 +1034,183 @@ function SupplierPaymentsHistoryPanel({ supplier, onNavigate, refreshKey, dateRa
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={`${r.kind}-${r.id}-${i}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                <td className="px-4 py-2 text-slate-700 dark:text-slate-200 tabular-nums">
-                  {r.invoice_date}
-                  {r.kind === 'initial' && <div className="text-[10px] text-amber-600 dark:text-amber-400 italic">fillestare</div>}
-                </td>
-                <td className="px-4 py-2 font-medium text-slate-800 dark:text-slate-100">
-                  {r.supplier_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
-                  {r.supplier_nipt && <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{r.supplier_nipt}</div>}
-                </td>
-                <td className="px-4 py-2 font-mono text-xs">
-                  <div className="tabular-nums text-slate-700 dark:text-slate-200 font-semibold">{r.date}</div>
-                  <button
-                    onClick={() => onNavigate?.('artikuj-te-tjere', { date: r.invoice_date, invoiceId: r.invoice_id })}
-                    className="text-blue-600 hover:text-blue-800 hover:underline text-[10px]"
-                    title="Hap faturën"
-                  >{r.invoice_no || '—'}</button>
-                </td>
-                <td className="px-4 py-2 text-right tabular-nums font-bold text-emerald-700 dark:text-emerald-300">{fmt(r.amount)}</td>
-                <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
-                  {n(r.total_has_gram) > 0 ? n(r.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="px-4 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
-                  {(() => {
-                    const invT = n(r.invoice_total)
-                    const invH = n(r.total_has_gram)
-                    const deducted = invT > 0 && invH > 0 ? invH * n(r.amount) / invT : 0
-                    return deducted > 0.005
-                      ? deducted.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                      : <span className="text-slate-300">—</span>
-                  })()}
-                </td>
-                <td className="px-4 py-2 text-center">
-                  <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{r.currency || 'LEK'}</span>
-                </td>
-                <td className="px-4 py-2 text-center">{methodBadge(r.payment_method)}</td>
-                <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate" title={r.notes || ''}>{r.notes || '—'}</td>
-                <td className="px-4 py-2 text-center whitespace-nowrap">
-                  {r.kind === 'partial' ? (
-                    <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => setEditRow(r)}
-                        className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs" title="Modifiko">✏️</button>
-                      <button onClick={() => removePartial(r)}
-                        className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs" title="Fshi">🗑️</button>
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500 italic" title="Modifiko nga fatura">në faturë</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {(() => {
+              // Grupo pagesat sipas faturës (invoice_id), duke ruajtur rendin
+              // e parë të takimit. Çdo grup = një rresht përmbledhës; nëse ka
+              // >1 pagesë, rreshti kolapson/zgjerohet nga chevron-i.
+              const groups = []
+              const idx = new Map()
+              for (const r of rows) {
+                const key = r.invoice_id
+                let g = idx.get(key)
+                if (!g) {
+                  g = {
+                    invoice_id: key,
+                    invoice_no: r.invoice_no,
+                    invoice_date: r.invoice_date,
+                    supplier_name: r.supplier_name,
+                    supplier_nipt: r.supplier_nipt,
+                    currency: r.currency,
+                    invoice_total: r.invoice_total,
+                    total_has_gram: r.total_has_gram,
+                    payments: [],
+                  }
+                  idx.set(key, g)
+                  groups.push(g)
+                }
+                g.payments.push(r)
+              }
+
+              // HAS zbritur për një pagesë — manual kur ekziston, përndryshe
+              // llogarit proporcionalisht me kursin e faturës.
+              const payHas = (p, invT, invH) => {
+                if (p.kind === 'partial' && p.has_gram_paid != null) return n(p.has_gram_paid)
+                return invT > 0 && invH > 0 ? invH * n(p.amount) / invT : 0
+              }
+
+              const fmtHas2 = (v) => v > 0.005
+                ? v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : null
+
+              const renderPaymentRow = (r, i, isChild) => (
+                <tr key={`${r.kind}-${r.id}-${i}`}
+                    className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isChild ? 'bg-slate-50/40 dark:bg-slate-900/20' : ''}`}>
+                  <td className={`px-4 py-2 text-slate-700 dark:text-slate-200 tabular-nums ${isChild ? 'pl-10 text-xs text-slate-500 dark:text-slate-400' : ''}`}>
+                    {isChild ? <span className="italic">↳ këst</span> : r.invoice_date}
+                    {!isChild && r.kind === 'initial' && <div className="text-[10px] text-amber-600 dark:text-amber-400 italic">fillestare</div>}
+                  </td>
+                  <td className={`px-4 py-2 ${isChild ? 'text-xs text-slate-400 dark:text-slate-500' : 'font-medium text-slate-800 dark:text-slate-100'}`}>
+                    {isChild ? '' : (r.supplier_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>)}
+                    {!isChild && r.supplier_nipt && <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{r.supplier_nipt}</div>}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">
+                    <div className="tabular-nums text-slate-700 dark:text-slate-200 font-semibold">{r.date}</div>
+                    {!isChild && (
+                      <button
+                        onClick={() => onNavigate?.('artikuj-te-tjere', { date: r.invoice_date, invoiceId: r.invoice_id })}
+                        className="text-blue-600 hover:text-blue-800 hover:underline text-[10px]"
+                        title="Hap faturën"
+                      >{r.invoice_no || '—'}</button>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums font-bold text-emerald-700 dark:text-emerald-300">{fmt(r.amount)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                    {!isChild && n(r.total_has_gram) > 0
+                      ? n(r.total_has_gram).toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
+                    {(() => {
+                      if (r.kind === 'partial' && r.has_gram_paid != null) {
+                        const v = n(r.has_gram_paid)
+                        return v > 0.005
+                          ? (
+                            <span>
+                              {v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <span className="ml-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">✓</span>
+                            </span>
+                          )
+                          : <span className="text-slate-400 italic text-[10px]">pa HAS</span>
+                      }
+                      const invT = n(r.invoice_total)
+                      const invH = n(r.total_has_gram)
+                      const deducted = invT > 0 && invH > 0 ? invH * n(r.amount) / invT : 0
+                      return deducted > 0.005
+                        ? deducted.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : <span className="text-slate-300">—</span>
+                    })()}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{r.currency || 'LEK'}</span>
+                  </td>
+                  <td className="px-4 py-2 text-center">{methodBadge(r.payment_method)}</td>
+                  <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate" title={r.notes || ''}>{r.notes || '—'}</td>
+                  <td className="px-4 py-2 text-center whitespace-nowrap">
+                    {r.kind === 'partial' ? (
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => setEditRow(r)}
+                          className="px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs" title="Modifiko">✏️</button>
+                        <button onClick={() => removePartial(r)}
+                          className="px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 hover:bg-red-100 text-red-600 text-xs" title="Fshi">🗑️</button>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 italic" title="Modifiko nga fatura">në faturë</span>
+                    )}
+                  </td>
+                </tr>
+              )
+
+              const out = []
+              groups.forEach((g, gi) => {
+                if (g.payments.length === 1) {
+                  // Një pagesë e vetme → shfaqe direkt, pa chevron.
+                  out.push(renderPaymentRow(g.payments[0], gi, false))
+                  return
+                }
+
+                const isOpen = expanded.has(g.invoice_id)
+                const sumAmount = g.payments.reduce((s, p) => s + n(p.amount), 0)
+                const invT = n(g.invoice_total)
+                const invH = n(g.total_has_gram)
+                const sumHas = g.payments.reduce((s, p) => s + payHas(p, invT, invH), 0)
+                const methods = Array.from(new Set(g.payments.map(p => p.payment_method)))
+                const lastDate = g.payments.reduce((m, p) => (p.date > m ? p.date : m), g.payments[0].date)
+
+                out.push(
+                  <tr key={`g-${g.invoice_id}`}
+                      className="border-b border-slate-200 dark:border-slate-700 bg-indigo-50/50 dark:bg-indigo-900/20 hover:bg-indigo-100/50 cursor-pointer"
+                      onClick={() => toggleExpand(g.invoice_id)}>
+                    <td className="px-4 py-2 text-slate-700 dark:text-slate-200 tabular-nums font-semibold">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400">{isOpen ? '▾' : '▸'}</span>
+                        <span>{g.invoice_date}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 font-medium text-slate-800 dark:text-slate-100">
+                      {g.supplier_name || <span className="italic text-slate-400 dark:text-slate-500">— pa emër —</span>}
+                      {g.supplier_nipt && <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{g.supplier_nipt}</div>}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      <div className="tabular-nums text-slate-700 dark:text-slate-200 font-semibold">deri {lastDate}</div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onNavigate?.('artikuj-te-tjere', { date: g.invoice_date, invoiceId: g.invoice_id }) }}
+                        className="text-blue-600 hover:text-blue-800 hover:underline text-[10px]"
+                        title="Hap faturën"
+                      >{g.invoice_no || '—'}</button>
+                      <div className="text-[10px] text-indigo-600 dark:text-indigo-300 font-sans not-italic font-semibold">
+                        {g.payments.length} këste
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(sumAmount)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                      {invH > 0 ? invH.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums font-bold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
+                      {fmtHas2(sumHas) || <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{g.currency || 'LEK'}</span>
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1 flex-wrap">
+                        {methods.map(m => <span key={m}>{methodBadge(m)}</span>)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-xs italic text-slate-500 dark:text-slate-400">— klik për detaje —</td>
+                    <td className="px-4 py-2 text-center whitespace-nowrap">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">({g.payments.length})</span>
+                    </td>
+                  </tr>
+                )
+
+                if (isOpen) {
+                  g.payments.forEach((p, pi) => {
+                    out.push(renderPaymentRow(p, `${gi}-${pi}`, true))
+                  })
+                }
+              })
+              return out
+            })()}
           </tbody>
           <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-700">
             {currenciesInList.map((cur, idx) => (
