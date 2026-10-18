@@ -95,6 +95,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
   const [payCurrency, setPayCurrency] = useState('EUR')
   const [rates, setRates]     = useState({ LEK: 1 })
   const [notes, setNotes]     = useState('')
+  const [hasOverride, setHasOverride] = useState('')
   const [saving, setSaving]   = useState(false)
   const [err, setErr]         = useState('')
   const [loadErr, setLoadErr] = useState('')
@@ -169,17 +170,28 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     return +(due * invoiceRate / payRate).toFixed(2)
   })()
 
-  // HAS — kursi fiksohet nga fatura: hasRate = total / has (çmim për gram HAS
-  // në monedhën e faturës). Çdo pagesë zbret HAS proporcionalisht me pjesën
-  // monetare të paguar; nuk nevojitet asnjë input shtesë nga user-i.
+  // HAS — kursi i faturës (hasRate = total/has) përdoret si default proporcional.
+  // Çdo pagesë mund të ketë has_gram_paid override (p.sh. kur kursi i HAS ka
+  // ndryshuar nga koha e faturës); kur ekziston override, zëvendëson pjesën
+  // proporcionale për atë pagesë.
   const invHas    = n(inv.total_has_gram)
   const hasRate   = invHas > 0 ? n(inv.total_with_vat) / invHas : 0
   const invTotalM = n(inv.total_with_vat)
-  const hasPaid   = invTotalM > 0 && invHas > 0 ? invHas * n(inv.amount_paid) / invTotalM : 0
-  const hasDue    = Math.max(0, invHas - hasPaid)
+  // Pagesa me override manual: sum(has_gram_paid) + sum(amount) i tyre.
+  const manualHasSum    = data.payments.reduce((s, p) => s + (p.has_gram_paid != null ? n(p.has_gram_paid) : 0), 0)
+  const manualAmountSum = data.payments.reduce((s, p) => s + (p.has_gram_paid != null ? n(p.amount) : 0), 0)
+  // Pjesa e paguar pa override → llogaritet proporcionalisht me kursin e faturës.
+  const propAmountPaid = Math.max(0, n(inv.amount_paid) - manualAmountSum)
+  const hasPaidProp    = invTotalM > 0 && invHas > 0 ? invHas * propAmountPaid / invTotalM : 0
+  const hasPaid        = manualHasSum + hasPaidProp
+  const hasDue         = Math.max(0, invHas - hasPaid)
   const amtInInvCcy = parseFloat(amount) > 0 ? toInvoiceCcy(amount) : 0
-  const hasDeductPreview = invTotalM > 0 && invHas > 0 ? invHas * amtInInvCcy / invTotalM : 0
   const fmtHas = (v) => v > 0.005 ? v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'
+  // HAS që do zbresë pagesa e re — vlera që user-i ka vendosur manualisht.
+  // Fusha nis bosh; nëse mbetet bosh, zbret 0 g HAS (pagesë vetëm në para, pa HAS).
+  const hasOverrideNum = parseFloat(hasOverride)
+  const hasOverrideSet = hasOverride !== '' && hasOverrideNum >= 0 && isFinite(hasOverrideNum)
+  const hasDeductEffective = hasOverrideSet ? hasOverrideNum : 0
 
   const sendPayment = async (payload) => {
     setErr('')
@@ -192,7 +204,7 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
       })
       const r = await res.json()
       if (!res.ok) throw new Error(r.error || 'Gabim')
-      setAmount(''); setNotes('')
+      setAmount(''); setNotes(''); setHasOverride('')
       await load()
       onSaved?.()
     } catch (e) {
@@ -215,11 +227,15 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     const ccyNote = payCurrency !== inv.currency
       ? `Pagesë ${fmt(amtPay)} ${payCurrency} (= ${fmt(amtInvoice)} ${inv.currency})`
       : ''
+    // Pagesa ruan HAS-in që user-i vendosi vetë (bosh → 0). Pa fallback në kalkulim
+    // automatik: user-i gjithmonë kontrollon sa gramë HAS zbresin me këtë pagesë.
+    const hasOverrideToSend = invHas > 0.005 ? (hasOverrideSet ? hasOverrideNum : 0) : null
     await sendPayment({
       amount: amtInvoice,
       date,
       payment_method: method,
       notes: notes ? (ccyNote ? `${notes} · ${ccyNote}` : notes) : ccyNote,
+      has_gram_paid: hasOverrideToSend,
     })
   }
 
@@ -237,11 +253,15 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
     const ccyNote = payCurrency !== inv.currency
       ? `Mbyllje me ${fmt(dueInPayCcy)} ${payCurrency} (= ${fmt(due)} ${inv.currency})`
       : 'Mbyllje e plotë e borxhit'
+    // "Mbyll borxhin plotësisht" — HAS zbret aq sa user-i ka vendosur te fusha
+    // (bosh → mbyll HAS-in e mbetur, meqë kjo është mbyllja e plotë e borxhit).
+    const hasOverrideToSend = invHas > 0.005 ? (hasOverrideSet ? hasOverrideNum : hasDue) : null
     await sendPayment({
       amount: due,
       date,
       payment_method: method,
       notes: notes ? `${notes} · ${ccyNote}` : ccyNote,
+      has_gram_paid: hasOverrideToSend,
     })
   }
 
@@ -348,7 +368,8 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                       <div className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(p.amount)}</div>
                       {invHas > 0.005 && invTotalM > 0 && (
                         <div className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
-                          {fmtHas(invHas * n(p.amount) / invTotalM)} g HAS
+                          {fmtHas(p.has_gram_paid != null ? n(p.has_gram_paid) : invHas * n(p.amount) / invTotalM)} g HAS
+                          {p.has_gram_paid != null && <span className="ml-1 text-[9px] italic text-slate-500">(manual)</span>}
                         </div>
                       )}
                       <div className="mt-1">{methodBadge(p.payment_method)}</div>
@@ -416,9 +437,9 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                       = {fmt(toInvoiceCcy(amount))} {inv.currency}
                     </p>
                   )}
-                  {invHas > 0.005 && hasDeductPreview > 0.005 && (
+                  {invHas > 0.005 && hasOverrideSet && hasDeductEffective > 0.005 && (
                     <p className="text-[10px] font-semibold text-yellow-700 dark:text-yellow-300 mt-0.5">
-                      → zbret {fmtHas(hasDeductPreview)} g HAS (mbeten {fmtHas(Math.max(0, hasDue - hasDeductPreview))})
+                      → zbret {fmtHas(hasDeductEffective)} g HAS (mbeten {fmtHas(Math.max(0, hasDue - hasDeductEffective))})
                     </p>
                   )}
                 </div>
@@ -429,6 +450,23 @@ function PaymentModal({ invoiceId, onClose, onSaved }) {
                     <option value="bank">🏦 Bankë</option>
                   </select>
                 </div>
+                {invHas > 0.005 && (
+                  <div className="col-span-4">
+                    <label className="form-label">
+                      HAS Paguar (gr)
+                      <span className="ml-2 text-[10px] font-normal text-slate-500 italic">
+                        mbetur për të paguar: {fmtHas(hasDue)} g
+                      </span>
+                    </label>
+                    <MoneyInput
+                      value={hasOverride} onChange={v => setHasOverride(String(v))}
+                      className="input-field tabular-nums"
+                      placeholder="0,00" />
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">
+                      Vendos sa gramë HAS po paguan me këtë pagesë. Lëre bosh (ose 0) nëse pagesa është vetëm në para.
+                    </p>
+                  </div>
+                )}
                 <div className="col-span-4">
                   <label className="form-label">Shënime (opsional)</label>
                   <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
@@ -570,8 +608,8 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
   }, { tot: 0, paid: 0, due: 0, totLek: 0, paidLek: 0, dueLek: 0 })
 
   // Totalet e grupuara sipas monedhës origjinale të faturës — pa konvertim në LEK.
-  // Has Paguar / Has Borxh janë proporcional me pjesën monetare të paguar/mbetur
-  // të faturës (kursi = total_fatura / total_has, i fiksuar nga vetë fatura).
+  // Has Paguar = (pagesa me override manual) + (pjesa pa override × kurs i faturës).
+  // Has Borxh = total HAS i faturës − Has Paguar (asnjëherë nën 0).
   const totalsByCur = invoices.reduce((acc, inv) => {
     const cur = inv.currency || 'LEK'
     if (!acc[cur]) acc[cur] = { tot: 0, paid: 0, due: 0, has: 0, hasPaid: 0, hasDue: 0 }
@@ -579,14 +617,17 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
     const paid  = n(inv.amount_paid)
     const due   = n(inv.amount_due != null ? inv.amount_due : (total - paid))
     const has   = n(inv.total_has_gram)
-    const ratioPaid = total > 0 ? paid / total : 0
-    const ratioDue  = total > 0 ? due  / total : 0
+    const manualHas    = n(inv.manual_has_paid)
+    const manualAmount = n(inv.manual_amount_paid)
+    const propAmount   = Math.max(0, paid - manualAmount)
+    const hasPaid      = manualHas + (total > 0 ? has * propAmount / total : 0)
+    const hasDue       = Math.max(0, has - hasPaid)
     acc[cur].tot     += total
     acc[cur].paid    += paid
     acc[cur].due     += due
     acc[cur].has     += has
-    acc[cur].hasPaid += has * ratioPaid
-    acc[cur].hasDue  += has * ratioDue
+    acc[cur].hasPaid += hasPaid
+    acc[cur].hasDue  += hasDue
     return acc
   }, {})
   const currenciesInList = Object.keys(totalsByCur).sort()
@@ -719,10 +760,14 @@ function SupplierInvoicesPanel({ supplier, onNavigate, refreshKey, onOpenPayment
                         {(() => {
                           const invTotal = n(inv.total_with_vat)
                           const invPaid  = n(inv.amount_paid)
-                          const invDue   = n(inv.amount_due != null ? inv.amount_due : (invTotal - invPaid))
                           const invHas   = n(inv.total_has_gram)
-                          const hasPaid  = invTotal > 0 && invHas > 0 ? invHas * invPaid / invTotal : 0
-                          const hasDue   = invTotal > 0 && invHas > 0 ? invHas * invDue  / invTotal : 0
+                          // Pagesa me override manual: zëvendësojnë pjesën e tyre
+                          // proporcionale; pjesa pa override llogaritet me kurs faturë.
+                          const manualHas    = n(inv.manual_has_paid)
+                          const manualAmount = n(inv.manual_amount_paid)
+                          const propAmount   = Math.max(0, invPaid - manualAmount)
+                          const hasPaid      = manualHas + (invTotal > 0 && invHas > 0 ? invHas * propAmount / invTotal : 0)
+                          const hasDue       = Math.max(0, invHas - hasPaid)
                           const fmtHas   = (v) => v > 0.005 ? v.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>
                           return (
                             <>

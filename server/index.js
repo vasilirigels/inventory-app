@@ -5836,11 +5836,17 @@ app.post('/api/purchase-invoices/:id/payments', async (req, res) => {
     if (amount > due + 0.005) return res.status(400).json({ error: `max ${due.toFixed(2)}` });
     const pm = ['cash','bank','pos'].includes(d.payment_method) ? d.payment_method : 'cash';
     const payDate = d.date || new Date().toISOString().slice(0, 10);
+    // has_gram_paid: override manual (në gramë HAS). NULL kur user-i nuk vendos
+    // vlerë manuale → UI do e llogarisë proporcionalisht nga shuma/totali.
+    const hasGramPaid = (d.has_gram_paid === '' || d.has_gram_paid == null)
+      ? null : parseFloat(d.has_gram_paid);
+    const hasGramVal = (hasGramPaid != null && hasGramPaid >= 0 && isFinite(hasGramPaid))
+      ? hasGramPaid : null;
     // arka_date = payDate që Arka Ditore ta reflektojë pagesën te data e pagesës,
     // jo te data e faturës. Vlen për të gjitha pagesat e reja (cash/bank/pos).
     await run(
-      `INSERT INTO purchase_payments (purchase_id, date, amount, payment_method, notes, arka_date) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, payDate, amount, pm, d.notes || '', payDate]
+      `INSERT INTO purchase_payments (purchase_id, date, amount, payment_method, notes, arka_date, has_gram_paid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, payDate, amount, pm, d.notes || '', payDate, hasGramVal]
     );
     const newPaid = +((inv.amount_paid || 0) + amount).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
@@ -5891,9 +5897,20 @@ app.put('/api/purchase-payments/:id', async (req, res) => {
     // Nëse arka_date ishte set më parë dhe user rikthen datën origjinale, ruajmë vlerën e re.
     const dateChanged = newDate !== pay.date;
     const newArkaDate = dateChanged ? newDate : pay.arka_date;
+    // has_gram_paid: nëse klienti dërgon fushën, e përditësojmë (null e pastron
+    // override-in dhe kthen në llogaritje proporcionale). Nëse s'dërgon fare, ruaj të vjetrën.
+    let newHasGramPaid = pay.has_gram_paid;
+    if (Object.prototype.hasOwnProperty.call(d, 'has_gram_paid')) {
+      const raw = d.has_gram_paid;
+      if (raw === '' || raw == null) newHasGramPaid = null;
+      else {
+        const v = parseFloat(raw);
+        newHasGramPaid = (isFinite(v) && v >= 0) ? v : null;
+      }
+    }
     await run(
-      `UPDATE purchase_payments SET date = ?, amount = ?, payment_method = ?, notes = ?, arka_date = ? WHERE id = ?`,
-      [newDate, newAmount, newPm, newNotes, newArkaDate, id]
+      `UPDATE purchase_payments SET date = ?, amount = ?, payment_method = ?, notes = ?, arka_date = ?, has_gram_paid = ? WHERE id = ?`,
+      [newDate, newAmount, newPm, newNotes, newArkaDate, newHasGramPaid, id]
     );
     const newPaid = +(paidWithoutThis + newAmount).toFixed(2);
     const newDue  = +Math.max(0, (inv.total_with_vat || 0) - newPaid).toFixed(2);
@@ -6006,7 +6023,13 @@ app.get('/api/supplier-debts', async (req, res) => {
         (SELECT amount FROM purchase_payments WHERE purchase_id = pi.id ORDER BY date DESC, id DESC LIMIT 1) AS last_payment_amount,
         (SELECT COUNT(*) FROM purchase_payments WHERE purchase_id = pi.id) AS payment_count,
         (SELECT COALESCE(SUM(COALESCE(pit.has_gram, 0) * COALESCE(pit.qty, 0)), 0)
-           FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS total_has_gram
+           FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS total_has_gram,
+        -- Shuma e HAS të paguar me override manual + shuma monetare e këtyre pagesave.
+        -- UI përdor këto për të zbritur pjesën manuale nga llogaritja proporcionale.
+        (SELECT COALESCE(SUM(has_gram_paid), 0) FROM purchase_payments
+           WHERE purchase_id = pi.id AND has_gram_paid IS NOT NULL) AS manual_has_paid,
+        (SELECT COALESCE(SUM(amount), 0) FROM purchase_payments
+           WHERE purchase_id = pi.id AND has_gram_paid IS NOT NULL) AS manual_amount_paid
       FROM purchase_invoices pi
       WHERE COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0
         AND COALESCE(pi.type, 'purchase') = 'purchase'`;

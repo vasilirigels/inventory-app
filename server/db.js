@@ -554,6 +554,11 @@ const MIGRATIONS = [
   // NULL = pagesa nuk është edituar → sjellja historike (attribuohet te data e faturës).
   "ALTER TABLE purchase_payments ADD COLUMN arka_date TEXT",
   "CREATE INDEX IF NOT EXISTS idx_purchase_payments_arka_date ON purchase_payments(arka_date)",
+  // has_gram_paid: override manual për gramët HAS të paguar në këtë pagesë.
+  // NULL = llogaritet proporcionalisht nga shuma/totali i faturës (sjellja default).
+  // E përdorur kur kursi i HAS ka ndryshuar nga koha e faturës (p.sh. fatura e vitit
+  // të kaluar paguhet sot me kurs ndryshe).
+  "ALTER TABLE purchase_payments ADD COLUMN has_gram_paid REAL",
   "ALTER TABLE expense_entries ADD COLUMN currency TEXT DEFAULT 'LEK'",
   "ALTER TABLE expense_entries ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE expense_entries ADD COLUMN exchange_rate REAL DEFAULT 1",
