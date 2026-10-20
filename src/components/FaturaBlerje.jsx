@@ -1603,7 +1603,19 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
           }
           setNotes(inv.notes || '')
           setIsGift(!!inv.is_gift)
-          const invItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
+          const rawInvItems = (inv.items && inv.items.length > 0) ? inv.items : [emptyItem()]
+          // Sinkronizo cost_price = purchase_price_no_vat per rreshtat ku dallojne
+          // (fatura te vjetra). "Cmim Blerje" ne UI tregon purchase_price_no_vat,
+          // por formula auto e sell_price per Diamant perdor cost_price. Mbaji ne
+          // sinkron qe sell_price te rikalkulohet drejt me multiplierin ekzistues.
+          const invItems = rawInvItems.map(it => {
+            const ppnv = parseFloat(it.purchase_price_no_vat) || 0
+            const cp   = parseFloat(it.cost_price) || 0
+            if (ppnv > 0 && Math.abs(ppnv - cp) > 0.005) {
+              return { ...it, cost_price: ppnv }
+            }
+            return it
+          })
           const mats = invItems.map(it => it.material).filter(Boolean)
           setCategory(forcedCategory || (mats.length > 0 && mats.every(m => m === mats[0]) ? mats[0] : ''))
           setItems(invItems)
@@ -2445,8 +2457,8 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
                       </>
                     )}
                     <td className="px-1 py-1">
-                      <MoneyInput value={it.cost_price}
-                        onChange={v => setItem(idx, { cost_price: v })}
+                      <MoneyInput value={it.purchase_price_no_vat}
+                        onChange={v => setItem(idx, { purchase_price_no_vat: v, cost_price: v })}
                         className="input-field-sm text-right"
                       />
                     </td>
