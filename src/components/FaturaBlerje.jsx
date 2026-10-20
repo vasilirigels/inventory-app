@@ -1460,6 +1460,9 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   // ekzistuese ngarkohen me monedhën e vet të ruajtur.
   const [currency, setCurrency] = useState('USD')
   const [exchangeRate, setExchangeRate] = useState(1)
+  // Kursi i fundit "i aplikuar" te artikujt — bazë për faktorin kur user-i
+  // e ndryshon manualisht kursin dhe largohet nga inputi.
+  const lastAppliedRateRef = useRef(1)
   const [rateSource, setRateSource]   = useState('')
   // Payment splits — pasqyrim i sistemit të FaturaShitje. Çdo split ka
   // method (cash|bank), monedhë, shumë dhe kurs drejt LEK.
@@ -1575,6 +1578,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
           setSupplierNipt(inv.supplier_nipt || '')
           setCurrency(inv.currency || 'LEK')
           setExchangeRate(inv.exchange_rate || 1)
+          lastAppliedRateRef.current = parseFloat(inv.exchange_rate) || 1
           // Rifresko splits — preferoj array-in e ruajtur; ndryshe krijoj një
           // split nga fushat legacy (payment_method + initial_amount_paid).
           const invCur = inv.currency || 'LEK'
@@ -1649,7 +1653,13 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   }, [invoiceDate])
 
   useEffect(() => {
-    if (allRates && allRates[currency] != null) setExchangeRate(allRates[currency])
+    if (allRates && allRates[currency] != null) {
+      setExchangeRate(allRates[currency])
+      // `changeCurrency` ka rikalkuluar artikujt me faktorin nga allRates;
+      // sinkronizo ref-in që një ndryshim i mëvonshëm manual i kursit të
+      // llogarisë saktë faktorin inkremental.
+      lastAppliedRateRef.current = parseFloat(allRates[currency]) || 1
+    }
   }, [currency, allRates])
 
   const setItem = (idx, patch) =>
@@ -1890,6 +1900,24 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
     setPaymentSplits(prev => prev.map(s => s.currency === currency ? { ...s, exchange_rate: r } : s))
   }
 
+  // Në blur: rikalkulon purchase_price_no_vat dhe sell_price me faktor
+  // = kursi_mëparshëm / kursi_i_ri, që vlera reale në LEK të mbetet e njëjtë.
+  // Aplikohet në blur sepse inputi është text-type dhe shkrimi tast-pas-tasti
+  // (p.sh. "9" pastaj "95") do aplikonte faktorë të ndërmjetëm të gabuar.
+  const commitExchangeRate = () => {
+    const newR = parseFloat(exchangeRate) || 0
+    const oldR = parseFloat(lastAppliedRateRef.current) || 0
+    if (newR <= 0 || oldR <= 0) return
+    const factor = oldR / newR
+    if (Math.abs(factor - 1) < 1e-9) return
+    setItems(prev => prev.map(it => ({
+      ...it,
+      purchase_price_no_vat: +(n(it.purchase_price_no_vat) * factor).toFixed(2),
+      sell_price:            +(n(it.sell_price) * factor).toFixed(2),
+    })))
+    lastAppliedRateRef.current = newR
+  }
+
   // Total i paguar në monedhën e faturës — konverton çdo split → LEK → faturës.
   const splitsPaidInInvoice = (() => {
     const invR = parseFloat(exchangeRate) || 1
@@ -2120,6 +2148,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
           </label>
           <input type="number" step="0.0001" min="0"
             value={exchangeRate} onChange={e => changeExchangeRate(e.target.value)}
+            onBlur={commitExchangeRate}
             disabled={currency === 'LEK'} className="input-field disabled:bg-slate-50" />
           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Burimi: <span className="font-medium">{rateSource || '—'}</span></p>
         </div>
