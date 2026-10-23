@@ -282,41 +282,75 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
 
   // Per-invoice exchange rate so payment events can be converted to LEK too
   // (payment.amount is in the invoice's currency).
-  const rateByInvoiceId     = new Map(data.invoices.map(i => [i.id, n(i.exchange_rate) || 1]))
-  const currencyByInvoiceId = new Map(data.invoices.map(i => [i.id, i.currency || 'LEK']))
+  const rateByInvoiceId      = new Map(data.invoices.map(i => [i.id, n(i.exchange_rate) || 1]))
+  const currencyByInvoiceId  = new Map(data.invoices.map(i => [i.id, i.currency || 'LEK']))
+  const totalByInvoiceId     = new Map(data.invoices.map(i => [i.id, n(i.total_with_vat)]))
+  const totalHasByInvoiceId  = new Map(data.invoices.map(i => [i.id, n(i.total_has_gram)]))
+
+  // HAS që zbret një pagesë: manual (has_gram_paid) kur ekziston, përndryshe
+  // proporcionalisht me kursin HAS të faturës (invHas * amount / invTotal).
+  const hasOfPayment = (p) => {
+    if (p.has_gram_paid != null) return n(p.has_gram_paid)
+    const invT = n(p.invoice_total) || totalByInvoiceId.get(p.purchase_id) || 0
+    const invH = totalHasByInvoiceId.get(p.purchase_id) || 0
+    return invT > 0 && invH > 0 ? invH * n(p.amount) / invT : 0
+  }
 
   let runDebit = 0, runCredit = 0
   let runDebitLek = 0, runCreditLek = 0
-  // Totalet e ndara sipas monedhës origjinale.
+  let runHasDebit = 0, runHasCredit = 0
+  // Totalet e ndara sipas monedhës origjinale (përfshi HAS që është pa-monedhë
+  // por mbahet për monedhën e faturës që e origjinoi).
   const totalsByCur = {}
-  const bump = (cur, invAmt, paidAmt) => {
-    if (!totalsByCur[cur]) totalsByCur[cur] = { invoiced: 0, paid: 0 }
+  const bump = (cur, invAmt, paidAmt, hasInv, hasPaid) => {
+    if (!totalsByCur[cur]) totalsByCur[cur] = { invoiced: 0, paid: 0, hasInv: 0, hasPaid: 0 }
     totalsByCur[cur].invoiced += invAmt
     totalsByCur[cur].paid     += paidAmt
+    totalsByCur[cur].hasInv   += hasInv
+    totalsByCur[cur].hasPaid  += hasPaid
   }
   const enriched = events.map(ev => {
+    let hasDebitRow = 0, hasCreditRow = 0
     if (ev.kind === 'invoice') {
       const rate = n(ev.invoice.exchange_rate) || 1
       const cur  = ev.invoice.currency || 'LEK'
-      runDebit  += n(ev.invoice.total_with_vat)
-      runCredit += ev.initialPaid
-      runDebitLek  += n(ev.invoice.total_with_vat) * rate
+      const invT = n(ev.invoice.total_with_vat)
+      const invH = n(ev.invoice.total_has_gram)
+      hasDebitRow  = invH
+      // HAS i konsumuar nga pjesa e paguar në krijim (proporcional).
+      hasCreditRow = invT > 0 && invH > 0 ? invH * ev.initialPaid / invT : 0
+      runDebit     += invT
+      runCredit    += ev.initialPaid
+      runDebitLek  += invT * rate
       runCreditLek += ev.initialPaid * rate
-      bump(cur, n(ev.invoice.total_with_vat), ev.initialPaid)
+      runHasDebit  += hasDebitRow
+      runHasCredit += hasCreditRow
+      bump(cur, invT, ev.initialPaid, hasDebitRow, hasCreditRow)
     } else {
       const rate = rateByInvoiceId.get(ev.payment.purchase_id) || 1
       const cur  = currencyByInvoiceId.get(ev.payment.purchase_id) || 'LEK'
-      runCredit += n(ev.payment.amount)
+      hasCreditRow = hasOfPayment(ev.payment)
+      runCredit    += n(ev.payment.amount)
       runCreditLek += n(ev.payment.amount) * rate
-      bump(cur, 0, n(ev.payment.amount))
+      runHasCredit += hasCreditRow
+      bump(cur, 0, n(ev.payment.amount), 0, hasCreditRow)
     }
-    return { ...ev, balance: +(runDebit - runCredit).toFixed(2) }
+    return {
+      ...ev,
+      balance: +(runDebit - runCredit).toFixed(2),
+      hasDebit: +hasDebitRow.toFixed(4),
+      hasCredit: +hasCreditRow.toFixed(4),
+      hasBalance: +(runHasDebit - runHasCredit).toFixed(4),
+    }
   })
   for (const c of Object.keys(totalsByCur)) {
     const t = totalsByCur[c]
     t.invoiced = +t.invoiced.toFixed(2)
     t.paid     = +t.paid.toFixed(2)
     t.due      = +(t.invoiced - t.paid).toFixed(2)
+    t.hasInv   = +t.hasInv.toFixed(4)
+    t.hasPaid  = +t.hasPaid.toFixed(4)
+    t.hasDue   = +Math.max(0, t.hasInv - t.hasPaid).toFixed(4)
   }
   const currenciesInList = Object.keys(totalsByCur).sort()
 
@@ -365,6 +399,9 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Detyrim (+)</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pagesë (−)</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Balanca</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">HAS Debit</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">HAS Pagesë</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">HAS Balanca</th>
             </tr>
           </thead>
           <tbody>
@@ -406,6 +443,15 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                     <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                       {fmt(ev.balance)}
                     </td>
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold bg-yellow-50/40 dark:bg-yellow-900/10 text-yellow-800 dark:text-yellow-200">
+                      {ev.hasDebit > 0.005 ? ev.hasDebit.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
+                      {ev.hasCredit > 0.005 ? ev.hasCredit.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.hasBalance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                      {ev.hasBalance > 0.005 ? ev.hasBalance.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '✓'}
+                    </td>
                   </tr>
                 )
               }
@@ -446,6 +492,20 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                   <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.balance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                     {fmt(ev.balance)}
                   </td>
+                  <td className="px-4 py-2"></td>
+                  <td className="px-4 py-2 text-right tabular-nums font-semibold bg-emerald-50/40 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200">
+                    {ev.hasCredit > 0.005
+                      ? (
+                        <span>
+                          {ev.hasCredit.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {p.has_gram_paid != null && <span className="ml-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400" title="HAS vendosur manualisht">✓</span>}
+                        </span>
+                      )
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className={`px-4 py-2 text-right tabular-nums font-bold ${ev.hasBalance > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                    {ev.hasBalance > 0.005 ? ev.hasBalance.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '✓'}
+                  </td>
                 </tr>
               )
             })}
@@ -465,6 +525,15 @@ function ActivityPanel({ supplier, onNavigate, dateRange }) {
                   <td className="px-4 py-3 text-right tabular-nums font-extrabold text-emerald-700 dark:text-emerald-300">{fmt(t.paid)}</td>
                   <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.due > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
                     {fmt(t.due)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200">
+                    {t.hasInv > 0.005 ? t.hasInv.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-extrabold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200">
+                    {t.hasPaid > 0.005 ? t.hasPaid.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                  </td>
+                  <td className={`px-4 py-3 text-right tabular-nums font-extrabold ${t.hasDue > 0.005 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                    {t.hasDue > 0.005 ? t.hasDue.toLocaleString('sq-AL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '✓'}
                   </td>
                 </tr>
               )

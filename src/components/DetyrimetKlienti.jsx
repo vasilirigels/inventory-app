@@ -945,7 +945,11 @@ function ClientInvoicesPanel({ client, onNavigate, refreshKey, onOpenPayment, da
                   </tr>
                   {g.list.map(inv => {
                     const pm  = inv.payment_method
-                    const pmBadge = pm === 'debt'
+                    const dueNow = n(inv.amount_due != null ? inv.amount_due : (inv.total_with_vat - inv.amount_paid))
+                    const settledDebt = pm === 'debt' && dueNow <= 0.005
+                    const pmBadge = settledDebt
+                      ? <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">✓ Shlyer</span>
+                      : pm === 'debt'
                       ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
                       : pm === 'bank'
                       ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>

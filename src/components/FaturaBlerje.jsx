@@ -459,6 +459,7 @@ function ProductPickerCell({ value, onPick, onNameChange }) {
 
 // ── List view: all purchase invoices for the day ────────────────────────────
 function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn, onDeleteReturn, refreshKey, title, materialFilter,
+                       excludeMaterials,
                        fromDate, setFromDate, toDate, setToDate }) {
   const [list, setList] = useState([])
   const [returns, setReturns] = useState([])
@@ -471,15 +472,18 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
   useEffect(() => {
     if (!fromDate || !toDate) return
     setLoading(true)
-    const matQ = materialFilter ? `?material=${encodeURIComponent(materialFilter)}` : ''
+    const params = new URLSearchParams()
+    if (materialFilter) params.set('material', materialFilter)
+    if (excludeMaterials) params.set('excludeMaterial', excludeMaterials)
+    const qs = params.toString()
     const url = fromDate === toDate
-      ? `/api/purchase-invoices/by-date/${fromDate}${matQ}`
-      : `/api/purchase-invoices/by-range?from=${fromDate}&to=${toDate}${materialFilter ? `&material=${encodeURIComponent(materialFilter)}` : ''}`
+      ? `/api/purchase-invoices/by-date/${fromDate}${qs ? '?' + qs : ''}`
+      : `/api/purchase-invoices/by-range?from=${fromDate}&to=${toDate}${qs ? '&' + qs : ''}`
     fetch(url)
       .then(r => r.json())
       .then(d => { setList(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => { setList([]); setLoading(false) })
-  }, [fromDate, toDate, refreshKey, materialFilter])
+  }, [fromDate, toDate, refreshKey, materialFilter, excludeMaterials])
 
   // Ngarko kthimet për të njëjtën periudhë — shfaqen si sekcion i veçantë poshtë
   // listës kryesore të blerjeve.
@@ -649,9 +653,10 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
             </thead>
             <tbody>
               {list.map(inv => {
-                // Snapshot from the invoice's creation moment — later payments via the
-                // Detyrime Furnitor modal are ignored here so daily totals stay stable.
-                const initPaid = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
+                // Rreshti i listës tregon gjendjen REALE të faturës (përfshirë pagesat
+                // nga Detyrime Furnitor). Totalet në footer mbeten snapshot i momentit
+                // të krijimit (totalet ditore stabile).
+                const initPaid = n(inv.amount_paid)
                 // Raw due (mund të jetë negativ nëse pagesa tepron totalin).
                 const dueRaw = +(n(inv.total_with_vat) - initPaid).toFixed(2)
                 const due = Math.max(0, dueRaw)
@@ -659,7 +664,10 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
                 // trajto pagesën si totalin efektiv — s'ka borxh të pashfaqur.
                 const noTotalButPaid = n(inv.total_with_vat) <= 0.005 && initPaid > 0.005
                 const pm = inv.payment_method
-                const pmBadge = pm === 'debt'
+                const fullyPaid = due <= 0.005
+                const pmBadge = pm === 'debt' && fullyPaid
+                  ? <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">✓ Shlyer</span>
+                  : pm === 'debt'
                   ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
                   : pm === 'bank'
                   ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
@@ -2897,7 +2905,7 @@ function PurchaseEditor({ date, invoiceId, onClose, onSaved, title, forcedCatego
   )
 }
 
-export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title, forcedCategory }) {
+export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title, forcedCategory, excludeMaterials }) {
   const [mode, setMode] = useState('list')
   const [editingId, setEditingId] = useState(null)
   const [returningId, setReturningId] = useState(null)
@@ -2958,6 +2966,7 @@ export default function FaturaBlerje({ date, openInvoiceId, onConsumeOpen, title
       refreshKey={refreshKey}
       title={title}
       materialFilter={forcedCategory}
+      excludeMaterials={excludeMaterials}
       fromDate={fromDate}
       setFromDate={setFromDate}
       toDate={toDate}

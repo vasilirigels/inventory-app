@@ -34,6 +34,7 @@ function EMPTY() {
     product_id: null,
     deposit: '',
     argjendar_name: '',
+    argjendar_paid_date: '',
   }
 }
 
@@ -281,13 +282,41 @@ function RepairModal({ repair, onClose, onSave, argjendars = [] }) {
                   }}
                   className="input-field" />
               </div>
-              <div className="flex items-end pb-2">
-                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
-                  <input type="checkbox" checked={!!form.paid}
-                    onChange={e => set('paid', e.target.checked ? 1 : 0)}
-                    className="w-4 h-4" />
-                  <span>Argjendari i paguar</span>
-                </label>
+              {/* Bllok i veçantë për statusin dhe datën e pagesës së argjendarit.
+                  I ndarë vizualisht me kornizë që user-i të kuptojë qartë se
+                  këto dy fusha janë të lidhura: Paguar? dhe KUR? */}
+              <div className="md:col-span-2 rounded-lg border-2 border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-900/10 p-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200 mb-2">
+                  💰 Pagesa ndaj Argjendarit
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+                    <input type="checkbox" checked={!!form.paid}
+                      onChange={e => {
+                        const checked = e.target.checked
+                        set('paid', checked ? 1 : 0)
+                        if (!checked) set('argjendar_paid_date', '')
+                      }}
+                      className="w-4 h-4" />
+                    <span className="font-semibold">A është paguar argjendari?</span>
+                  </label>
+                  <div>
+                    <label className="form-label !mb-1">
+                      Data e Pagesës <span className="text-rose-600">*</span>
+                    </label>
+                    <input type="date"
+                      value={form.argjendar_paid_date || ''}
+                      onChange={e => set('argjendar_paid_date', e.target.value)}
+                      disabled={!form.paid}
+                      className={`input-field ${!form.paid ? 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed opacity-60' : ''}`}
+                      placeholder="Zgjidh datën kur u pagua" />
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                      {form.paid
+                        ? '👉 Vendos datën reale kur ia dhe paratë argjendarit (jo datën kur mori porosinë).'
+                        : 'E aktivizuar vetëm pasi shëno "argjendari i paguar".'}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div className="md:col-span-2">
@@ -652,7 +681,16 @@ export default function Riparimet() {
                       </td>
                       <td className="px-3 py-3 text-center">
                         {r.paid
-                          ? <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">✓ Paguar</span>
+                          ? (
+                            <>
+                              <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">✓ Paguar</span>
+                              {r.argjendar_paid_date && (
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 whitespace-nowrap">
+                                  {r.argjendar_paid_date}
+                                </div>
+                              )}
+                            </>
+                          )
                           : <span className="badge bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">— </span>}
                       </td>
                       <td className="px-3 py-3">

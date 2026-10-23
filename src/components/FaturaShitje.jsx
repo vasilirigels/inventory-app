@@ -1150,13 +1150,16 @@ function InvoiceList({ date, onOpen, onCreate, onDelete, onStornim, refreshKey, 
             </thead>
             <tbody>
               {list.map(inv => {
-                // Snapshot from the invoice's creation moment — later payments via the
-                // Detyrime Klienti modal are ignored here so daily xhiro stays stable.
-                // Vetëm pjesa cash + POS quhet e paguar; Borxhi shfaqet si i papaguar.
-                const initPaid = truePaidCashPos(inv)
+                // Rreshti i listës tregon gjendjen REALE të faturës (përfshirë pagesat
+                // nga Detyrime Klienti). Totalet në footer mbeten snapshot i momentit
+                // të krijimit (xhiro ditore stabile).
+                const initPaid = n(inv.amount_paid)
                 const due = Math.max(0, n(inv.total_with_vat) - initPaid)
                 const pm  = inv.payment_method
-                const pmBadge = pm === 'debt'
+                const fullyPaid = due <= 0.005
+                const pmBadge = pm === 'debt' && fullyPaid
+                  ? <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">✓ Shlyer</span>
+                  : pm === 'debt'
                   ? <span className="badge bg-amber-100 text-amber-700 dark:text-amber-300">⚠️ Borxh</span>
                   : (pm === 'bank' || pm === 'pos')
                   ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">💳 Me POS</span>
@@ -1453,6 +1456,11 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
   const [notes, setNotes]             = useState('')
   const [items, setItems]             = useState([emptyItem()])
   const [allRates, setAllRates]       = useState({ LEK: 1 })
+  // Pagesat e mëvonshme (nga Detyrime Klienti) — editori mban snapshot-in e
+  // krijimit, prandaj ruajmë veçmas totalin aktual që banner-i të dallojë
+  // faturat e shlyera më pas nga ato që janë ende borxh.
+  const [laterPaidInfo, setLaterPaidInfo] = useState(null)
+  const [laterPayments, setLaterPayments] = useState([])
 
   const isAdmin = getUser()?.role === 'admin'
   const isSalesRole = isSales()
@@ -1480,6 +1488,18 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
         if (invoiceId) {
           const inv = await fetch(`/api/invoices/${invoiceId}`).then(r => r.json())
           if (cancel) return
+          const laterPaid = +(n(inv.amount_paid) - n(inv.initial_amount_paid)).toFixed(2)
+          if (laterPaid > 0.005) {
+            setLaterPaidInfo({ later: laterPaid, totalPaid: n(inv.amount_paid), total: n(inv.total_with_vat), currency: inv.currency || 'LEK' })
+            // Historiku i pagesave të mëvonshme (për panelin informues te editori).
+            try {
+              const pays = await fetch(`/api/invoices/${invoiceId}/payments`).then(r => r.json())
+              if (!cancel) setLaterPayments(Array.isArray(pays) ? pays : [])
+            } catch { if (!cancel) setLaterPayments([]) }
+          } else {
+            setLaterPaidInfo(null)
+            setLaterPayments([])
+          }
           setInvoiceDate(inv.date || date)
           setInvoiceNo(inv.invoice_no || '')
           setCustomer({
@@ -1916,6 +1936,30 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
         </div>
       </div>
 
+      {/* Banner për pagesat e mëvonshme nga Detyrime Klienti.
+          Editori paraqet snapshot-in e krijimit (shuma e paguar në atë moment);
+          pagesat e kryera më pas te Detyrime Klienti nuk reflektohen te fushat
+          "Shuma e Paguar / Pa Paguar" prandaj ky njoftim parandalon konfuzionin. */}
+      {laterPaidInfo && (
+        <div className="card bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 p-3 flex items-start gap-2">
+          <span className="text-2xl leading-none">{laterPaidInfo.totalPaid >= laterPaidInfo.total - 0.005 ? '✓' : 'ℹ️'}</span>
+          <div className="text-sm text-emerald-800 dark:text-emerald-200 leading-snug">
+            {laterPaidInfo.totalPaid >= laterPaidInfo.total - 0.005 ? (
+              <>
+                <strong>Fatura është SHLYER plotësisht</strong> ({fmt(laterPaidInfo.totalPaid)} {laterPaidInfo.currency}) me pagesa të mëvonshme te <em>Detyrime Klienti</em>.
+              </>
+            ) : (
+              <>
+                Fatura ka pagesa të mëvonshme me total <strong>{fmt(laterPaidInfo.later)} {laterPaidInfo.currency}</strong> nga <em>Detyrime Klienti</em>. Total aktual i paguar: <strong>{fmt(laterPaidInfo.totalPaid)} / {fmt(laterPaidInfo.total)} {laterPaidInfo.currency}</strong>.
+              </>
+            )}
+            <div className="text-xs mt-1 text-emerald-700/80 dark:text-emerald-300/80">
+              Fushat "Shuma e Paguar / Pa Paguar" më poshtë tregojnë gjendjen në kohën e krijimit — nuk ndikohen nga pagesat e mëvonshme.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header card */}
       <div className="card grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
@@ -1986,10 +2030,17 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {paymentSplits.length === 0 && (
+                      {paymentSplits.length === 0 && !laterPaidInfo && (
                         <tr>
                           <td colSpan={5} className="px-3 py-4 text-center text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 text-xs">
                             ⚠️ Asnjë pagesë — fatura do të mbetet <span className="font-semibold">borxh i plotë</span>. Përdor butonat më poshtë për të shtuar pagesë.
+                          </td>
+                        </tr>
+                      )}
+                      {paymentSplits.length === 0 && laterPaidInfo && (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-3 text-center text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 text-xs italic">
+                            Asnjë pagesë në krijim — pagesat janë regjistruar më vonë te <strong>Detyrime Klienti</strong> ↓
                           </td>
                         </tr>
                       )}
@@ -2035,6 +2086,45 @@ function InvoiceEditor({ date, invoiceId, onClose, onSaved, online = false }) {
                     </div>
                   )}
                 </div>
+                {/* Historiku i pagesave të mëvonshme (nga Detyrime Klienti) — read-only.
+                    Ruhen te invoice_payments dhe përzihen te amount_paid prej backend-it;
+                    editori nuk mund t'i prekë direkt, prandaj tregohen vetëm për informacion. */}
+                {laterPayments.length > 0 && (
+                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 overflow-hidden bg-emerald-50/40 dark:bg-emerald-900/10">
+                    <div className="px-3 py-2 bg-emerald-100/60 dark:bg-emerald-900/30 text-xs font-semibold text-emerald-800 dark:text-emerald-200 flex items-center justify-between">
+                      <span>💰 Pagesa të Mëvonshme (nga Detyrime Klienti) — {laterPayments.length}</span>
+                      <span className="font-mono tabular-nums">
+                        Total: {fmt(laterPayments.reduce((s, p) => s + n(p.amount), 0))} {currency}
+                      </span>
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead className="bg-white/60 dark:bg-slate-900/40 text-slate-500 dark:text-slate-400">
+                        <tr>
+                          <th className="px-2 py-1.5 text-left font-semibold w-28">Data</th>
+                          <th className="px-2 py-1.5 text-left font-semibold w-28">Metoda</th>
+                          <th className="px-2 py-1.5 text-right font-semibold">Shuma ({currency})</th>
+                          <th className="px-2 py-1.5 text-left font-semibold">Shënime</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {laterPayments.map(p => {
+                          const pmU = (p.payment_method || '').toLowerCase()
+                          const methodBadge = pmU === 'bank' || pmU === 'pos'
+                            ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë/POS</span>
+                            : <span className="badge bg-emerald-100 text-emerald-700 dark:text-emerald-300">💵 Cash</span>
+                          return (
+                            <tr key={p.id} className="border-t border-emerald-100 dark:border-emerald-900/40">
+                              <td className="px-2 py-1.5 tabular-nums text-slate-700 dark:text-slate-200">{p.date}</td>
+                              <td className="px-2 py-1.5">{methodBadge}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">{fmt(n(p.amount))}</td>
+                              <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300 italic">{p.notes || '—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Totali ({currency})</label>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getUser } from '../lib/auth.js'
-import { setLastReadCommentId } from '../lib/unreadComments.js'
+import { setLastReadCommentId, signalChatActivity, getNextPollInterval } from '../lib/unreadComments.js'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
 
 // Chat i brendshëm — çdo përdorues shikon të njëjtat mesazhe, dhe realtime
@@ -72,30 +72,65 @@ export default function Komentet() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    // Hapja e faqes Komentet = aktivitet → polling i shpejtë (2s) për 1 min.
+    signalChatActivity()
+    load()
+  }, [load])
   useRealtimeSync('comments', load)
 
-  // Poll i lehtë çdo 30s — pyet vetëm MAX(id). Fetch të plotë (500 rreshta)
-  // vetëm kur MAX(id) ndryshon. WS lokal nuk sheh komente nga PC të tjera;
-  // ky poll e mbush hendekun pa djegur row-reads në Turso. Intervalin e mbajmë
-  // të njëjtë me useUnreadCommentsCount (30s) që të mos ketë dyfishim thirrjesh.
+  // Fetch incremental — merr vetëm komentet pas knownMaxId dhe i shton listës.
+  // Në vend të 500 rreshtave/thirrje, zakonisht 1-3 rreshta/komente të reja.
+  const fetchIncremental = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/comments/since?id=${knownMaxId.current || 0}`)
+      if (!res.ok) return
+      const fresh = await res.json()
+      if (!Array.isArray(fresh) || fresh.length === 0) return
+      setMessages(prev => {
+        const existing = new Set(prev.map(c => c.id))
+        const added = fresh.filter(c => !existing.has(c.id))
+        return added.length > 0 ? [...prev, ...added] : prev
+      })
+      const maxId = fresh.reduce((m, c) => Math.max(m, c.id), knownMaxId.current)
+      knownMaxId.current = maxId
+      if (maxId > 0) setLastReadCommentId(maxId)
+      // Komenti i ri = aktivitet → mban polling të shpejtë.
+      signalChatActivity()
+    } catch (_) { /* offline */ }
+  }, [])
+
+  // Poll adaptiv — rescheduleon me interval sipas aktivitetit (2s/10s/30s).
   useEffect(() => {
+    let timer = null
+    let stopped = false
     const pollLight = async () => {
       try {
         const res = await fetch('/api/comments/latest-id')
         if (!res.ok) return
         const { id } = await res.json()
-        if ((id || 0) > knownMaxId.current) load()
+        if ((id || 0) > knownMaxId.current) fetchIncremental()
       } catch (_) { /* offline */ }
     }
-    const id = setInterval(pollLight, 30000)
-    const onVisible = () => { if (document.visibilityState === 'visible') pollLight() }
+    const tick = async () => {
+      if (stopped) return
+      await pollLight()
+      if (stopped) return
+      timer = setTimeout(tick, getNextPollInterval())
+    }
+    timer = setTimeout(tick, getNextPollInterval())
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      signalChatActivity()
+      pollLight()
+    }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
-      clearInterval(id)
+      stopped = true
+      if (timer) clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [load])
+  }, [fetchIncremental])
 
   // Ruaj pozicionin: nëse user-i është poshtë, e mbajmë poshtë kur vijnë mesazhe;
   // nëse është duke lexuar lart, nuk e zhvendosim.
@@ -131,6 +166,8 @@ export default function Komentet() {
       }
       setText('')
       wasNearBottom.current = true
+      // Dërgim = aktivitet → poll 2s për 1 min (presim përgjigjen e menjëhershme).
+      signalChatActivity()
       // Rifresko lokalisht; realtime do ta rifreskojë edhe te userat e tjerë.
       load()
     } finally {
@@ -228,7 +265,8 @@ export default function Komentet() {
         <form onSubmit={send} className="border-t border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 flex items-end gap-2 flex-shrink-0">
           <textarea
             value={text}
-            onChange={e => setText(e.target.value)}
+            onChange={e => { setText(e.target.value); signalChatActivity() }}
+            onFocus={() => signalChatActivity()}
             onKeyDown={onKeyDown}
             placeholder="Shkruaj një koment… (Enter për të dërguar, Shift+Enter për rresht të ri)"
             rows={2}

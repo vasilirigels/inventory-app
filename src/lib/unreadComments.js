@@ -130,10 +130,28 @@ function showOsNotification(comment, extraCount) {
 // që të kapim komente të reja që vijnë nga user-a në PC të tjera (databaza
 // Turso është e përbashkët, por broadcast-i i WS jo).
 //
-// Për të kursyer Turso reads: poll bën vetëm SELECT MAX(id) FROM comments
-// (1 rresht/thirrje), fetch të plotë të LIMIT 500 vetëm kur MAX(id) ndryshon.
-// Interval 30s (jo 5s si më parë) — 6× më rrallë, prandaj ~50-100× më pak reads.
-const POLL_MS = 30_000
+// Adaptive polling — intervali ndryshon sipas aktivitetit të fundit:
+//   • <60s pas aktivitetit (chat live)   → poll çdo 2s   (perceptohet instant)
+//   • <10 min pas aktivitetit (normal)   → poll çdo 10s
+//   • idle >10 min                        → poll çdo 30s  (kursen Turso reads)
+// Aktivitet = dërgim mesazhi, hapja e Komenteve, fokus në input, ose marrja
+// e një komenti të ri. Reset-ohet nga signalChatActivity().
+const POLL_FAST = 2_000
+const POLL_NORMAL = 10_000
+const POLL_IDLE = 30_000
+const WINDOW_FAST = 60_000       // 1 min pas aktivitetit = fast
+const WINDOW_NORMAL = 10 * 60_000 // 10 min pas aktivitetit = normal
+
+let lastActivityTs = 0
+export function signalChatActivity() {
+  lastActivityTs = Date.now()
+}
+export function getNextPollInterval() {
+  const elapsed = Date.now() - lastActivityTs
+  if (elapsed < WINDOW_FAST) return POLL_FAST
+  if (elapsed < WINDOW_NORMAL) return POLL_NORMAL
+  return POLL_IDLE
+}
 
 export function useUnreadCommentsCount() {
   const [count, setCount] = useState(0)
@@ -187,17 +205,52 @@ export function useUnreadCommentsCount() {
     } catch (_) { /* offline / boot */ }
   }, [])
 
-  // Poll i lehtë — pyet vetëm MAX(id). Nëse ndryshon, thirr refresh() të plotë.
+  // Poll i lehtë — pyet vetëm MAX(id). Nëse ndryshon, bëj fetch incremental
+  // (vetëm komentet pas knownMaxId) — zakonisht 1-3 rreshta/komente të reja në
+  // vend të 500. Shumë më lirë në Turso reads.
   const pollLight = useCallback(async () => {
     try {
       const res = await fetch('/api/comments/latest-id')
       if (!res.ok) return
       const { id } = await res.json()
       if ((id || 0) > knownMaxId.current) {
-        refresh()
+        await fetchIncremental()
       }
     } catch (_) { /* offline / boot */ }
-  }, [refresh])
+  }, [])
+
+  // Merr vetëm komentet më të reja se ai që njohim. S'kalon përmes `refresh()`
+  // që tërheq 500 rreshta — thjesht i shton (ose zëvendëson duplikatet) listës
+  // dhe triggeron notification-et për kometet e reja të lexuesit.
+  const fetchIncremental = useCallback(async () => {
+    try {
+      const me = getUser()
+      const since = knownMaxId.current || 0
+      const res = await fetch(`/api/comments/since?id=${since}`)
+      if (!res.ok) return
+      const fresh = await res.json()
+      if (!Array.isArray(fresh) || fresh.length === 0) return
+      const maxId = fresh.reduce((m, c) => Math.max(m, c.id), knownMaxId.current)
+      knownMaxId.current = maxId
+      const lastRead = getLastReadCommentId()
+      // Rifresko count-in me shumën aktuale të palexuarve; count-in e saktë
+      // s'mund ta rrisim thjesht me fresh.length sepse disa mund të jenë nga vetja.
+      const unreadNew = fresh.filter(c => c.id > lastRead && c.user_id !== me?.id)
+      if (unreadNew.length > 0) setCount(c => c + unreadNew.length)
+      const suppress = isOnKomentetPage() && document.visibilityState === 'visible'
+      const toNotify = fresh.filter(c => c.id > (lastNotifiedId.current ?? 0) && c.user_id !== me?.id)
+                            .sort((a, b) => a.id - b.id)
+      lastNotifiedId.current = maxId
+      if (toNotify.length > 0 && !suppress) {
+        for (const c of toNotify) enqueueToast(c)
+        playPing()
+        showOsNotification(toNotify[toNotify.length - 1], toNotify.length - 1)
+      }
+      // Komenti i ri ri-nis dritaren e aktivitetit — kështu polling vazhdon te
+      // shpejtë për 1 min, duke kapur përgjigjet në kohë reale.
+      if (toNotify.length > 0) signalChatActivity()
+    } catch (_) { /* offline */ }
+  }, [])
 
   // Kërko lejen për njoftime një herë kur user-i ka bërë login.
   useEffect(() => { requestNotifyPermission() }, [])
@@ -209,14 +262,27 @@ export function useUnreadCommentsCount() {
     return () => { listeners.delete(refresh) }
   }, [refresh])
 
-  // Poll periodik i lehtë — kap komentet nga PC të tjera që WS lokal nuk i sheh.
+  // Poll adaptiv — rescheduleon vetveten me interval sipas aktivitetit.
+  // setTimeout + reschedule (jo setInterval) sepse intervali ndryshon dinamikisht.
   useEffect(() => {
-    const id = setInterval(pollLight, POLL_MS)
-    // Rifresko menjëherë kur tabi kthehet aktiv (kursen kohën e pritjes).
-    const onVisible = () => { if (document.visibilityState === 'visible') pollLight() }
+    let timer = null
+    let stopped = false
+    const tick = async () => {
+      if (stopped) return
+      await pollLight()
+      if (stopped) return
+      timer = setTimeout(tick, getNextPollInterval())
+    }
+    timer = setTimeout(tick, getNextPollInterval())
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      signalChatActivity() // kthimi te tabi është sinjal aktiviteti
+      pollLight()
+    }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
-      clearInterval(id)
+      stopped = true
+      if (timer) clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [pollLight])

@@ -1072,6 +1072,12 @@ const MIGRATIONS = [
   "ALTER TABLE repairs ADD COLUMN argjendar_name TEXT DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_repairs_argjendar ON repairs(argjendar_name)",
 
+  // Data e pagesës së argjendarit — e ndryshme nga date_received (data e marrjes
+  // së porosisë). Argjendari paguhet më vonë; dua të dij datën reale të pagesës
+  // për raportet e flukseve monetare dhe borxheve ndaj argjendarit.
+  "ALTER TABLE repairs ADD COLUMN argjendar_paid_date TEXT DEFAULT ''",
+  "CREATE INDEX IF NOT EXISTS idx_repairs_argj_paid_date ON repairs(argjendar_paid_date)",
+
   // Regjistër i argjendarëve — krijohet një herë nga user-i dhe pastaj përdoret
   // nga dropdown-i te forma e riparimit. Emri kopjohet te repairs.argjendar_name
   // si snapshot (rename → update auto edhe te riparimet ekzistuese).
@@ -1105,6 +1111,18 @@ const MIGRATIONS = [
   "ALTER TABLE partner_debt_payments ADD COLUMN source_withdrawal_id INTEGER DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS idx_partner_debts_src_wd ON partner_debts(source_withdrawal_id)",
   "CREATE INDEX IF NOT EXISTS idx_partner_debt_payments_src_wd ON partner_debt_payments(source_withdrawal_id)",
+
+  // payment_method ('cash' | 'bank') për investime dhe pagesa borxhi — që te
+  // Investimi të ndahen flukset sipas mënyrës së pagesës (default 'cash' për
+  // rreshtat ekzistues që nuk kanë vlerë).
+  "ALTER TABLE partner_investments ADD COLUMN payment_method TEXT DEFAULT 'cash'",
+  "ALTER TABLE partner_debt_payments ADD COLUMN payment_method TEXT DEFAULT 'cash'",
+
+  // source_investment_id lidh borxhet auto-të krijuara me investimin që i
+  // triggeroi — kështu kur fshihet investimi, cascade fshihet edhe borxhi.
+  // Rregulli: çdo investim nga Biba shton 30% borxh Diana→Biba.
+  "ALTER TABLE partner_debts ADD COLUMN source_investment_id INTEGER DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_partner_debts_src_inv ON partner_debts(source_investment_id)",
 ];
 
 async function initDB() {

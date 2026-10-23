@@ -574,10 +574,10 @@ const SALES_WRITE_ALLOW = [
 app.get('/api/comments', async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    // Cache 30s: multi-PC scenario — 3 përdorues hapin faqen njëkohësisht → 1
-    // query Turso në vend të 3. Invalidohet automatikisht kur postohet ose
-    // fshihet një koment (rule më poshtë te CACHE_INVALIDATION_RULES).
-    const rows = await cached(`comments:limit:${limit}`, 30_000, () => queryAll(
+    // Thirret në fillim të faqes dhe pas WS events — jo nga poll. Cache 10s
+    // batch-on thirrjet burst (p.sh. hapja e njëkohshme te disa përdorues).
+    // Komentet e reja nga poll trajtohen nga /api/comments/since (incremental).
+    const rows = await cached(`comments:limit:${limit}`, 10_000, () => queryAll(
       `SELECT id, user_id, username, role, body, created_at
        FROM comments ORDER BY id ASC LIMIT ?`,
       [limit],
@@ -594,6 +594,22 @@ app.get('/api/comments/latest-id', async (req, res) => {
   try {
     const row = await queryOne('SELECT COALESCE(MAX(id), 0) AS id FROM comments');
     res.json({ id: row?.id || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Fetch incremental — kthen vetëm komentet me id > ?since. Përdoret pas poll-it
+// kur zbulohet latestId > knownMaxId: në vend të 500 rreshtave, kthehen vetëm
+// N komentet e reja (zakonisht 1-3). Pa cache sepse klienti e dërgon kur dëshiron
+// freshness; batch-im nuk nevojitet (thirrja është vetëm pas ndryshimit).
+app.get('/api/comments/since', async (req, res) => {
+  try {
+    const since = Math.max(0, Number(req.query.id) || 0);
+    const rows = await queryAll(
+      `SELECT id, user_id, username, role, body, created_at
+         FROM comments WHERE id > ? ORDER BY id ASC LIMIT 500`,
+      [since],
+    );
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -821,12 +837,16 @@ app.post('/api/repairs', async (req, res) => {
       );
       if (clash) return res.status(409).json({ error: 'product_reserved' });
     }
+    // Data e pagesës ruhet si e vendosur nga user-i. S'ka default — nëse paid=1
+    // pa datë, mbetet bosh dhe user mund ta plotësojë kur realisht paguan.
+    const paidFlag = d.paid ? 1 : 0;
+    const argjendarPaidDate = String(d.argjendar_paid_date || '').trim();
     const result = await run(
       `INSERT INTO repairs
        (date_received, customer_name, customer_phone, item_description,
         issue_description, notes, price, currency, status, paid, created_by,
-        product_id, deposit, argjendar_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        product_id, deposit, argjendar_name, argjendar_paid_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         date_received,
         customer_name,
@@ -837,11 +857,12 @@ app.post('/api/repairs', async (req, res) => {
         Number(d.price) || 0,
         String(d.currency || 'LEK'),
         d.status && ['pranuar','ne_pune','gati','dorezuar'].includes(d.status) ? d.status : 'pranuar',
-        d.paid ? 1 : 0,
+        paidFlag,
         req.user.username,
         product_id,
         Math.max(0, Number(d.deposit) || 0),
         String(d.argjendar_name || '').trim(),
+        argjendarPaidDate,
       ],
     );
     const row = await queryOne(`${REPAIR_SELECT} WHERE r.id = ?`, [Number(result.lastInsertRowid)]);
@@ -880,12 +901,17 @@ app.put('/api/repairs/:id', async (req, res) => {
       }
     }
     const date_delivered = String(d.date_delivered || '');
+    const paidFlag = d.paid ? 1 : 0;
+    // Data e pagesës: ruhet siç e dërgon user-i. Nëse pagesa ç'aktivizohet
+    // (1→0), fshihet (nuk ka më kuptim).
+    let argjendarPaidDate = String(d.argjendar_paid_date || '').trim();
+    if (!paidFlag) argjendarPaidDate = '';
     await run(
       `UPDATE repairs SET
          date_received = ?, customer_name = ?, customer_phone = ?,
          item_description = ?, issue_description = ?, notes = ?,
          price = ?, currency = ?, status = ?, date_delivered = ?, paid = ?,
-         product_id = ?, deposit = ?, argjendar_name = ?,
+         product_id = ?, deposit = ?, argjendar_name = ?, argjendar_paid_date = ?,
          updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
@@ -899,10 +925,11 @@ app.put('/api/repairs/:id', async (req, res) => {
         String(d.currency || 'LEK'),
         status,
         date_delivered,
-        d.paid ? 1 : 0,
+        paidFlag,
         product_id,
         Math.max(0, Number(d.deposit) || 0),
         String(d.argjendar_name || '').trim(),
+        argjendarPaidDate,
         id,
       ],
     );
@@ -982,11 +1009,13 @@ app.use('/api', (req, res, next) => {
 // Prekjet indirekte (purchase-invoices krijojnë/përditësojnë produkte,
 // invoices ulin stokun) invalidojnë cache-in 'products'.
 const CACHE_INVALIDATION_RULES = [
-  { pathRe: /^\/api\/(products|purchase-invoices|invoices|magazina-|flete-|hurda-purchases|has-purchases)/, keys: ['products', 'client-debts-summary', 'supplier-debts-summary', 'invoices-by-range', 'report', 'yearly', 'monthly'] },
-  { pathRe: /^\/api\/invoice-payments/,   keys: ['client-debts-summary', 'invoices-by-range'] },
-  { pathRe: /^\/api\/purchase-payments/,  keys: ['supplier-debts-summary'] },
+  { pathRe: /^\/api\/(products|purchase-invoices|invoices|magazina-|flete-|hurda-purchases|has-purchases)/, keys: ['products', 'client-debts-summary', 'supplier-debts-summary', 'invoices-by-range', 'report', 'yearly', 'monthly', 'pnl'] },
+  { pathRe: /^\/api\/invoice-payments/,   keys: ['client-debts-summary', 'invoices-by-range', 'pnl'] },
+  { pathRe: /^\/api\/purchase-payments/,  keys: ['supplier-debts-summary', 'pnl'] },
   { pathRe: /^\/api\/expense-categories/, keys: ['expense-categories'] },
-  { pathRe: /^\/api\/expense-entries/,    keys: ['report', 'yearly', 'monthly'] },
+  { pathRe: /^\/api\/expense-entries/,    keys: ['report', 'yearly', 'monthly', 'pnl'] },
+  { pathRe: /^\/api\/marketing/,          keys: ['pnl'] },
+  { pathRe: /^\/api\/worker/,             keys: ['pnl'] },
   { pathRe: /^\/api\/suppliers/,          keys: ['suppliers'] },
   { pathRe: /^\/api\/clients/,            keys: ['clients'] },
   { pathRe: /^\/api\/comments/,           keys: ['comments'] },
@@ -1599,6 +1628,460 @@ app.get('/api/report', async (req, res) => {
       buckets,
     };
     cache.set(`report:${from}:${to}`, payload, 5 * 60_000);
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// P&L / BILANC — për Përmbledhësen. Agregon nga tabelat burim (invoices,
+// invoice_items, products, expense_entries, marketing_contract_entries,
+// worker_payments) për të kthyer një strukturë të qartë:
+//   byCategory: { flori|diamant|tjeter: { per currency: {revenue, cost, profit, cope, gram, has} } }
+//   byPaymentMethod: { cash|bank|debt|mikse: per currency revenue }
+//   expenses: per currency (ndaresisht: daily, transport, marketing contracts, worker payments)
+// Fitimi llogaritet VETËM si (Shitje − Kosto artikujsh), per kategori — shpenzimet
+// mbahen të ndara si "cost pool" për t'u paraqitur veçmas, jo t'i zbresin nga
+// marzhi i kategorive.
+// ============================================================
+app.get('/api/pnl', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
+
+    // v5 = + HAS te detyrimet (klientë + furnitorë), proporcional me borxhin
+    const cacheKey = `pnl:v5:${from}:${to}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
+
+    const CURS = ['LEK', 'EUR', 'USD', 'GBP', 'CHF'];
+    const zeroCur = () => ({ LEK: 0, EUR: 0, USD: 0, GBP: 0, CHF: 0 });
+
+    // Shitje per kategori + monedhë. is_credit_note trajtohet me shenjë negative
+    // (kreditore = rikthim fature). Fatura të anuluara përjashtohen.
+    // Kosto: preferohet products.cost_price, me fallback te
+    // products.purchase_price_no_vat (kostoja e blerjes pa TVSH). Nëse të dyja
+    // janë 0 (ose produkti është fshirë / artikull manual pa product_id) →
+    // artikulli numërohet si "pa kosto të ditur" dhe raportohet veçmas në
+    // cope_unknown_cost / revenue_unknown_cost për transparencë në UI.
+    // Dhuratat (is_gift=1) përjashtohen nga numërimi i "pa kosto" sepse pritet
+    // të jenë 0 revenue dhe kostoja llogaritet ndryshe.
+    // Materiali lexohet nga products.material. Nëse produkti është fshirë →
+    // NULL → 'tjeter'.
+    const salesRows = await queryAll(
+      `SELECT
+         CASE
+           WHEN COALESCE(p.material, '') = 'flori'   THEN 'flori'
+           WHEN COALESCE(p.material, '') = 'diamant' THEN 'diamant'
+           ELSE 'tjeter'
+         END AS cat,
+         COALESCE(i.currency, 'LEK') AS cur,
+         COALESCE(i.payment_method, 'cash') AS pm,
+         COALESCE(i.is_credit_note, 0) AS is_credit,
+         SUM(COALESCE(ii.qty, 0)) AS cope,
+         SUM(COALESCE(ii.gram, 0) * COALESCE(ii.qty, 0)) AS gram,
+         SUM(COALESCE(ii.has_gram, 0) * COALESCE(ii.qty, 0)) AS has_g,
+         SUM(COALESCE(ii.total_with_vat, 0)) AS revenue_with_vat,
+         SUM(COALESCE(ii.qty, 0) *
+             COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0)
+         ) AS cost,
+         SUM(CASE
+               WHEN COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0) <= 0
+                AND COALESCE(ii.is_gift, 0) = 0
+               THEN COALESCE(ii.qty, 0) ELSE 0 END
+         ) AS cope_unknown_cost,
+         SUM(CASE
+               WHEN COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0) <= 0
+                AND COALESCE(ii.is_gift, 0) = 0
+               THEN COALESCE(ii.total_with_vat, 0) ELSE 0 END
+         ) AS revenue_unknown_cost
+       FROM invoices i
+       JOIN invoice_items ii ON ii.invoice_id = i.id
+       LEFT JOIN products p ON p.id = ii.product_id
+       WHERE i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0
+       GROUP BY cat, cur, pm, is_credit`,
+      [from, to]
+    );
+
+    const blankMetrics = () => ({
+      cope: 0, gram: 0, has: 0,
+      revenue: zeroCur(), cost: zeroCur(), profit: zeroCur(),
+      // Artikuj pa cost_price të ditur — për të njoftuar user-in që fitimi
+      // mund të jetë i mbivlerësuar për këtë pjesë (shih warning në UI).
+      cope_unknown: 0,
+      revenue_unknown: zeroCur(),
+    });
+    const byCategory = { flori: blankMetrics(), diamant: blankMetrics(), tjeter: blankMetrics() };
+    const byPaymentMethod = { cash: zeroCur(), bank: zeroCur(), pos: zeroCur(), debt: zeroCur(), mikse: zeroCur() };
+
+    for (const r of salesRows) {
+      const sign = r.is_credit ? -1 : 1;
+      const cat = r.cat; const cur = (r.cur || 'LEK').toUpperCase();
+      if (!(cur in zeroCur())) continue;
+      const m = byCategory[cat];
+      m.cope += sign * (r.cope || 0);
+      m.gram += sign * (r.gram || 0);
+      m.has  += sign * (r.has_g || 0);
+      m.revenue[cur] += sign * (r.revenue_with_vat || 0);
+      m.cost[cur]    += sign * (r.cost || 0);
+      m.profit[cur]  += sign * ((r.revenue_with_vat || 0) - (r.cost || 0));
+      m.cope_unknown += sign * (r.cope_unknown_cost || 0);
+      m.revenue_unknown[cur] += sign * (r.revenue_unknown_cost || 0);
+      const pm = r.pm in byPaymentMethod ? r.pm : 'cash';
+      byPaymentMethod[pm][cur] += sign * (r.revenue_with_vat || 0);
+    }
+
+    // Shpenzime (ndarë sipas kind: daily, transport, marketing).
+    const expRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur,
+              COALESCE(amount, 0)       AS amt,
+              COALESCE(kind, 'daily')   AS kind
+         FROM expense_entries WHERE date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const expenses_daily     = zeroCur();
+    const expenses_transport = zeroCur();
+    const expenses_marketing = zeroCur();
+    for (const r of expRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (!(c in zeroCur())) continue;
+      if (r.kind === 'transport')      expenses_transport[c] += r.amt;
+      else if (r.kind === 'marketing') expenses_marketing[c] += r.amt;
+      else                              expenses_daily[c]     += r.amt;
+    }
+
+    // Marketing nga kontratat — përfshi BOTH 'cash' (pagesa në para) DHE
+    // 'product' (produkte të dhëna si marketing — kostoja në EUR). Të dyja
+    // reduktojnë fitimin real, prandaj futen te shpenzimet marketing të periudhës.
+    const mktAllRows = await queryAll(
+      `SELECT COALESCE(type, '') AS type, COALESCE(amount_eur, 0) AS amt
+         FROM marketing_contract_entries
+        WHERE date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    let mktPeriodCash = 0, mktPeriodProduct = 0;
+    for (const r of mktAllRows) {
+      const v = Number(r.amt) || 0;
+      if (r.type === 'cash') mktPeriodCash += v;
+      else if (r.type === 'product') mktPeriodProduct += v;
+    }
+
+    // Marketing jashtë kontratave — tabela `marketing_expenses` përmban
+    // shpenzime ad-hoc marketing që NUK janë të lidhura me ndonjë kontratë
+    // (p.sh. kamera për një event). Zbret direkt nga fitimi.
+    const mktExtraRows = await queryAll(
+      `SELECT COALESCE(currency, 'LEK') AS cur, COALESCE(amount, 0) AS amt
+         FROM marketing_expenses WHERE date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    let mktPeriodExtra = 0; // vetëm për audit; grupohet per cur më poshtë
+    for (const r of mktExtraRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      const v = Number(r.amt) || 0;
+      if (c in zeroCur()) expenses_marketing[c] += v;
+      if (c === 'EUR') mktPeriodExtra += v;
+    }
+
+    expenses_marketing.EUR += mktPeriodCash + mktPeriodProduct;
+
+    // Pagesa punëtorësh — tabela ka vetëm kolona EUR dhe filtrohet me date_paid.
+    const wpRows = await queryAll(
+      `SELECT COALESCE(salary_cash_eur, 0) + COALESCE(bonus_cash_eur, 0)
+              + COALESCE(salary_bank_eur, 0) + COALESCE(bonus_bank_eur, 0) AS eur
+         FROM worker_payments WHERE date_paid BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const workerPayments = zeroCur();
+    for (const r of wpRows) workerPayments.EUR += (r.eur || 0);
+
+    // Fitimi total per currency = SUM e fitimit të kategorive (NUK zbret shpenzimet
+    // — ato paraqiten veçmas te UI dhe lexuesi i sheh si cost pool i veçantë).
+    const totalProfit = zeroCur();
+    for (const cat of ['flori', 'diamant', 'tjeter']) {
+      for (const c of CURS) totalProfit[c] += byCategory[cat].profit[c];
+    }
+
+    // Marzhi per kategori per currency (profit / revenue × 100). Null kur revenue≈0.
+    const marginOf = (metrics) => {
+      const out = {};
+      for (const c of CURS) {
+        const rev = metrics.revenue[c];
+        out[c] = Math.abs(rev) > 0.005 ? +((metrics.profit[c] / rev) * 100).toFixed(2) : null;
+      }
+      return out;
+    };
+    const marginByCategory = {
+      flori: marginOf(byCategory.flori),
+      diamant: marginOf(byCategory.diamant),
+      tjeter: marginOf(byCategory.tjeter),
+    };
+
+    // Rrumbullako numrat për payload të lexueshëm.
+    const roundCur = (obj) => {
+      const o = {};
+      for (const c of CURS) o[c] = +(obj[c] || 0).toFixed(2);
+      return o;
+    };
+    for (const cat of ['flori', 'diamant', 'tjeter']) {
+      const m = byCategory[cat];
+      m.cope           = +m.cope.toFixed(2);
+      m.gram           = +m.gram.toFixed(3);
+      m.has            = +m.has.toFixed(3);
+      m.revenue        = roundCur(m.revenue);
+      m.cost           = roundCur(m.cost);
+      m.profit         = roundCur(m.profit);
+      m.cope_unknown   = +m.cope_unknown.toFixed(2);
+      m.revenue_unknown = roundCur(m.revenue_unknown);
+    }
+    for (const pm of Object.keys(byPaymentMethod)) {
+      byPaymentMethod[pm] = roundCur(byPaymentMethod[pm]);
+    }
+
+    // ── Detyrime Klientesh — për borxhet mban edhe HAS (grama floriri të
+    // pastër) në proporcion me borxhin e mbetur. Formula:
+    //   has_due = total_has_gram_of_invoice × (amount_due / total_with_vat)
+    // Përgjigjet "Sa borxh gjeneroi kjo periudhë dhe sa HAS do mbetet kur
+    // klientët paguajnë?".
+    const clientDebtRows = await queryAll(
+      `SELECT COALESCE(i.currency, 'LEK') AS cur,
+              SUM(COALESCE(i.amount_due, i.total_with_vat - i.amount_paid)) AS due,
+              SUM(
+                CASE WHEN COALESCE(i.total_with_vat, 0) > 0.005
+                  THEN COALESCE((SELECT SUM(COALESCE(ii.has_gram,0) * COALESCE(ii.qty,0))
+                                   FROM invoice_items ii WHERE ii.invoice_id = i.id), 0)
+                       * COALESCE(i.amount_due, i.total_with_vat - i.amount_paid)
+                       / i.total_with_vat
+                ELSE 0 END
+              ) AS has_due,
+              COUNT(DISTINCT COALESCE(NULLIF(i.customer_nipt,''), i.customer_name)) AS client_count
+         FROM invoices i
+        WHERE COALESCE(i.cancelled, 0) = 0
+          AND i.date BETWEEN ? AND ?
+          AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005
+        GROUP BY cur`,
+      [from, to]
+    );
+    const clientDebts = zeroCur();
+    let clientDebtors = 0;
+    let clientDebtsHas = 0;
+    for (const r of clientDebtRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in zeroCur()) clientDebts[c] += Number(r.due) || 0;
+      clientDebtors += Number(r.client_count) || 0;
+      clientDebtsHas += Number(r.has_due) || 0;
+    }
+
+    // ── Detyrime Furnitori — e njëjta logjikë me HAS proporcional.
+    const supplierDebtRows = await queryAll(
+      `SELECT COALESCE(pi.currency, 'LEK') AS cur,
+              SUM(COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid)) AS due,
+              SUM(
+                CASE WHEN COALESCE(pi.total_with_vat, 0) > 0.005
+                  THEN COALESCE((SELECT SUM(COALESCE(pit.has_gram,0) * COALESCE(pit.qty,0))
+                                   FROM purchase_items pit WHERE pit.purchase_id = pi.id), 0)
+                       * COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid)
+                       / pi.total_with_vat
+                ELSE 0 END
+              ) AS has_due,
+              COUNT(DISTINCT COALESCE(NULLIF(pi.supplier_nipt,''), pi.supplier_name)) AS supplier_count
+         FROM purchase_invoices pi
+        WHERE COALESCE(pi.type, 'purchase') = 'purchase'
+          AND pi.date BETWEEN ? AND ?
+          AND COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0.005
+        GROUP BY cur`,
+      [from, to]
+    );
+    const supplierDebts = zeroCur();
+    let supplierDebtors = 0;
+    let supplierDebtsHas = 0;
+    for (const r of supplierDebtRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in zeroCur()) supplierDebts[c] += Number(r.due) || 0;
+      supplierDebtors += Number(r.supplier_count) || 0;
+      supplierDebtsHas += Number(r.has_due) || 0;
+    }
+
+    // ── Totali kumulativ i borxheve (gjithë kohës) + HAS.
+    const clientDebtAllRows = await queryAll(
+      `SELECT COALESCE(i.currency, 'LEK') AS cur,
+              SUM(COALESCE(i.amount_due, i.total_with_vat - i.amount_paid)) AS due,
+              SUM(
+                CASE WHEN COALESCE(i.total_with_vat, 0) > 0.005
+                  THEN COALESCE((SELECT SUM(COALESCE(ii.has_gram,0) * COALESCE(ii.qty,0))
+                                   FROM invoice_items ii WHERE ii.invoice_id = i.id), 0)
+                       * COALESCE(i.amount_due, i.total_with_vat - i.amount_paid)
+                       / i.total_with_vat
+                ELSE 0 END
+              ) AS has_due,
+              COUNT(DISTINCT COALESCE(NULLIF(i.customer_nipt,''), i.customer_name)) AS client_count
+         FROM invoices i
+        WHERE COALESCE(i.cancelled, 0) = 0
+          AND COALESCE(i.amount_due, i.total_with_vat - i.amount_paid) > 0.005
+        GROUP BY cur`
+    );
+    const clientDebtsAll = zeroCur();
+    let clientDebtorsAll = 0;
+    let clientDebtsHasAll = 0;
+    for (const r of clientDebtAllRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in zeroCur()) clientDebtsAll[c] += Number(r.due) || 0;
+      clientDebtorsAll += Number(r.client_count) || 0;
+      clientDebtsHasAll += Number(r.has_due) || 0;
+    }
+    const supplierDebtAllRows = await queryAll(
+      `SELECT COALESCE(pi.currency, 'LEK') AS cur,
+              SUM(COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid)) AS due,
+              SUM(
+                CASE WHEN COALESCE(pi.total_with_vat, 0) > 0.005
+                  THEN COALESCE((SELECT SUM(COALESCE(pit.has_gram,0) * COALESCE(pit.qty,0))
+                                   FROM purchase_items pit WHERE pit.purchase_id = pi.id), 0)
+                       * COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid)
+                       / pi.total_with_vat
+                ELSE 0 END
+              ) AS has_due,
+              COUNT(DISTINCT COALESCE(NULLIF(pi.supplier_nipt,''), pi.supplier_name)) AS supplier_count
+         FROM purchase_invoices pi
+        WHERE COALESCE(pi.type, 'purchase') = 'purchase'
+          AND COALESCE(pi.amount_due, pi.total_with_vat - pi.amount_paid) > 0.005
+        GROUP BY cur`
+    );
+    const supplierDebtsAll = zeroCur();
+    let supplierDebtorsAll = 0;
+    let supplierDebtsHasAll = 0;
+    for (const r of supplierDebtAllRows) {
+      const c = (r.cur || 'LEK').toUpperCase();
+      if (c in zeroCur()) supplierDebtsAll[c] += Number(r.due) || 0;
+      supplierDebtorsAll += Number(r.supplier_count) || 0;
+      supplierDebtsHasAll += Number(r.has_due) || 0;
+    }
+
+    // ── Riparimet si burim shtesë i të ardhurave. Numërohen vetëm riparimet
+    // e dorëzuara (dmth. shërbimi është kryer dhe pagesa është e detyrueshme/
+    // marrë). Deposit është pagesë pjesore ndaj çmimit — nuk shtohet veçmas.
+    const repairRows = await queryAll(
+      `SELECT COALESCE(currency, 'EUR') AS cur,
+              COALESCE(price, 0) AS price,
+              COALESCE(paid, 0) AS paid
+         FROM repairs
+        WHERE status = 'dorezuar'
+          AND COALESCE(date_delivered, date_received) BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const repairs = { total: zeroCur(), count: 0, unpaid: zeroCur() };
+    for (const r of repairRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (!(c in zeroCur())) continue;
+      const price = Number(r.price) || 0;
+      const isPaid = Number(r.paid) || 0;
+      repairs.total[c] += price;
+      repairs.count += 1;
+      if (!isPaid) repairs.unpaid[c] += price;
+    }
+
+    // ── Marketing i detajuar: ndaj CASH (para të dhëna) nga PRODUCT (produkte
+    // të dhëna) — të dyja janë kosto marketing, por drejtuesi i sheh veç e veç.
+    // Buxheti nga marketing_contracts.total_amount_eur = pritshmëria që caktoi
+    // user-i kur hapi kontratën; shpesh tejkalohet kur jepen shumë produkte.
+    // Marketing summary — kontratat/hyrjet FILTRUAR sipas periudhës:
+    //   - Kontratat sipas `start_date` (data kur u hap kontrata)
+    //   - Hyrjet (cash/product/extra) sipas `date`
+    // Totalet "gjithë kohës" ruhen veçmas si referencë.
+    const mktSummary = await queryOne(
+      `SELECT
+         (SELECT COUNT(*) FROM marketing_contracts WHERE status = 'open'   AND start_date BETWEEN ? AND ?) AS open_contracts,
+         (SELECT COUNT(*) FROM marketing_contracts WHERE status = 'closed' AND start_date BETWEEN ? AND ?) AS closed_contracts,
+         (SELECT COALESCE(SUM(total_amount_eur), 0) FROM marketing_contracts WHERE status = 'open'   AND start_date BETWEEN ? AND ?) AS open_budget_eur,
+         (SELECT COALESCE(SUM(total_amount_eur), 0) FROM marketing_contracts WHERE status = 'closed' AND start_date BETWEEN ? AND ?) AS closed_budget_eur,
+         (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'cash'    AND date BETWEEN ? AND ?) AS paid_cash_total,
+         (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'product' AND date BETWEEN ? AND ?) AS paid_product_total,
+         (SELECT COUNT(*)                       FROM marketing_contract_entries WHERE type = 'product' AND date BETWEEN ? AND ?) AS product_entries_count,
+         (SELECT COALESCE(SUM(COALESCE(amount_eur, amount, 0)), 0) FROM marketing_expenses WHERE date BETWEEN ? AND ?) AS paid_extra_total,
+         (SELECT COUNT(*)                       FROM marketing_expenses WHERE date BETWEEN ? AND ?) AS extra_entries_count,
+         -- Totalet gjithë kohës (reference):
+         (SELECT COUNT(*) FROM marketing_contracts WHERE status = 'open')   AS all_open_contracts,
+         (SELECT COALESCE(SUM(total_amount_eur), 0) FROM marketing_contracts WHERE status = 'open') AS all_open_budget_eur,
+         (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'cash')    AS all_paid_cash,
+         (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'product') AS all_paid_product,
+         (SELECT COALESCE(SUM(COALESCE(amount_eur, amount, 0)), 0) FROM marketing_expenses)           AS all_paid_extra`,
+      [from, to, from, to, from, to, from, to, from, to, from, to, from, to, from, to, from, to]
+    );
+    // Periudhë (merret nga mktSummary):
+    const paidCashPeriod    = Number(mktSummary?.paid_cash_total) || 0;
+    const paidProductPeriod = Number(mktSummary?.paid_product_total) || 0;
+    const paidExtraPeriod   = Number(mktSummary?.paid_extra_total) || 0;
+    const openBudgetPeriod  = Number(mktSummary?.open_budget_eur) || 0;
+    // Gjithë kohës (reference):
+    const paidCashAll    = Number(mktSummary?.all_paid_cash) || 0;
+    const paidProductAll = Number(mktSummary?.all_paid_product) || 0;
+    const paidExtraAll   = Number(mktSummary?.all_paid_extra) || 0;
+    const openBudgetAll  = Number(mktSummary?.all_open_budget_eur) || 0;
+    const marketing = {
+      // ── Në periudhë:
+      open_contracts:          Number(mktSummary?.open_contracts) || 0,
+      closed_contracts:        Number(mktSummary?.closed_contracts) || 0,
+      open_budget_eur:         +openBudgetPeriod.toFixed(2),
+      closed_budget_eur:       +(Number(mktSummary?.closed_budget_eur) || 0).toFixed(2),
+      paid_cash_eur_total:     +paidCashPeriod.toFixed(2),
+      paid_product_eur_total:  +paidProductPeriod.toFixed(2),
+      paid_extra_eur_total:    +paidExtraPeriod.toFixed(2),
+      paid_total_eur:          +(paidCashPeriod + paidProductPeriod + paidExtraPeriod).toFixed(2),
+      product_entries_count:   Number(mktSummary?.product_entries_count) || 0,
+      extra_entries_count:     Number(mktSummary?.extra_entries_count) || 0,
+      budget_variance_eur:     +((paidCashPeriod + paidProductPeriod + paidExtraPeriod) - openBudgetPeriod).toFixed(2),
+      // Në periudhën e zgjedhur (nga `expenses_marketing` që kombinon
+      // contract_entries + marketing_expenses për datën):
+      paid_cash_period_eur:    +mktPeriodCash.toFixed(2),
+      paid_product_period_eur: +mktPeriodProduct.toFixed(2),
+      paid_extra_period_eur:   +mktPeriodExtra.toFixed(2),
+      paid_in_period_eur:      +(mktPeriodCash + mktPeriodProduct + mktPeriodExtra).toFixed(2),
+      // ── Totalet gjithë kohës (për të ruajtur figurën e madhe):
+      all_time: {
+        open_contracts:    Number(mktSummary?.all_open_contracts) || 0,
+        open_budget_eur:   +openBudgetAll.toFixed(2),
+        paid_cash_eur:     +paidCashAll.toFixed(2),
+        paid_product_eur:  +paidProductAll.toFixed(2),
+        paid_extra_eur:    +paidExtraAll.toFixed(2),
+        paid_total_eur:    +(paidCashAll + paidProductAll + paidExtraAll).toFixed(2),
+      },
+    };
+
+    const payload = {
+      from, to,
+      byCategory,
+      marginByCategory,
+      byPaymentMethod,
+      expenses: {
+        daily:     roundCur(expenses_daily),
+        transport: roundCur(expenses_transport),
+        marketing: roundCur(expenses_marketing),
+        workers:   roundCur(workerPayments),
+      },
+      totalProfit: roundCur(totalProfit),
+      // Borxhet filtruar sipas datës së faturës (periudha) + totale gjithë kohës
+      // për referencë. UI mund të tregojë të dyja.
+      debts: {
+        clients:             roundCur(clientDebts),
+        clients_count:       clientDebtors,
+        clients_has:         +clientDebtsHas.toFixed(3),
+        suppliers:           roundCur(supplierDebts),
+        suppliers_count:     supplierDebtors,
+        suppliers_has:       +supplierDebtsHas.toFixed(3),
+        clients_all:         roundCur(clientDebtsAll),
+        clients_count_all:   clientDebtorsAll,
+        clients_has_all:     +clientDebtsHasAll.toFixed(3),
+        suppliers_all:       roundCur(supplierDebtsAll),
+        suppliers_count_all: supplierDebtorsAll,
+        suppliers_has_all:   +supplierDebtsHasAll.toFixed(3),
+      },
+      marketing,
+      repairs: {
+        total: roundCur(repairs.total),
+        unpaid: roundCur(repairs.unpaid),
+        count: repairs.count,
+      },
+    };
+    cache.set(cacheKey, payload, 60_000);
     res.json(payload);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4142,6 +4625,24 @@ function buildPurchaseMaterialFilter(material) {
   };
 }
 
+// Përjashton faturat që përmbajnë ndonjë artikull me material në listë
+// (p.sh. `excludeMaterial=flori,diamant` për faqen "Artikuj Të Tjerë"
+// që duhet të tregojë vetëm fatura që NUK kanë asnjë artikull flori ose diamant).
+function buildPurchaseMaterialExclude(exclude) {
+  if (!exclude || !String(exclude).trim()) return { sql: '', params: [] };
+  const parts = String(exclude).split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return { sql: '', params: [] };
+  const placeholders = parts.map(() => '?').join(',');
+  return {
+    sql: `AND NOT EXISTS (
+      SELECT 1 FROM purchase_items xpite
+      LEFT JOIN products xpe ON xpe.id = xpite.product_id
+      WHERE xpite.purchase_id = pi.id AND COALESCE(xpe.material, '') IN (${placeholders})
+    )`,
+    params: parts,
+  };
+}
+
 // Total gram (peshë) i artikujve për faturë — kur ka materialFilter, numërohen
 // vetëm artikujt e produkteve me atë material (p.sh. Blerje Flori s'duhet të
 // përfshijë grama e diamanteve nëse fatura ka të dyja).
@@ -4211,6 +4712,7 @@ app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
   try {
     const { date } = req.params;
     const mat = buildPurchaseMaterialFilter(req.query.material);
+    const excl = buildPurchaseMaterialExclude(req.query.excludeMaterial);
     const gram = purchaseGramSubquery(req.query.material);
     const has = purchaseHasSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
@@ -4225,9 +4727,9 @@ app.get('/api/purchase-invoices/by-date/:date', async (req, res) => {
          ${sell.sql},
          ${cnt.sql}
        FROM purchase_invoices pi
-       WHERE pi.date = ? AND COALESCE(pi.type, 'purchase') = 'purchase' ${mat.sql}
+       WHERE pi.date = ? AND COALESCE(pi.type, 'purchase') = 'purchase' ${mat.sql} ${excl.sql}
        ORDER BY pi.id ASC`,
-      [...gram.params, ...has.params, ...buy.params, ...sell.params, ...cnt.params, date, ...mat.params]
+      [...gram.params, ...has.params, ...buy.params, ...sell.params, ...cnt.params, date, ...mat.params, ...excl.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4237,6 +4739,7 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const mat = buildPurchaseMaterialFilter(req.query.material);
+    const excl = buildPurchaseMaterialExclude(req.query.excludeMaterial);
     const gram = purchaseGramSubquery(req.query.material);
     const has = purchaseHasSubquery(req.query.material);
     const buy = purchaseBuyTotalSubquery(req.query.material);
@@ -4251,9 +4754,9 @@ app.get('/api/purchase-invoices/by-range', async (req, res) => {
          ${sell.sql},
          ${cnt.sql}
        FROM purchase_invoices pi
-       WHERE pi.date BETWEEN ? AND ? AND COALESCE(pi.type, 'purchase') = 'purchase' ${mat.sql}
+       WHERE pi.date BETWEEN ? AND ? AND COALESCE(pi.type, 'purchase') = 'purchase' ${mat.sql} ${excl.sql}
        ORDER BY pi.date ASC, pi.id ASC`,
-      [...gram.params, ...has.params, ...buy.params, ...sell.params, ...cnt.params, from, to, ...mat.params]
+      [...gram.params, ...has.params, ...buy.params, ...sell.params, ...cnt.params, from, to, ...mat.params, ...excl.params]
     ));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -6121,7 +6624,12 @@ app.get('/api/supplier-activity', async (req, res) => {
     if (from) { conds.push('date >= ?'); params.push(from); }
     if (to)   { conds.push('date <= ?'); params.push(to); }
     const invoices = await queryAll(
-      `SELECT * FROM purchase_invoices WHERE ${conds.join(' AND ')} ORDER BY date ASC, id ASC`,
+      `SELECT pi.*,
+              (SELECT COALESCE(SUM(COALESCE(pit.has_gram, 0) * COALESCE(pit.qty, 0)), 0)
+                 FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS total_has_gram
+         FROM purchase_invoices pi
+        WHERE ${conds.join(' AND ')}
+        ORDER BY date ASC, pi.id ASC`,
       params
     );
     if (invoices.length === 0) {
@@ -6134,7 +6642,9 @@ app.get('/api/supplier-activity', async (req, res) => {
     if (from) { payWhere += ' AND p.date >= ?'; payParams.push(from); }
     if (to)   { payWhere += ' AND p.date <= ?'; payParams.push(to); }
     const payments = await queryAll(
-      `SELECT p.*, pi.invoice_no, pi.date AS invoice_date, pi.total_with_vat AS invoice_total
+      `SELECT p.*, pi.invoice_no, pi.date AS invoice_date, pi.total_with_vat AS invoice_total,
+              (SELECT COALESCE(SUM(COALESCE(pit.has_gram, 0) * COALESCE(pit.qty, 0)), 0)
+                 FROM purchase_items pit WHERE pit.purchase_id = pi.id) AS invoice_total_has_gram
          FROM purchase_payments p
          JOIN purchase_invoices pi ON pi.id = p.purchase_id
         WHERE ${payWhere}
@@ -10870,15 +11380,19 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
 app.get('/api/investimi', async (_req, res) => {
   try {
     const investments = await queryAll(
-      `SELECT id, partner_name, amount_eur, date, note, created_at
+      `SELECT id, partner_name, amount_eur, date, note, created_at,
+              COALESCE(payment_method, 'cash') AS payment_method
          FROM partner_investments ORDER BY date ASC, id ASC`
     );
     const debts = await queryAll(
-      `SELECT id, debtor, creditor, initial_amount_eur, reason, date, created_at
+      `SELECT id, debtor, creditor, initial_amount_eur, reason, date, created_at,
+              COALESCE(source_investment_id, 0) AS source_investment_id,
+              COALESCE(source_withdrawal_id, 0) AS source_withdrawal_id
          FROM partner_debts ORDER BY date ASC, id ASC`
     );
     const payments = await queryAll(
-      `SELECT id, debt_id, amount_eur, date, note, created_at
+      `SELECT id, debt_id, amount_eur, date, note, created_at,
+              COALESCE(payment_method, 'cash') AS payment_method
          FROM partner_debt_payments ORDER BY date ASC, id ASC`
     );
     const debtsEnriched = debts.map(d => {
@@ -10899,21 +11413,52 @@ app.get('/api/investimi', async (_req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Pjesa e borxhit që i rritet Dianes për çdo investim nga Biba (biznesi
+// operon me 30% ortakëri për Dianën).
+const DIANA_DEBT_SHARE = 0.30;
+
 app.post('/api/investimi/investments', async (req, res) => {
   try {
-    const { partner_name, amount_eur, date, note } = req.body || {};
+    const { partner_name, amount_eur, date, note, payment_method } = req.body || {};
     if (!partner_name || !date) return res.status(400).json({ error: 'partner_name and date required' });
+    const name = String(partner_name).trim();
+    const amt = parseFloat(amount_eur) || 0;
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
     const r = await run(
-      `INSERT INTO partner_investments (partner_name, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
-      [partner_name, parseFloat(amount_eur) || 0, date, note || '']
+      `INSERT INTO partner_investments (partner_name, amount_eur, date, note, payment_method) VALUES (?, ?, ?, ?, ?)`,
+      [name, amt, date, note || '', pm]
     );
-    res.json({ id: Number(r.lastInsertRowid), success: true });
+    const invId = Number(r.lastInsertRowid);
+    // Auto-rritje: investim i Bibës → krijon borxh Diana→Biba me 30% të shumës.
+    // Krijon rresht të ri te partner_debts (për audit) i lidhur me investimin
+    // për cascade kur fshihet.
+    let debtAutoCreated = null;
+    if (name.toLowerCase() === 'biba' && amt > 0) {
+      const debtAmt = +(amt * DIANA_DEBT_SHARE).toFixed(2);
+      if (debtAmt > 0) {
+        const dr = await run(
+          `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, reason, date, source_investment_id)
+           VALUES ('Diana', 'Biba', ?, ?, ?, ?)`,
+          [debtAmt, `${(DIANA_DEBT_SHARE * 100).toFixed(0)}% nga investimi i Bibës (${amt.toFixed(2)} EUR)`, date, invId]
+        );
+        debtAutoCreated = { id: Number(dr.lastInsertRowid), amount_eur: debtAmt };
+      }
+    }
+    res.json({ id: invId, success: true, debt_auto_created: debtAutoCreated });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/investimi/investments/:id', async (req, res) => {
   try {
-    await run(`DELETE FROM partner_investments WHERE id = ?`, [Number(req.params.id)]);
+    const id = Number(req.params.id);
+    // Cascade: fshi edhe borxhet auto-të krijuara nga ky investim + pagesat e
+    // tyre. Pa këtë, pas fshirjes së investimit do mbeteshin borxhe orfane
+    // "fantazmë" që nuk përputhen me asnjë investim real.
+    await batchWrite([
+      { sql: `DELETE FROM partner_debt_payments WHERE debt_id IN (SELECT id FROM partner_debts WHERE source_investment_id = ?)`, args: [id] },
+      { sql: `DELETE FROM partner_debts WHERE source_investment_id = ?`, args: [id] },
+      { sql: `DELETE FROM partner_investments WHERE id = ?`, args: [id] },
+    ]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -10946,16 +11491,70 @@ app.delete('/api/investimi/debts/:id', async (req, res) => {
 
 app.post('/api/investimi/debt-payments', async (req, res) => {
   try {
-    const { debt_id, amount_eur, date, note } = req.body || {};
+    const { debt_id, amount_eur, date, note, payment_method } = req.body || {};
     const did = Number(debt_id);
     const amt = parseFloat(amount_eur) || 0;
     if (!did || !date) return res.status(400).json({ error: 'debt_id and date required' });
     if (amt <= 0) return res.status(400).json({ error: 'amount_eur must be > 0' });
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
     const r = await run(
-      `INSERT INTO partner_debt_payments (debt_id, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
-      [did, amt, date, note || '']
+      `INSERT INTO partner_debt_payments (debt_id, amount_eur, date, note, payment_method) VALUES (?, ?, ?, ?, ?)`,
+      [did, amt, date, note || '', pm]
     );
     res.json({ id: Number(r.lastInsertRowid), success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Pagesë e konsoliduar — një shumë e vetme shpërndahet FIFO (më i vjetri i pari)
+// në borxhet aktive mes të njëjtit debtor/creditor. Krijon një ose më shumë
+// `partner_debt_payments` sipas nevojës, atomikisht via batchWrite.
+app.post('/api/investimi/debt-payments/consolidated', async (req, res) => {
+  try {
+    const { debtor, creditor, amount_eur, date, note, payment_method } = req.body || {};
+    const amt = parseFloat(amount_eur) || 0;
+    if (!debtor || !creditor || !date) return res.status(400).json({ error: 'debtor, creditor, date required' });
+    if (amt <= 0) return res.status(400).json({ error: 'amount_eur must be > 0' });
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
+    // Borxhet aktive te kësaj çifti debtor→creditor, më i vjetri i pari.
+    const activeDebts = await queryAll(
+      `SELECT d.id,
+              d.initial_amount_eur,
+              COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0) AS paid,
+              (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) AS remaining
+         FROM partner_debts d
+        WHERE d.debtor = ? AND d.creditor = ?
+          AND (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) > 0.005
+        ORDER BY d.date ASC, d.id ASC`,
+      [String(debtor).trim(), String(creditor).trim()]
+    );
+    if (activeDebts.length === 0) {
+      return res.status(400).json({ error: 'Nuk ka borxh aktiv për këtë çift (debtor→creditor)' });
+    }
+    const totalRemaining = activeDebts.reduce((s, d) => s + Number(d.remaining || 0), 0);
+    if (amt > totalRemaining + 0.005) {
+      return res.status(400).json({
+        error: `Shuma (${amt.toFixed(2)}) tejkalon borxhin e mbetur (${totalRemaining.toFixed(2)} EUR)`
+      });
+    }
+    // Shpërndaje FIFO.
+    let remaining = amt;
+    const stmts = [];
+    const applied = [];
+    for (const d of activeDebts) {
+      if (remaining <= 0.005) break;
+      const canPay = Number(d.remaining) || 0;
+      const payNow = Math.min(remaining, canPay);
+      const payRounded = +payNow.toFixed(2);
+      if (payRounded <= 0) continue;
+      stmts.push({
+        sql: `INSERT INTO partner_debt_payments (debt_id, amount_eur, date, note, payment_method) VALUES (?, ?, ?, ?, ?)`,
+        args: [Number(d.id), payRounded, date, note || '', pm],
+      });
+      applied.push({ debt_id: Number(d.id), amount_eur: payRounded });
+      remaining -= payRounded;
+    }
+    await batchWrite(stmts);
+    res.json({ success: true, payments: applied, total_applied: +(amt - remaining).toFixed(2) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
