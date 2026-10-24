@@ -2234,6 +2234,29 @@ export default function Products() {
               className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
             >✕ pastro filtrin</button>
           )}
+          <span className="w-px h-3 bg-slate-200 dark:bg-slate-700" />
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const data = await fetch('/api/products/stock-drift').then(r => r.json())
+                const n = data?.count || 0
+                if (n === 0) {
+                  alert('✓ Të gjitha stokat janë në përputhje me lëvizjet reale.\n\nStock = Blerje − Shitje − Marketing (hapur) − Riparim (pa dorëzuar)')
+                  return
+                }
+                const list = (data.items || []).slice(0, 20).map(r =>
+                  `• ${r.name} (${r.barcode || '-'}) — stock aktual: ${r.stock_aktual}, duhet: ${r.stock_sakte}`
+                ).join('\n')
+                const more = n > 20 ? `\n…dhe ${n - 20} të tjera.` : ''
+                alert(`⚠ ${n} produkte me stock të pasaktë:\n\n${list}${more}\n\nKonsultoje administratorin — mund të ketë ngjarje që nuk janë sinkronizuar me stokun.`)
+              } catch (e) {
+                alert('Gabim: ' + e.message)
+              }
+            }}
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+            title="Verifiko që stock = Blerje − Shitje − Marketing − Riparim"
+          >🔍 Verifiko Stock</button>
         </div>
       )}
 

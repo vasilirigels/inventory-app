@@ -2369,6 +2369,59 @@ app.get('/api/products/has-drift', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Verifikim i stock-ut: krahason stock-un aktual me stock-un e pritshëm nga
+// lëvizjet reale (blerje − shitje − marketing i hapur − riparim pa dorëzuar).
+// Kthen VETËM produktet me mospërputhje → admin shfaq butonin "⚠️ Verifiko Stock".
+// Përdoret si rrjet mbrojtës pas bug-ut v1.2.72 (Apliko × mbishkronte stock-un)
+// dhe për të kapur ngjarje historike ku stock-u nuk u sinkronizua (p.sh. produkte
+// në marketing që nuk u zbritën automatikisht para fix-it atomik).
+app.get('/api/products/stock-drift', async (_req, res) => {
+  try {
+    const rows = await queryAll(`
+      SELECT p.id, p.name, p.barcode, p.stock AS stock_aktual,
+             COALESCE((SELECT SUM(pit.qty) FROM purchase_items pit
+                         JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+                        WHERE pit.product_id = p.id AND pi.invoice_no NOT LIKE 'KTH%'), 0)
+             - COALESCE((SELECT SUM(pit.qty) FROM purchase_items pit
+                          JOIN purchase_invoices pi ON pi.id = pit.purchase_id
+                         WHERE pit.product_id = p.id AND pi.invoice_no LIKE 'KTH%'), 0)
+             - COALESCE((SELECT SUM(ii.qty) FROM invoice_items ii
+                          JOIN invoices i ON i.id = ii.invoice_id
+                         WHERE ii.product_id = p.id
+                           AND COALESCE(i.cancelled, 0) = 0
+                           AND i.invoice_no NOT LIKE 'KTH%'), 0)
+             + COALESCE((SELECT SUM(ii.qty) FROM invoice_items ii
+                          JOIN invoices i ON i.id = ii.invoice_id
+                         WHERE ii.product_id = p.id
+                           AND COALESCE(i.cancelled, 0) = 0
+                           AND i.invoice_no LIKE 'KTH%'), 0)
+             - COALESCE((SELECT SUM(COALESCE(mce.product_qty, 1))
+                          FROM marketing_contract_entries mce
+                          JOIN marketing_contracts mc ON mc.id = mce.contract_id
+                         WHERE mce.product_id = p.id
+                           AND mc.status = 'open'), 0)
+             - COALESCE((SELECT COUNT(*) FROM repairs r
+                         WHERE r.product_id = p.id
+                           AND (r.date_delivered IS NULL OR r.date_delivered = '')
+                           AND r.converted_invoice_id IS NULL), 0)
+             AS stock_sakte
+        FROM products p
+       WHERE p.active = 1
+    `);
+    const drift = rows.filter(r => Number(r.stock_aktual) !== Number(r.stock_sakte));
+    res.json({
+      count: drift.length,
+      items: drift,
+      summary: {
+        total_aktive: rows.length,
+        me_mospershtatje: drift.length,
+        tepert: drift.filter(r => Number(r.stock_aktual) > Number(r.stock_sakte)).length,
+        mungojne: drift.filter(r => Number(r.stock_aktual) < Number(r.stock_sakte)).length,
+      },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // updated_at is a millisecond timestamp used for optimistic locking on
 // concurrent product edits. INSERT and UPDATE both stamp `now`, so a client
 // that PUTs with a stale value gets a 409 and can re-fetch.
