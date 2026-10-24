@@ -36,6 +36,12 @@ function EMPTY() {
     image_path: '',
     currency: 'EUR',
     sell_price: '',
+    // Kapari (vetëm në krijim) — regjistrohet pas ruajtjes së porosisë dhe
+    // futet si cash në arkë për datën e porosisë. Në edit nuk shfaqet këtu —
+    // menaxhohet nga modali "💰 Kaparët".
+    deposit_amount: '',
+    deposit_method: 'cash',
+    deposit_notes: '',
   }
 }
 
@@ -302,6 +308,36 @@ function PorosiEditor({ porosi, onClose, onSave }) {
                 <MoneyInput value={form.sell_price} onChange={v => set('sell_price', v)} />
               </div>
             </div>
+
+            {/* Kapari — vetëm kur krijohet porosi e re (edit menaxhohet nga modali 💰) */}
+            {!porosi?.id && (
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">💰</span>
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Kapari (opsional)</h4>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Hyn direkt në arkë për datën e porosisë</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="form-label">Shuma e Kaparit</label>
+                    <MoneyInput value={form.deposit_amount} onChange={v => set('deposit_amount', v)} />
+                  </div>
+                  <div>
+                    <label className="form-label">Metoda</label>
+                    <select value={form.deposit_method || 'cash'} onChange={e => set('deposit_method', e.target.value)} className="input-field">
+                      <option value="cash">💵 Cash</option>
+                      <option value="bank">🏦 Bankë</option>
+                      <option value="pos">💳 POS</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Shënim</label>
+                    <input type="text" value={form.deposit_notes || ''} onChange={e => set('deposit_notes', e.target.value)}
+                      className="input-field" placeholder="p.sh. Kapari fillestar" />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">
@@ -687,6 +723,26 @@ export default function Porosi() {
       const err = await res.json().catch(() => ({}))
       alert(err.error || 'Gabim në ruajtje')
       return
+    }
+    // Nëse është porosi e re dhe user vendosi kapar > 0, regjistroje te
+    // porosi_deposits — kjo e fut cash-in direkt në arkë për datën e porosisë.
+    const created = method === 'POST' ? await res.json().catch(() => null) : null
+    const depAmt = parseFloat(form.deposit_amount) || 0
+    if (created?.id && depAmt > 0) {
+      try {
+        await fetch(`/api/porosi/${created.id}/deposits`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: form.date, amount: depAmt,
+            currency: form.currency || 'EUR',
+            method: ['cash','bank','pos'].includes(form.deposit_method) ? form.deposit_method : 'cash',
+            exchange_rate: 1,
+            notes: form.deposit_notes || 'Kapari fillestar',
+          }),
+        })
+      } catch (e) {
+        alert('Porosia u krijua, por kapari nuk u regjistrua: ' + e.message)
+      }
     }
     setShowEditor(false)
     await load()
