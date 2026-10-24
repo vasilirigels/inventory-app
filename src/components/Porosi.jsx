@@ -354,7 +354,7 @@ function DepositsModal({ porosi, onClose, onChanged }) {
   const submit = async (e) => {
     e.preventDefault()
     const amt = parseFloat(form.amount) || 0
-    if (amt <= 0) { alert('Vendos shumën e depozitës.'); return }
+    if (amt <= 0) { alert('Vendos shumën e kaparit.'); return }
     if (!form.date) { alert('Vendos datën.'); return }
     setSaving(true)
     try {
@@ -374,7 +374,7 @@ function DepositsModal({ porosi, onClose, onChanged }) {
   }
 
   const removeDep = async (id) => {
-    if (!confirm('Fshi këtë depozitë?')) return
+    if (!confirm('Fshi këtë kapar?')) return
     const res = await fetch(`/api/porosi-deposits/${id}`, { method: 'DELETE' })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -390,7 +390,7 @@ function DepositsModal({ porosi, onClose, onChanged }) {
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="modal-header">
           <div>
-            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">💰 Depozitat — {porosi.porosi_no}</h3>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">💰 Kapari (Depozitat) — {porosi.porosi_no}</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">{porosi.customer_name}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
@@ -417,11 +417,11 @@ function DepositsModal({ porosi, onClose, onChanged }) {
 
           {/* Lista e depozitave */}
           <div>
-            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Depozitat e Regjistruara</h4>
+            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Kaparët e Regjistruar</h4>
             {loading ? (
               <div className="text-center text-sm text-slate-400 py-4">Duke ngarkuar...</div>
             ) : deposits.length === 0 ? (
-              <div className="text-center text-sm text-slate-400 py-4">Nuk ka depozita ende.</div>
+              <div className="text-center text-sm text-slate-400 py-4">Nuk ka kapar ende.</div>
             ) : (
               <div className="space-y-1">
                 {deposits.map(d => (
@@ -451,7 +451,7 @@ function DepositsModal({ porosi, onClose, onChanged }) {
           {/* Formë e re depozite */}
           {porosi.status !== 'dorezuar' && (
             <form onSubmit={submit} className="border-t border-slate-200 dark:border-slate-700 pt-4 space-y-3">
-              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">➕ Regjistro Depozitë të Re</h4>
+              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">➕ Regjistro Kapar të Ri</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <div>
                   <label className="form-label text-xs">Data</label>
@@ -486,10 +486,10 @@ function DepositsModal({ porosi, onClose, onChanged }) {
               <div>
                 <label className="form-label text-xs">Shënime (opsionale)</label>
                 <input type="text" value={form.notes} onChange={e => set('notes', e.target.value)}
-                  className="input-field text-sm" placeholder="p.sh. Depozita e parë 30%" />
+                  className="input-field text-sm" placeholder="p.sh. Kapari fillestar" />
               </div>
               <button type="submit" className="btn-primary w-full" disabled={saving}>
-                {saving ? 'Duke regjistruar...' : '💰 Regjistro Depozitën'}
+                {saving ? 'Duke regjistruar...' : '💰 Regjistro Kaparin'}
               </button>
             </form>
           )}
@@ -534,7 +534,7 @@ function DeliverModal({ porosi, onClose, onDelivered }) {
     if (!full.sell_price || parseFloat(full.sell_price) <= 0) {
       alert('Vendos vlerën e shitjes te porosia para dorëzimit.'); return
     }
-    if (!confirm(`Të krijohet fatura e shitjes për ${full.customer_name}?\n\nTotal: ${fmt(total)} ${full.currency}\nDepozitat: ${fmt(totalDeposits)} ${full.currency}\nPagesa e re: ${fmt(newPay)} ${full.currency}\nMbetet borxh: ${fmt(remainingAfterPay)} ${full.currency}`)) return
+    if (!confirm(`Të krijohet fatura e shitjes për ${full.customer_name}?\n\nTotal: ${fmt(total)} ${full.currency}\nKapari: ${fmt(totalDeposits)} ${full.currency}\nPagesa e re: ${fmt(newPay)} ${full.currency}\nMbetet borxh: ${fmt(remainingAfterPay)} ${full.currency}`)) return
     setSaving(true)
     try {
       const res = await fetch(`/api/porosi/${porosi.id}/deliver`, {
@@ -582,7 +582,7 @@ function DeliverModal({ porosi, onClose, onDelivered }) {
               <div className="text-lg font-bold tabular-nums">{fmt(total)} {full.currency}</div>
             </div>
             <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg text-center">
-              <div className="text-[10px] text-emerald-700 uppercase">Depozita e Aplikuar</div>
+              <div className="text-[10px] text-emerald-700 uppercase">Kapari i Aplikuar</div>
               <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(totalDeposits)} {full.currency}</div>
             </div>
           </div>
@@ -717,7 +717,7 @@ export default function Porosi() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">🛠️ Porosi (Custom Orders)</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Menaxho porositë me modifikime — depozitë paraprake dhe dorëzim si faturë shitje.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Menaxho porositë me modifikime — kapar paraprak dhe dorëzim si faturë shitje.</p>
         </div>
         <button onClick={openNew} className="btn-primary">➕ Porosi e Re</button>
       </div>
@@ -820,7 +820,7 @@ export default function Porosi() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => setDepositsFor(p)} className="btn-secondary text-xs" title="Depozitat">💰</button>
+                        <button onClick={() => setDepositsFor(p)} className="btn-secondary text-xs" title="Kaparët">💰</button>
                         {p.status !== 'dorezuar' && (
                           <>
                             <button onClick={() => openEdit(p)} className="btn-secondary text-xs" title="Edito">✏️</button>
