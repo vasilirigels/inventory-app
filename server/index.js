@@ -8084,22 +8084,13 @@ app.get('/api/kasaforta', async (req, res) => {
 const CURS_SW = ['lek', 'eur', 'usd', 'gbp', 'chf'];
 
 async function syncSafeWithdrawTotals(date) {
-  const agg = await queryOne(
-    `SELECT ${CURS_SW.map(c => `COALESCE(SUM(amount_${c}), 0) AS ${c}`).join(', ')}
-       FROM safe_withdrawals WHERE date = ?`,
-    [date]
-  ) || {};
-  const existing = await queryOne('SELECT id FROM daily_records WHERE date = ?', [date]);
-  const cols = CURS_SW.map(c => `safe_withdraw_${c}`);
-  const vals = CURS_SW.map(c => +(agg[c] || 0).toFixed(2));
-  if (existing) {
-    const setClause = cols.map(col => `${col} = ?`).join(', ');
-    await run(`UPDATE daily_records SET ${setClause} WHERE date = ?`, [...vals, date]);
-  } else {
-    const colList = cols.join(', ');
-    const placeholders = cols.map(() => '?').join(', ');
-    await run(`INSERT INTO daily_records (date, ${colList}) VALUES (?, ${placeholders})`, [date, ...vals]);
-  }
+  // Delego te syncSafeConvertTotals: ai llogarit saktë `safe_withdraw_*` nga
+  // DY burime (safe_withdrawals + safe_conversions.from_amount) dhe `safe_deposit_*`
+  // nga safe_conversions.to_amount. Pa këtë delegim, kur tërheqja regjistrohet pas
+  // një konvertimi në të njëjtën datë, mbishkruhet totali duke humbur pjesën e
+  // konvertimit → endpoint-i /api/kasaforta llogarit `max(0, wd - convOut)` dhe e
+  // shuan tërheqjen reale.
+  await syncSafeConvertTotals(date);
 }
 
 // GET — ngjarjet individuale të kasafortës për një datë specifike, të grupuara

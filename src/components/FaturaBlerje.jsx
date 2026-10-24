@@ -525,8 +525,12 @@ function PurchaseList({ date, onOpen, onCreate, onDelete, onReturn, onOpenReturn
   const totals = list.reduce((acc, inv) => {
     const rate = n(inv.exchange_rate) || 1
     const usdRate = n(usdByDate[inv.date]) || 0
-    // value_USD = value_original * (invoice→LEK rate) / (USD→LEK rate)
-    const toUsd = usdRate > 0 ? (rate / usdRate) : 0
+    const invCur = inv.currency || 'LEK'
+    // Fatura USD: vlerat janë tashmë në USD → pa konvertim.
+    // Monedha të tjera: value_LEK = value * invRate; value_USD = value_LEK / usdRate.
+    const toUsd = invCur === 'USD'
+      ? 1
+      : (usdRate > 0 ? (rate / usdRate) : 0)
     const initPaid = inv.initial_amount_paid != null ? n(inv.initial_amount_paid) : n(inv.amount_paid)
     const initDue  = Math.max(0, n(inv.total_with_vat) - initPaid)
     const gross = n(inv.subtotal_no_vat) + n(inv.total_discount)
