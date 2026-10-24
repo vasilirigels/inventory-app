@@ -229,21 +229,15 @@ export default function Kasaforta() {
                           {cur.closeout_in > 0 ? `+${fmt(cur.closeout_in)}` : '—'}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums" title={convTitle}>
-                          {cur.conv_in > 0 && (
-                            <span className="text-sky-700 font-semibold">🔄 +{fmt(cur.conv_in)}</span>
-                          )}
-                          {cur.conv_in > 0 && cur.conv_out > 0 && <span className="text-slate-300 mx-1">·</span>}
-                          {cur.conv_out > 0 && (
-                            <span className="text-violet-700 font-semibold">🔄 −{fmt(cur.conv_out)}</span>
-                          )}
-                          {cur.conv_in === 0 && cur.conv_out === 0 && <span className="text-slate-300">—</span>}
-                          {convEvents.length > 0 && (
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 space-y-0.5">
+                          {convEvents.length === 0 ? (
+                            <span className="text-slate-300">—</span>
+                          ) : (
+                            <div className="space-y-0.5">
                               {convEvents.map((ev, i) => (
-                                <div key={i} className="truncate max-w-[240px]" title={convTitle}>
+                                <div key={i} className={ev.direction === 'in' ? 'text-sky-700 dark:text-sky-300 font-semibold' : 'text-violet-700 dark:text-violet-300 font-semibold'}>
                                   {ev.direction === 'in'
-                                    ? <>← {fmt(ev.other_amount)} {ev.other_cur}</>
-                                    : <>→ {fmt(ev.other_amount)} {ev.other_cur}</>
+                                    ? <>+{fmt(ev.amount)} <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">← {fmt(ev.other_amount)} {ev.other_cur}</span></>
+                                    : <>−{fmt(ev.amount)} <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">→ {fmt(ev.other_amount)} {ev.other_cur}</span></>
                                   }
                                 </div>
                               ))}
