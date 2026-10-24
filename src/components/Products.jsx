@@ -1785,6 +1785,16 @@ export default function Products() {
     } catch (e) { console.error(e) }
   }, [])
 
+  // Rrjet mbrojtës: ngarkohet sa herë hap faqen Produkte dhe shfaq paralajmërim
+  // automatikisht nëse ndonjë stock nuk përputhet me lëvizjet reale.
+  const [stockDrift, setStockDrift] = useState({ count: 0, items: [] })
+  const loadStockDrift = useCallback(async () => {
+    try {
+      const data = await fetch('/api/products/stock-drift').then(r => r.json())
+      setStockDrift({ count: data?.count || 0, items: data?.items || [] })
+    } catch (e) { console.error(e) }
+  }, [])
+
   const load = useCallback(async () => {
     try {
       const data = await fetch('/api/products').then(r => r.json())
@@ -1792,7 +1802,8 @@ export default function Products() {
     } catch (e) { console.error(e) }
     setLoading(false)
     loadHasDrift()
-  }, [loadHasDrift])
+    loadStockDrift()
+  }, [loadHasDrift, loadStockDrift])
 
   useEffect(() => { load() }, [load])
 
@@ -2235,28 +2246,24 @@ export default function Products() {
             >✕ pastro filtrin</button>
           )}
           <span className="w-px h-3 bg-slate-200 dark:bg-slate-700" />
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const data = await fetch('/api/products/stock-drift').then(r => r.json())
-                const n = data?.count || 0
-                if (n === 0) {
-                  alert('✓ Të gjitha stokat janë në përputhje me lëvizjet reale.\n\nStock = Blerje − Shitje − Marketing (hapur) − Riparim (pa dorëzuar)')
-                  return
-                }
-                const list = (data.items || []).slice(0, 20).map(r =>
+          {stockDrift.count > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                const list = stockDrift.items.slice(0, 30).map(r =>
                   `• ${r.name} (${r.barcode || '-'}) — stock aktual: ${r.stock_aktual}, duhet: ${r.stock_sakte}`
                 ).join('\n')
-                const more = n > 20 ? `\n…dhe ${n - 20} të tjera.` : ''
-                alert(`⚠ ${n} produkte me stock të pasaktë:\n\n${list}${more}\n\nKonsultoje administratorin — mund të ketë ngjarje që nuk janë sinkronizuar me stokun.`)
-              } catch (e) {
-                alert('Gabim: ' + e.message)
-              }
-            }}
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
-            title="Verifiko që stock = Blerje − Shitje − Marketing − Riparim"
-          >🔍 Verifiko Stock</button>
+                const more = stockDrift.count > 30 ? `\n…dhe ${stockDrift.count - 30} të tjera.` : ''
+                alert(`⚠ ${stockDrift.count} produkte me stock të pasaktë:\n\n${list}${more}\n\nMund të jenë ngjarje që nuk u sinkronizuan me stokun (bug i vjetër ose fshirje historike). Konsultoje administratorin për korrigjim.`)
+              }}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-semibold hover:bg-amber-200 dark:hover:bg-amber-900/60"
+              title="Produkte me stock që nuk përputhet me lëvizjet reale"
+            >⚠️ {stockDrift.count} stock të pasaktë</button>
+          ) : (
+            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-emerald-600 dark:text-emerald-400" title="Stock-u i të gjitha produkteve përputhet me lëvizjet reale">
+              ✓ Stock i saktë
+            </span>
+          )}
         </div>
       )}
 
