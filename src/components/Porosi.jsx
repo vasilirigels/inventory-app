@@ -305,7 +305,7 @@ function PorosiEditor({ porosi, onClose, onSave }) {
               </div>
               <div>
                 <label className="form-label">Vlera e Shitjes *</label>
-                <MoneyInput value={form.sell_price} onChange={v => set('sell_price', v)} />
+                <MoneyInput value={form.sell_price} onChange={v => set('sell_price', v)} className="input-field" />
               </div>
             </div>
 
@@ -320,7 +320,7 @@ function PorosiEditor({ porosi, onClose, onSave }) {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="form-label">Shuma e Kaparit</label>
-                    <MoneyInput value={form.deposit_amount} onChange={v => set('deposit_amount', v)} />
+                    <MoneyInput value={form.deposit_amount} onChange={v => set('deposit_amount', v)} className="input-field" />
                   </div>
                   <div>
                     <label className="form-label">Metoda</label>
