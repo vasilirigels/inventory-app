@@ -8311,38 +8311,70 @@ app.get('/api/safe-withdrawals', async (req, res) => {
 // Efektet te Investimi kur destination eshte 'biba_investment' ose 'diana_debt'.
 // Kthen listen e statement-eve per batchWrite (atomike me INSERT/UPDATE/DELETE
 // te safe_withdrawals). source_withdrawal_id lidh rreshtin per cascade.
-async function investimiSideEffects(destination, amountEur, date, withdrawalId) {
+//
+// `amountsByCurrency` është objekt { USD: 100, EUR: 500, LEK: 0, ... } — për çdo
+// monedhë me shumë > 0, krijohet statement veç. Nuk ka konvertim: investim USD
+// → tërheqje USD → zbret borxh USD. Nëse nuk ka borxh aktiv në atë monedhë te
+// 'biba_investment', hidhet gabim.
+async function investimiSideEffects(destination, amountsByCurrency, date, withdrawalId) {
   const stmts = [];
+  const entries = Object.entries(amountsByCurrency || {})
+    .map(([cur, v]) => [String(cur).toUpperCase(), Number(v) || 0])
+    .filter(([, v]) => v > 0);
+  if (entries.length === 0) return stmts;
+
   if (destination === 'biba_investment') {
-    // 30% e shumes shkon si pagese borxhi te borxhi me i vjeter aktiv i Dianes.
-    const payment = Math.round(amountEur * 0.30 * 100) / 100;
-    if (payment <= 0) return stmts;
-    const debt = await queryOne(
-      `SELECT d.id,
-              (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) AS remaining
-         FROM partner_debts d
-        WHERE d.debtor = 'Diana' AND d.creditor = 'Biba'
-          AND (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) > 0.005
-        ORDER BY d.date ASC, d.id ASC
-        LIMIT 1`
-    );
-    if (!debt) {
-      const err = new Error('Nuk ka borxh aktiv Diana→Biba per te shlyer (30% nga terheqja Biba Investim)');
-      err.status = 400;
-      throw err;
+    // Për çdo monedhë me shumë > 0: 30% shkon si pagesë borxhi te borxhi më i
+    // vjetër aktiv Diana→Biba NË ATË MONEDHË. Nëse monedha nuk ka borxh aktiv,
+    // gabim i qartë.
+    for (const [cur, amt] of entries) {
+      const payment = Math.round(amt * 0.30 * 100) / 100;
+      if (payment <= 0.005) continue;
+      const debt = await queryOne(
+        `SELECT d.id,
+                COALESCE(NULLIF(d.amount, 0), d.initial_amount_eur, 0) AS amt,
+                COALESCE((
+                  SELECT SUM(COALESCE(NULLIF(p.amount, 0), p.amount_eur, 0))
+                    FROM partner_debt_payments p
+                   WHERE p.debt_id = d.id
+                     AND UPPER(COALESCE(NULLIF(p.currency, ''), 'EUR')) = ?
+                ), 0) AS paid
+           FROM partner_debts d
+          WHERE d.debtor = 'Diana' AND d.creditor = 'Biba'
+            AND UPPER(COALESCE(NULLIF(d.currency, ''), 'EUR')) = ?
+            AND (COALESCE(NULLIF(d.amount, 0), d.initial_amount_eur, 0) - COALESCE((
+                   SELECT SUM(COALESCE(NULLIF(p.amount, 0), p.amount_eur, 0))
+                     FROM partner_debt_payments p
+                    WHERE p.debt_id = d.id
+                      AND UPPER(COALESCE(NULLIF(p.currency, ''), 'EUR')) = ?
+                 ), 0)) > 0.005
+          ORDER BY d.date ASC, d.id ASC
+          LIMIT 1`,
+        [cur, cur, cur]
+      );
+      if (!debt) {
+        const err = new Error(`Nuk ka borxh aktiv Diana→Biba në ${cur} për të shlyer 30% nga tërheqja Biba Investim`);
+        err.status = 400;
+        throw err;
+      }
+      const amtEurLegacy = cur === 'EUR' ? payment : 0;
+      stmts.push({
+        sql: `INSERT INTO partner_debt_payments (debt_id, amount, currency, amount_eur, date, note, source_withdrawal_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [debt.id, payment, cur, amtEurLegacy, date,
+               `Nga Tërheqje Biba Investim (30% e ${amt.toFixed(2)} ${cur})`, withdrawalId],
+      });
     }
-    stmts.push({
-      sql: `INSERT INTO partner_debt_payments (debt_id, amount_eur, date, note, source_withdrawal_id)
-            VALUES (?, ?, ?, ?, ?)`,
-      args: [debt.id, payment, date, `Nga Tërheqje Biba Investim (30% e ${amountEur.toFixed(2)} EUR)`, withdrawalId],
-    });
   } else if (destination === 'diana_debt') {
-    if (amountEur <= 0) return stmts;
-    stmts.push({
-      sql: `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, reason, date, source_withdrawal_id)
-            VALUES ('Diana', 'Biba', ?, ?, ?, ?)`,
-      args: [amountEur, 'Tërheqje Diana nga kasaforta', date, withdrawalId],
-    });
+    // Për çdo monedhë me shumë > 0: krijon borxh të ri Diana→Biba në atë monedhë.
+    for (const [cur, amt] of entries) {
+      const amtEurLegacy = cur === 'EUR' ? amt : 0;
+      stmts.push({
+        sql: `INSERT INTO partner_debts (debtor, creditor, amount, currency, initial_amount_eur, reason, date, source_withdrawal_id)
+              VALUES ('Diana', 'Biba', ?, ?, ?, ?, ?, ?)`,
+        args: [amt, cur, amtEurLegacy, `Tërheqje Diana nga kasaforta (${amt.toFixed(2)} ${cur})`, date, withdrawalId],
+      });
+    }
   }
   return stmts;
 }
@@ -8374,9 +8406,6 @@ app.post('/api/safe-withdrawals', async (req, res) => {
     if (SW_DESTS_ADMIN.includes(destination) && req.user?.role !== 'admin') {
       return res.status(403).json({ error: 'Vetëm admini mund të përdorë këtë destinacion' });
     }
-    if (SW_DESTS_ADMIN.includes(destination) && amounts.eur <= 0) {
-      return res.status(400).json({ error: 'Për këtë destinacion duhet shumë > 0 në EUR' });
-    }
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
     const cols = CURS_SW.map(c => `amount_${c}`);
@@ -8388,7 +8417,9 @@ app.post('/api/safe-withdrawals', async (req, res) => {
     );
     const withdrawalId = Number(r.lastInsertRowid);
     // Efektet te Investimi: pagese borxhi (Biba Investim) ose borxh i ri (Diana Borxh).
-    const sideStmts = await investimiSideEffects(destination, amounts.eur, date, withdrawalId);
+    // Pa konvertim monedhash — për çdo monedhë me shumë > 0 krijohet statement veç.
+    const amountsByCur = Object.fromEntries(CURS_SW.map(c => [c.toUpperCase(), amounts[c] || 0]));
+    const sideStmts = await investimiSideEffects(destination, amountsByCur, date, withdrawalId);
     if (sideStmts.length) await batchWrite(sideStmts);
     await syncSafeWithdrawTotals(date);
     res.json({ success: true, id: withdrawalId });
@@ -8421,9 +8452,6 @@ app.put('/api/safe-withdrawals/:id', async (req, res) => {
     if (SW_DESTS_ADMIN.includes(existing.destination || '') && req.user?.role !== 'admin') {
       return res.status(403).json({ error: 'Vetëm admini mund të editojë këtë tërheqje' });
     }
-    if (SW_DESTS_ADMIN.includes(destination) && amounts.eur <= 0) {
-      return res.status(400).json({ error: 'Për këtë destinacion duhet shumë > 0 në EUR' });
-    }
     const person = String(d.person || '').trim();
     const note   = String(d.note   || '').trim();
     const setParts = ['date = ?', ...CURS_SW.map(c => `amount_${c} = ?`), 'destination = ?', 'person = ?', 'note = ?'];
@@ -8431,7 +8459,8 @@ app.put('/api/safe-withdrawals/:id', async (req, res) => {
     await run(`UPDATE safe_withdrawals SET ${setParts.join(', ')} WHERE id = ?`, params);
     // Rikrijo efektet anesore: fshi te vjetrat, shto te rejat sipas destinacionit te ri.
     await clearInvestimiSideEffects(Number(id));
-    const sideStmts = await investimiSideEffects(destination, amounts.eur, date, Number(id));
+    const amountsByCur = Object.fromEntries(CURS_SW.map(c => [c.toUpperCase(), amounts[c] || 0]));
+    const sideStmts = await investimiSideEffects(destination, amountsByCur, date, Number(id));
     if (sideStmts.length) await batchWrite(sideStmts);
     await syncSafeWithdrawTotals(existing.date);
     if (date !== existing.date) await syncSafeWithdrawTotals(date);
@@ -11463,90 +11492,101 @@ app.get('/api/reports/daily-turnover', async (req, res) => {
 //   - summary: totale (kontribut i agreguar për partner, borxhi fillestar/mbetja)
 app.get('/api/investimi', async (_req, res) => {
   try {
+    // Monedha ruhet gjatë gjithë ciklit — nuk ka më konvertim. Legacy rreshtat
+    // kanë currency='EUR' + amount=amount_eur (backfill te initDB). Mbahen edhe
+    // amount_eur dhe initial_amount_eur për kompatibilitet me kodin legacy, por
+    // nuk përdoren më për llogaritjet e reja.
     const investments = await queryAll(
-      `SELECT id, partner_name, amount_eur, date, note, created_at,
+      `SELECT id, partner_name, date, note, created_at,
               COALESCE(payment_method, 'cash') AS payment_method,
-              COALESCE(amount, amount_eur) AS amount,
-              COALESCE(currency, 'EUR') AS currency,
-              COALESCE(exchange_rate_to_eur, 1) AS exchange_rate_to_eur
+              COALESCE(NULLIF(amount, 0), amount_eur, 0) AS amount,
+              UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency
          FROM partner_investments ORDER BY date ASC, id ASC`
     );
     const debts = await queryAll(
-      `SELECT id, debtor, creditor, initial_amount_eur, reason, date, created_at,
+      `SELECT id, debtor, creditor, reason, date, created_at,
               COALESCE(source_investment_id, 0) AS source_investment_id,
               COALESCE(source_withdrawal_id, 0) AS source_withdrawal_id,
-              COALESCE(amount, initial_amount_eur) AS amount,
-              COALESCE(currency, 'EUR') AS currency,
-              COALESCE(exchange_rate_to_eur, 1) AS exchange_rate_to_eur
+              COALESCE(NULLIF(amount, 0), initial_amount_eur, 0) AS amount,
+              UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency
          FROM partner_debts ORDER BY date ASC, id ASC`
     );
     const payments = await queryAll(
-      `SELECT id, debt_id, amount_eur, date, note, created_at,
+      `SELECT id, debt_id, date, note, created_at,
               COALESCE(payment_method, 'cash') AS payment_method,
-              COALESCE(amount, amount_eur) AS amount,
-              COALESCE(currency, 'EUR') AS currency,
-              COALESCE(exchange_rate_to_eur, 1) AS exchange_rate_to_eur
+              COALESCE(NULLIF(amount, 0), amount_eur, 0) AS amount,
+              UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency
          FROM partner_debt_payments ORDER BY date ASC, id ASC`
     );
+    // Grupo pagesat sipas debt_id dhe llogarit paid/remaining NË MONEDHËN e borxhit.
+    // Një pagesë në monedhë tjetër nga borxhi është jo e vlefshme — por për të
+    // qenë tolerantë, injorohet (nuk reduktohet mbetja). Front-end-i e lejon
+    // vetëm monedhën e njëjtë kur zgjedh borxhin për të paguar.
     const debtsEnriched = debts.map(d => {
       const list = payments.filter(p => p.debt_id === d.id);
-      const paid = list.reduce((s, p) => s + (p.amount_eur || 0), 0);
+      const paid = list
+        .filter(p => p.currency === d.currency)
+        .reduce((s, p) => s + (p.amount || 0), 0);
       return {
         ...d,
-        paid_eur: +paid.toFixed(2),
-        remaining_eur: +((d.initial_amount_eur || 0) - paid).toFixed(2),
+        paid: +paid.toFixed(2),
+        remaining: +((d.amount || 0) - paid).toFixed(2),
         payments: list,
       };
     });
+    // partners: {Biba: {EUR: 100000, USD: 500}, Diana: {EUR: 0}}
     const partners = {};
     for (const inv of investments) {
-      partners[inv.partner_name] = (partners[inv.partner_name] || 0) + (inv.amount_eur || 0);
+      const name = inv.partner_name;
+      if (!partners[name]) partners[name] = {};
+      partners[name][inv.currency] = (partners[name][inv.currency] || 0) + (inv.amount || 0);
     }
-    res.json({ investments, debts: debtsEnriched, partners });
+    // Totale globale sipas monedhës (për faqen përmbledhëse).
+    const totals_by_currency = {};
+    for (const name of Object.keys(partners)) {
+      for (const [cur, v] of Object.entries(partners[name])) {
+        totals_by_currency[cur] = (totals_by_currency[cur] || 0) + v;
+      }
+    }
+    res.json({ investments, debts: debtsEnriched, partners, totals_by_currency });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Pjesa e borxhit që i rritet Dianes për çdo investim nga Biba (biznesi
-// operon me 30% ortakëri për Dianën).
+// Pjesa e borxhit që i rritet ortakut-debtor për çdo investim nga ortaku kryesor
+// (biznesi operon me 30% ortakëri për ortakun tjetër). Borxhi auto krijohet në
+// TË NJËJTËN MONEDHË si investimi — jo konvertim.
 const DIANA_DEBT_SHARE = 0.30;
 
 app.post('/api/investimi/investments', async (req, res) => {
   try {
-    const { partner_name, amount, currency, exchange_rate_to_eur, amount_eur, date, note, payment_method } = req.body || {};
+    const { partner_name, amount, currency, date, note, payment_method } = req.body || {};
     if (!partner_name || !date) return res.status(400).json({ error: 'partner_name and date required' });
     const name = String(partner_name).trim();
-    // Mbështet dy forma inputi:
-    //  (A) amount + currency + exchange_rate_to_eur → llogarit amount_eur
-    //  (B) amount_eur (legacy) → amount = amount_eur, currency = 'EUR'
     const cur = String(currency || 'EUR').toUpperCase();
-    const rate = parseFloat(exchange_rate_to_eur) || 1;
-    const amtOrig = parseFloat(amount);
-    const amt = Number.isFinite(amtOrig) && amtOrig > 0
-      ? amtOrig
-      : (parseFloat(amount_eur) || 0);
-    const amtEur = cur === 'EUR' ? amt : +(amt * rate).toFixed(2);
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount duhet > 0' });
     const pm = payment_method === 'bank' ? 'bank' : 'cash';
+    // amount_eur ruhet për kompatibilitet legacy; nuk përdoret nga query-të e reja.
+    const amtEurLegacy = cur === 'EUR' ? amt : 0;
     const r = await run(
-      `INSERT INTO partner_investments (partner_name, amount, currency, exchange_rate_to_eur, amount_eur, date, note, payment_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, amt, cur, rate, amtEur, date, note || '', pm]
+      `INSERT INTO partner_investments (partner_name, amount, currency, amount_eur, date, note, payment_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, amt, cur, amtEurLegacy, date, note || '', pm]
     );
     const invId = Number(r.lastInsertRowid);
-    const amt_eur_for_debt = amtEur;
-    // Auto-rritje: investim i Bibës → krijon borxh Diana→Biba me 30% të shumës.
-    // Krijon rresht të ri te partner_debts (për audit) i lidhur me investimin
-    // për cascade kur fshihet. Borxhi është gjithmonë në EUR (ekuivalenti i
-    // konvertuar) edhe nëse investimi ishte në monedhë tjetër.
+    // Auto-rritje: investim i Bibës → krijon borxh Diana→Biba me 30% në TË NJËJTËN monedhë.
     let debtAutoCreated = null;
-    if (name.toLowerCase() === 'biba' && amt_eur_for_debt > 0) {
-      const debtAmt = +(amt_eur_for_debt * DIANA_DEBT_SHARE).toFixed(2);
+    if (name.toLowerCase() === 'biba' && amt > 0) {
+      const debtAmt = +(amt * DIANA_DEBT_SHARE).toFixed(2);
       if (debtAmt > 0) {
         const dr = await run(
-          `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, amount, currency, exchange_rate_to_eur, reason, date, source_investment_id)
-           VALUES ('Diana', 'Biba', ?, ?, 'EUR', 1, ?, ?, ?)`,
-          [debtAmt, debtAmt, `${(DIANA_DEBT_SHARE * 100).toFixed(0)}% nga investimi i Bibës (${amt.toFixed(2)} ${cur})`, date, invId]
+          `INSERT INTO partner_debts (debtor, creditor, amount, currency, initial_amount_eur, reason, date, source_investment_id)
+           VALUES ('Diana', 'Biba', ?, ?, ?, ?, ?, ?)`,
+          [debtAmt, cur, cur === 'EUR' ? debtAmt : 0,
+           `${(DIANA_DEBT_SHARE * 100).toFixed(0)}% nga investimi i Bibës (${amt.toFixed(2)} ${cur})`,
+           date, invId]
         );
-        debtAutoCreated = { id: Number(dr.lastInsertRowid), amount_eur: debtAmt };
+        debtAutoCreated = { id: Number(dr.lastInsertRowid), amount: debtAmt, currency: cur };
       }
     }
     res.json({ id: invId, success: true, debt_auto_created: debtAutoCreated });
@@ -11570,18 +11610,16 @@ app.delete('/api/investimi/investments/:id', async (req, res) => {
 
 app.post('/api/investimi/debts', async (req, res) => {
   try {
-    const { debtor, creditor, amount, currency, exchange_rate_to_eur, initial_amount_eur, reason, date } = req.body || {};
+    const { debtor, creditor, amount, currency, reason, date } = req.body || {};
     if (!debtor || !creditor || !date) return res.status(400).json({ error: 'debtor, creditor dhe date kerkohen' });
     const cur = String(currency || 'EUR').toUpperCase();
-    const rate = parseFloat(exchange_rate_to_eur) || 1;
-    const amtOrig = parseFloat(amount);
-    const amt = Number.isFinite(amtOrig) && amtOrig > 0 ? amtOrig : (parseFloat(initial_amount_eur) || 0);
-    if (amt <= 0) return res.status(400).json({ error: 'amount duhet > 0' });
-    const amtEur = cur === 'EUR' ? amt : +(amt * rate).toFixed(2);
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount duhet > 0' });
+    const amtEurLegacy = cur === 'EUR' ? amt : 0;
     const r = await run(
-      `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, amount, currency, exchange_rate_to_eur, reason, date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [debtor, creditor, amtEur, amt, cur, rate, reason || '', date]
+      `INSERT INTO partner_debts (debtor, creditor, amount, currency, initial_amount_eur, reason, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [String(debtor).trim(), String(creditor).trim(), amt, cur, amtEurLegacy, reason || '', date]
     );
     res.json({ id: Number(r.lastInsertRowid), success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -11601,79 +11639,78 @@ app.delete('/api/investimi/debts/:id', async (req, res) => {
 
 app.post('/api/investimi/debt-payments', async (req, res) => {
   try {
-    const { debt_id, amount, currency, exchange_rate_to_eur, amount_eur, date, note, payment_method } = req.body || {};
+    const { debt_id, amount, currency, date, note, payment_method } = req.body || {};
     const did = Number(debt_id);
     if (!did || !date) return res.status(400).json({ error: 'debt_id and date required' });
     const cur = String(currency || 'EUR').toUpperCase();
-    const rate = parseFloat(exchange_rate_to_eur) || 1;
-    const amtOrig = parseFloat(amount);
-    const amt = Number.isFinite(amtOrig) && amtOrig > 0 ? amtOrig : (parseFloat(amount_eur) || 0);
-    if (amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
-    const amtEur = cur === 'EUR' ? amt : +(amt * rate).toFixed(2);
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
     const pm = payment_method === 'bank' ? 'bank' : 'cash';
+    const amtEurLegacy = cur === 'EUR' ? amt : 0;
     const r = await run(
-      `INSERT INTO partner_debt_payments (debt_id, amount, currency, exchange_rate_to_eur, amount_eur, date, note, payment_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [did, amt, cur, rate, amtEur, date, note || '', pm]
+      `INSERT INTO partner_debt_payments (debt_id, amount, currency, amount_eur, date, note, payment_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [did, amt, cur, amtEurLegacy, date, note || '', pm]
     );
     res.json({ id: Number(r.lastInsertRowid), success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Pagesë e konsoliduar — një shumë e vetme shpërndahet FIFO (më i vjetri i pari)
-// në borxhet aktive mes të njëjtit debtor/creditor. Krijon një ose më shumë
-// `partner_debt_payments` sipas nevojës, atomikisht via batchWrite.
+// Pagesë e konsoliduar — një shumë e vetme NË MONEDHË TË CAKTUAR shpërndahet
+// FIFO (më i vjetri i pari) në borxhet aktive të ASAJ MONEDHE mes të njëjtit
+// debtor/creditor. Pa konvertim: USD paguhet vetëm USD borxh.
 app.post('/api/investimi/debt-payments/consolidated', async (req, res) => {
   try {
-    const { debtor, creditor, amount, currency, exchange_rate_to_eur, amount_eur, date, note, payment_method } = req.body || {};
+    const { debtor, creditor, amount, currency, date, note, payment_method } = req.body || {};
     if (!debtor || !creditor || !date) return res.status(400).json({ error: 'debtor, creditor, date required' });
-    // Mbështet legacy (amount_eur) + të ri (amount + currency + exchange_rate_to_eur).
     const cur = String(currency || 'EUR').toUpperCase();
-    const rate = parseFloat(exchange_rate_to_eur) || 1;
-    const amtOrig = parseFloat(amount);
-    const amtInCur = Number.isFinite(amtOrig) && amtOrig > 0 ? amtOrig : (parseFloat(amount_eur) || 0);
-    if (amtInCur <= 0) return res.status(400).json({ error: 'amount must be > 0' });
-    const amt = cur === 'EUR' ? amtInCur : +(amtInCur * rate).toFixed(2);
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
     const pm = payment_method === 'bank' ? 'bank' : 'cash';
-    // Borxhet aktive te kësaj çifti debtor→creditor, më i vjetri i pari.
+    // Borxhet aktive të ASAJ monedhe te kësaj çifti, më i vjetri i pari.
     const activeDebts = await queryAll(
       `SELECT d.id,
-              d.initial_amount_eur,
-              COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0) AS paid,
-              (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) AS remaining
+              COALESCE(NULLIF(d.amount, 0), d.initial_amount_eur, 0) AS amt,
+              COALESCE((
+                SELECT SUM(COALESCE(NULLIF(p.amount, 0), p.amount_eur, 0))
+                  FROM partner_debt_payments p
+                 WHERE p.debt_id = d.id
+                   AND UPPER(COALESCE(NULLIF(p.currency, ''), 'EUR')) = ?
+              ), 0) AS paid
          FROM partner_debts d
         WHERE d.debtor = ? AND d.creditor = ?
-          AND (d.initial_amount_eur - COALESCE((SELECT SUM(amount_eur) FROM partner_debt_payments WHERE debt_id = d.id), 0)) > 0.005
+          AND UPPER(COALESCE(NULLIF(d.currency, ''), 'EUR')) = ?
         ORDER BY d.date ASC, d.id ASC`,
-      [String(debtor).trim(), String(creditor).trim()]
+      [cur, String(debtor).trim(), String(creditor).trim(), cur]
     );
-    if (activeDebts.length === 0) {
-      return res.status(400).json({ error: 'Nuk ka borxh aktiv për këtë çift (debtor→creditor)' });
+    const activeRemaining = activeDebts
+      .map(d => ({ id: Number(d.id), remaining: +(Number(d.amt) - Number(d.paid)).toFixed(2) }))
+      .filter(d => d.remaining > 0.005);
+    if (activeRemaining.length === 0) {
+      return res.status(400).json({ error: `Nuk ka borxh aktiv në ${cur} për ${debtor}→${creditor}` });
     }
-    const totalRemaining = activeDebts.reduce((s, d) => s + Number(d.remaining || 0), 0);
+    const totalRemaining = activeRemaining.reduce((s, d) => s + d.remaining, 0);
     if (amt > totalRemaining + 0.005) {
       return res.status(400).json({
-        error: `Shuma (${amt.toFixed(2)}) tejkalon borxhin e mbetur (${totalRemaining.toFixed(2)} EUR)`
+        error: `Shuma (${amt.toFixed(2)} ${cur}) tejkalon borxhin e mbetur (${totalRemaining.toFixed(2)} ${cur})`
       });
     }
     // Shpërndaje FIFO.
     let remaining = amt;
     const stmts = [];
     const applied = [];
-    for (const d of activeDebts) {
+    for (const d of activeRemaining) {
       if (remaining <= 0.005) break;
-      const canPay = Number(d.remaining) || 0;
-      const payNow = Math.min(remaining, canPay);
+      const payNow = Math.min(remaining, d.remaining);
       const payRounded = +payNow.toFixed(2);
       if (payRounded <= 0) continue;
-      // Nëse pagesa është në monedhë tjetër, ndaj proporcionalisht edhe amount-in origjinal.
-      const amtInCurChunk = cur === 'EUR' ? payRounded : +(payRounded / rate).toFixed(2);
+      const amtEurLegacy = cur === 'EUR' ? payRounded : 0;
       stmts.push({
-        sql: `INSERT INTO partner_debt_payments (debt_id, amount, currency, exchange_rate_to_eur, amount_eur, date, note, payment_method)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [Number(d.id), amtInCurChunk, cur, rate, payRounded, date, note || '', pm],
+        sql: `INSERT INTO partner_debt_payments (debt_id, amount, currency, amount_eur, date, note, payment_method)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [d.id, payRounded, cur, amtEurLegacy, date, note || '', pm],
       });
-      applied.push({ debt_id: Number(d.id), amount_eur: payRounded, amount: amtInCurChunk, currency: cur });
+      applied.push({ debt_id: d.id, amount: payRounded, currency: cur });
       remaining -= payRounded;
     }
     await batchWrite(stmts);

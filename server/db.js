@@ -1123,6 +1123,17 @@ const MIGRATIONS = [
   // Rregulli: çdo investim nga Biba shton 30% borxh Diana→Biba.
   "ALTER TABLE partner_debts ADD COLUMN source_investment_id INTEGER DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS idx_partner_debts_src_inv ON partner_debts(source_investment_id)",
+
+  // Multicurrency te Investimi — ruhet shuma origjinale + monedha; nuk ka më
+  // konvertim automatik në EUR (shefi kërkoi: investim USD → tërheqje USD).
+  // amount_eur legacy mbetet për rreshtat e vjetër; backfill më poshtë ruan
+  // koherencën. currency 'EUR' default për legacy.
+  "ALTER TABLE partner_investments ADD COLUMN amount REAL DEFAULT 0",
+  "ALTER TABLE partner_investments ADD COLUMN currency TEXT DEFAULT 'EUR'",
+  "ALTER TABLE partner_debts ADD COLUMN amount REAL DEFAULT 0",
+  "ALTER TABLE partner_debts ADD COLUMN currency TEXT DEFAULT 'EUR'",
+  "ALTER TABLE partner_debt_payments ADD COLUMN amount REAL DEFAULT 0",
+  "ALTER TABLE partner_debt_payments ADD COLUMN currency TEXT DEFAULT 'EUR'",
 ];
 
 async function initDB() {
@@ -1144,6 +1155,18 @@ async function initDB() {
   await Promise.allSettled([
     client.execute(`UPDATE invoices SET amount_paid = 0, amount_due = total_with_vat
                     WHERE is_credit_note = 1 AND (amount_due IS NULL OR amount_due = 0)`),
+    // Backfill multicurrency te partner_* — rreshtat ekzistues janë në EUR
+    // (schema e vjetër kishte vetëm amount_eur). Mbush amount dhe currency që
+    // query-të e reja (që nuk përdorin më amount_eur) të funksionojnë menjëherë.
+    client.execute(`UPDATE partner_investments
+                       SET amount = amount_eur, currency = 'EUR'
+                     WHERE (amount IS NULL OR amount = 0) AND COALESCE(amount_eur, 0) > 0`),
+    client.execute(`UPDATE partner_debts
+                       SET amount = initial_amount_eur, currency = 'EUR'
+                     WHERE (amount IS NULL OR amount = 0) AND COALESCE(initial_amount_eur, 0) > 0`),
+    client.execute(`UPDATE partner_debt_payments
+                       SET amount = amount_eur, currency = 'EUR'
+                     WHERE (amount IS NULL OR amount = 0) AND COALESCE(amount_eur, 0) > 0`),
     client.execute(`
       UPDATE expense_entries
       SET currency = CASE
@@ -1235,12 +1258,12 @@ async function initDB() {
     if ((invCount.rows[0]?.n ?? 0) === 0 && (debtCount.rows[0]?.n ?? 0) === 0) {
       const today = new Date().toISOString().slice(0, 10);
       await client.batch([
-        { sql: `INSERT INTO partner_investments (partner_name, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
-          args: ['Biba', 100000, today, 'Kapital fillestar (70% ortakëri)'] },
-        { sql: `INSERT INTO partner_investments (partner_name, amount_eur, date, note) VALUES (?, ?, ?, ?)`,
-          args: ['Diana', 0, today, 'Kapital fillestar (30% ortakëri — pa pagesë fillestare)'] },
-        { sql: `INSERT INTO partner_debts (debtor, creditor, initial_amount_eur, reason, date) VALUES (?, ?, ?, ?, ?)`,
-          args: ['Diana', 'Biba', 30000, '30% ortakëri e financuar nga Biba', today] },
+        { sql: `INSERT INTO partner_investments (partner_name, amount, currency, amount_eur, date, note) VALUES (?, ?, ?, ?, ?, ?)`,
+          args: ['Biba', 100000, 'EUR', 100000, today, 'Kapital fillestar (70% ortakëri)'] },
+        { sql: `INSERT INTO partner_investments (partner_name, amount, currency, amount_eur, date, note) VALUES (?, ?, ?, ?, ?, ?)`,
+          args: ['Diana', 0, 'EUR', 0, today, 'Kapital fillestar (30% ortakëri — pa pagesë fillestare)'] },
+        { sql: `INSERT INTO partner_debts (debtor, creditor, amount, currency, initial_amount_eur, reason, date) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          args: ['Diana', 'Biba', 30000, 'EUR', 30000, '30% ortakëri e financuar nga Biba', today] },
       ], 'write');
     }
   } catch (e) {
