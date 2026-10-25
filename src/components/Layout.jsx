@@ -31,6 +31,8 @@ const SALES_ALLOWED_PAGES = new Set([
   'komentet',
   // Riparimet — regjistrimi i punimeve që sjellin klientët
   'riparimet',
+  // Argjendarët — grupon riparimet sipas argjendarit
+  'argjendaret',
 ])
 
 function prevDay(date) {
@@ -59,6 +61,7 @@ const NAV_GROUPS = [
       { id: 'furnitor',  label: 'Furnitor',     icon: '🏭' },
       { id: 'komentet',  label: 'Komentet',          icon: '💬' },
       { id: 'riparimet', label: 'Riparimet',         icon: '🛠️' },
+      { id: 'argjendaret', label: 'Argjendarët',     icon: '💍' },
     ],
   },
   {
@@ -154,6 +157,7 @@ const PAGE_TITLES = {
   marketing:    'Shpenzime Marketingu',
   komentet:     'Komentet',
   riparimet:    'Riparimet',
+  argjendaret:  'Argjendarët',
   shitje:       'Shitje',
   blerje:       'Blerje',
   shpenzime:    'Shpenzime',

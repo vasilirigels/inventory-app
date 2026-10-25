@@ -23,6 +23,8 @@ export default function Investimi() {
   const [payDate, setPayDate]     = useState(today())
   const [payNote, setPayNote]     = useState('')
   const [payMethod, setPayMethod] = useState('cash')
+  const [payCurrency, setPayCurrency] = useState('EUR')
+  const [payRate, setPayRate]     = useState('1') // X → EUR
   const [paying, setPaying]       = useState(false)
   // Zgjeroni/palosni listën e borxheve individuale brenda një karte konsoliduese
   const [expandedPair, setExpandedPair] = useState(null)
@@ -34,12 +36,17 @@ export default function Investimi() {
   const [invDate, setInvDate]       = useState(today())
   const [invNote, setInvNote]       = useState('')
   const [invMethod, setInvMethod]   = useState('cash')
+  const [invCurrency, setInvCurrency] = useState('EUR')
+  const [invRate, setInvRate]       = useState('1')
 
-  // Formular borxh i ri (p.sh. kur Diana merr shtese nga kapitali i Bibes)
+  // Formular borxh i ri (p.sh. kur Diana merr shtese nga kapitali i Bibes).
+  // Fushat lihen bosh që user të shkruajë manualisht ose të zgjedhë nga autocomplete.
   const [showAddDebt, setShowAddDebt] = useState(false)
-  const [debtDebtor, setDebtDebtor]     = useState('Diana')
-  const [debtCreditor, setDebtCreditor] = useState('Biba')
+  const [debtDebtor, setDebtDebtor]     = useState('')
+  const [debtCreditor, setDebtCreditor] = useState('')
   const [debtAmount, setDebtAmount]     = useState('')
+  const [debtCurrency, setDebtCurrency] = useState('EUR')
+  const [debtRate, setDebtRate]         = useState('1')
   const [debtReason, setDebtReason]     = useState('')
   const [debtDate, setDebtDate]         = useState(today())
 
@@ -66,11 +73,16 @@ export default function Investimi() {
     try {
       const r = await fetch('/api/investimi/debt-payments/consolidated', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ debtor, creditor, amount_eur: amt, date: payDate, note: payNote, payment_method: payMethod }),
+        body: JSON.stringify({
+          debtor, creditor,
+          amount: amt, currency: payCurrency,
+          exchange_rate_to_eur: parseFloat(payRate) || 1,
+          date: payDate, note: payNote, payment_method: payMethod,
+        }),
       })
       if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
       const resp = await r.json().catch(() => ({}))
-      setPayAmount(''); setPayNote(''); setPayDate(today()); setPayKey(null); setPayMethod('cash')
+      setPayAmount(''); setPayNote(''); setPayDate(today()); setPayKey(null); setPayMethod('cash'); setPayCurrency('EUR'); setPayRate('1')
       const nPays = resp?.payments?.length || 0
       flash(`✓ Pagesa u regjistrua${nPays > 1 ? ` (u shpërnda në ${nPays} borxhe)` : ''}`)
       await load()
@@ -96,11 +108,16 @@ export default function Investimi() {
     try {
       const r = await fetch('/api/investimi/investments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partner_name: invPartner.trim(), amount_eur: n(invAmount), date: invDate, note: invNote, payment_method: invMethod }),
+        body: JSON.stringify({
+          partner_name: invPartner.trim(),
+          amount: n(invAmount), currency: invCurrency,
+          exchange_rate_to_eur: parseFloat(invRate) || 1,
+          date: invDate, note: invNote, payment_method: invMethod,
+        }),
       })
       if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
       const resp = await r.json().catch(() => ({}))
-      setInvAmount(''); setInvNote(''); setInvPartner('Biba'); setInvDate(today()); setInvMethod('cash')
+      setInvAmount(''); setInvNote(''); setInvPartner('Biba'); setInvDate(today()); setInvMethod('cash'); setInvCurrency('EUR'); setInvRate('1')
       setShowAddInv(false)
       if (resp?.debt_auto_created) {
         flash(`✓ Investimi u shtua · Borxhi i Dianës u rrit automatikisht me ${fmt(resp.debt_auto_created.amount_eur)} EUR (30%)`)
@@ -134,14 +151,17 @@ export default function Investimi() {
         body: JSON.stringify({
           debtor: debtDebtor.trim(),
           creditor: debtCreditor.trim(),
-          initial_amount_eur: n(debtAmount),
+          amount: n(debtAmount),
+          currency: debtCurrency,
+          exchange_rate_to_eur: parseFloat(debtRate) || 1,
           reason: debtReason,
           date: debtDate,
         }),
       })
       if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
       setDebtAmount(''); setDebtReason(''); setDebtDate(today())
-      setDebtDebtor('Diana'); setDebtCreditor('Biba')
+      setDebtDebtor(''); setDebtCreditor('')
+      setDebtCurrency('EUR'); setDebtRate('1')
       setShowAddDebt(false)
       flash('✓ Borxhi u shtua')
       await load()
@@ -162,6 +182,18 @@ export default function Investimi() {
       await load()
     } catch (e) { flash('✗ ' + e.message) }
   }
+
+  // Opsione për datalist te forma e Borxhit — bashkon emrat statikë (zakonisht
+  // të përdorur) me emrat që janë tashmë në DB (debtor/creditor nga borxhet
+  // ekzistuese). User mund gjithmonë të shkruajë diçka tjetër manualisht.
+  const debtorCreditorOptions = useMemo(() => {
+    const set = new Set(['Biba', 'Diana', 'Champlate'])
+    for (const d of (data?.debts || [])) {
+      if (d.debtor) set.add(d.debtor)
+      if (d.creditor) set.add(d.creditor)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'sq'))
+  }, [data?.debts])
 
   if (loading) {
     return <div className="p-8 text-center text-slate-400">Duke ngarkuar…</div>
@@ -245,9 +277,28 @@ export default function Investimi() {
               <input value={invPartner} onChange={e => setInvPartner(e.target.value)} className="input-field w-full" />
             </label>
             <label className="text-xs">
-              <span className="block text-slate-500 mb-1">Shuma (EUR)</span>
+              <span className="block text-slate-500 mb-1">Shuma</span>
               <input type="number" step="0.01" value={invAmount} onChange={e => setInvAmount(e.target.value)} className="input-field w-full tabular-nums text-right" />
             </label>
+            <label className="text-xs">
+              <span className="block text-slate-500 mb-1">Monedha</span>
+              <select value={invCurrency} onChange={e => { setInvCurrency(e.target.value); if (e.target.value === 'EUR') setInvRate('1') }} className="input-field w-full">
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="LEK">LEK</option>
+                <option value="GBP">GBP</option>
+                <option value="CHF">CHF</option>
+              </select>
+            </label>
+            {invCurrency !== 'EUR' && (
+              <label className="text-xs">
+                <span className="block text-slate-500 mb-1">Kursi 1 {invCurrency} = ? EUR</span>
+                <input type="number" step="0.0001" value={invRate} onChange={e => setInvRate(e.target.value)} className="input-field w-full tabular-nums text-right" placeholder="p.sh. 0.92 për USD→EUR" />
+                <span className="block text-[10px] text-slate-500 mt-1">
+                  ≈ {fmt(n(invAmount) * (parseFloat(invRate) || 0))} EUR
+                </span>
+              </label>
+            )}
             <label className="text-xs">
               <span className="block text-slate-500 mb-1">Data</span>
               <input type="date" value={invDate} onChange={e => setInvDate(e.target.value)} className="input-field w-full" />
@@ -272,18 +323,44 @@ export default function Investimi() {
 
         {showAddDebt && (
           <form onSubmit={submitDebt} className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4 grid gap-2 sm:grid-cols-2">
+            <datalist id="partner-names">
+              {debtorCreditorOptions.map(name => <option key={name} value={name} />)}
+            </datalist>
             <label className="text-xs">
               <span className="block text-slate-500 mb-1">Debtor (merr borxh)</span>
-              <input value={debtDebtor} onChange={e => setDebtDebtor(e.target.value)} className="input-field w-full" />
+              <input value={debtDebtor} onChange={e => setDebtDebtor(e.target.value)}
+                list="partner-names" placeholder="p.sh. Biba, Diana, Champlate…"
+                className="input-field w-full" />
             </label>
             <label className="text-xs">
               <span className="block text-slate-500 mb-1">Creditor (jep borxh)</span>
-              <input value={debtCreditor} onChange={e => setDebtCreditor(e.target.value)} className="input-field w-full" />
+              <input value={debtCreditor} onChange={e => setDebtCreditor(e.target.value)}
+                list="partner-names" placeholder="p.sh. Biba, Diana, Champlate…"
+                className="input-field w-full" />
             </label>
             <label className="text-xs">
-              <span className="block text-slate-500 mb-1">Shuma (EUR)</span>
+              <span className="block text-slate-500 mb-1">Shuma</span>
               <input type="number" step="0.01" value={debtAmount} onChange={e => setDebtAmount(e.target.value)} className="input-field w-full tabular-nums text-right" autoFocus />
             </label>
+            <label className="text-xs">
+              <span className="block text-slate-500 mb-1">Monedha</span>
+              <select value={debtCurrency} onChange={e => { setDebtCurrency(e.target.value); if (e.target.value === 'EUR') setDebtRate('1') }} className="input-field w-full">
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="LEK">LEK</option>
+                <option value="GBP">GBP</option>
+                <option value="CHF">CHF</option>
+              </select>
+            </label>
+            {debtCurrency !== 'EUR' && (
+              <label className="text-xs">
+                <span className="block text-slate-500 mb-1">Kursi 1 {debtCurrency} = ? EUR</span>
+                <input type="number" step="0.0001" value={debtRate} onChange={e => setDebtRate(e.target.value)} className="input-field w-full tabular-nums text-right" />
+                <span className="block text-[10px] text-slate-500 mt-1">
+                  ≈ {fmt(n(debtAmount) * (parseFloat(debtRate) || 0))} EUR
+                </span>
+              </label>
+            )}
             <label className="text-xs">
               <span className="block text-slate-500 mb-1">Data</span>
               <input type="date" value={debtDate} onChange={e => setDebtDate(e.target.value)} className="input-field w-full" />
@@ -370,9 +447,30 @@ export default function Investimi() {
               {payKey === key && (
                 <form onSubmit={submitPayment} className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4 grid gap-2 sm:grid-cols-2">
                   <label className="text-xs">
-                    <span className="block text-slate-500 mb-1">Shuma (EUR) — max {fmt(g.remaining)}</span>
-                    <input type="number" step="0.01" min="0" max={g.remaining} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="input-field w-full tabular-nums text-right" autoFocus />
+                    <span className="block text-slate-500 mb-1">
+                      Shuma {payCurrency === 'EUR' ? `(EUR) — max ${fmt(g.remaining)}` : `(${payCurrency})`}
+                    </span>
+                    <input type="number" step="0.01" min="0" value={payAmount} onChange={e => setPayAmount(e.target.value)} className="input-field w-full tabular-nums text-right" autoFocus />
                   </label>
+                  <label className="text-xs">
+                    <span className="block text-slate-500 mb-1">Monedha</span>
+                    <select value={payCurrency} onChange={e => { setPayCurrency(e.target.value); if (e.target.value === 'EUR') setPayRate('1') }} className="input-field w-full">
+                      <option value="EUR">EUR</option>
+                      <option value="USD">USD</option>
+                      <option value="LEK">LEK</option>
+                      <option value="GBP">GBP</option>
+                      <option value="CHF">CHF</option>
+                    </select>
+                  </label>
+                  {payCurrency !== 'EUR' && (
+                    <label className="text-xs sm:col-span-2">
+                      <span className="block text-slate-500 mb-1">Kursi 1 {payCurrency} = ? EUR</span>
+                      <input type="number" step="0.0001" value={payRate} onChange={e => setPayRate(e.target.value)} className="input-field w-full tabular-nums text-right" />
+                      <span className="block text-[10px] text-slate-500 mt-1">
+                        ≈ {fmt(n(payAmount) * (parseFloat(payRate) || 0))} EUR (do të zbresi nga borxhi)
+                      </span>
+                    </label>
+                  )}
                   <label className="text-xs">
                     <span className="block text-slate-500 mb-1">Data</span>
                     <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className="input-field w-full" />

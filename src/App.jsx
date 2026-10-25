@@ -45,6 +45,7 @@ const DailyFieldsForm        = lazy(() => import('./components/sections/DailyFie
 const UnifiedReport          = lazy(() => import('./components/sections/UnifiedReport.jsx'))
 const Komentet               = lazy(() => import('./components/Komentet.jsx'))
 const Riparimet              = lazy(() => import('./components/Riparimet.jsx'))
+const Argjendaret            = lazy(() => import('./components/Argjendaret.jsx'))
 const ShitjeOnline           = lazy(() => import('./components/ShitjeOnline.jsx'))
 const Porosi                 = lazy(() => import('./components/Porosi.jsx'))
 const Investimi              = lazy(() => import('./components/Investimi.jsx'))
@@ -108,6 +109,7 @@ const SALES_ALLOWED_PAGES = new Set([
   'detyrime',
   'komentet',
   'riparimet',
+  'argjendaret',
 ])
 
 function AppInner({ user }) {
@@ -233,6 +235,7 @@ function AppInner({ user }) {
 
       case 'komentet':       return <Komentet />
       case 'riparimet':      return <Riparimet />
+      case 'argjendaret':    return <Argjendaret />
       case 'pagesa-punetoresh': return <PagesaPunetoresh />
 
       default: break

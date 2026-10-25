@@ -124,9 +124,15 @@ function ProductPicker({ product, exceptRepairId, onPick, onClear }) {
   )
 }
 
-function RepairModal({ repair, onClose, onSave, argjendars = [] }) {
+function RepairModal({ repair, onClose, onSave, argjendars = [], onArgjendarsChanged, inline = false }) {
   const [form, setForm] = useState(() => repair ? { ...EMPTY(), ...repair } : EMPTY())
+  const [showArgManager, setShowArgManager] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  // Pas ruajtjes së suksesshme në inline mode, resetoj formën për riparim të ri.
+  const handleSave = async (f) => {
+    await onSave(f)
+    if (inline && !repair?.id) setForm(EMPTY())
+  }
   // Riparimi ka product_id → JOIN te backend-i mbush product_* → reflekto si objekt
   // për ProductPicker (mos e ri-fetcho, i kemi tashmë brenda rreshtit të riparimit).
   const linkedProduct = form.product_id
@@ -168,19 +174,25 @@ function RepairModal({ repair, onClose, onSave, argjendars = [] }) {
       alert('Për një riparim të lidhur me produkt duhet të vendosësh Çmimin (do të bëhet fatura e shitjes në momentin e dorëzimit).')
       return
     }
-    onSave(form)
+    handleSave(form)
   }
+  const Wrapper = inline
+    ? ({ children }) => <div className="card p-0 overflow-hidden">{children}</div>
+    : ({ children }) => (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+          <div className="modal-box max-w-2xl">{children}</div>
+        </div>
+      )
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box max-w-2xl">
-        <div className="modal-header">
+    <Wrapper>
+        <div className={inline ? 'px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between' : 'modal-header'}>
           <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
-            {repair?.id ? `Edito Riparimin #${repair.id}` : 'Riparim i Ri'}
+            {repair?.id ? `Edito Riparimin #${repair.id}` : '🛠️ Riparim i Ri'}
           </h3>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>
+          {!inline && <button type="button" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>}
         </div>
         <form onSubmit={submit}>
-          <div className="modal-body">
+          <div className={inline ? 'p-4' : 'modal-body'}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="form-label">Data e Marrjes *</label>
@@ -247,7 +259,13 @@ function RepairModal({ repair, onClose, onSave, argjendars = [] }) {
               </div>
 
               <div className="md:col-span-2">
-                <label className="form-label">Argjendari (kush e bën punën)</label>
+                <label className="form-label flex items-center justify-between">
+                  <span>Argjendari (kush e bën punën)</span>
+                  <button type="button"
+                    onClick={() => setShowArgManager(true)}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold"
+                  >⚙ Menaxho argjendarët</button>
+                </label>
                 <input type="text" value={form.argjendar_name || ''}
                   onChange={e => set('argjendar_name', e.target.value)}
                   className="input-field" placeholder="p.sh. Bujar, Fatos..."
@@ -334,13 +352,113 @@ function RepairModal({ repair, onClose, onSave, argjendars = [] }) {
               )}
             </div>
           </div>
-          <div className="modal-footer">
-            <button type="button" onClick={onClose} className="btn-secondary">Anulo</button>
+          <div className={inline ? 'px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex justify-end gap-2' : 'modal-footer'}>
+            {!inline && <button type="button" onClick={onClose} className="btn-secondary">Anulo</button>}
             <button type="submit" className="btn-primary">
               {repair?.id ? '💾 Ruaj Ndryshimet' : '+ Shto Riparimin'}
             </button>
           </div>
         </form>
+        {showArgManager && (
+          <ArgjendarManagerModal
+            onClose={() => setShowArgManager(false)}
+            onChanged={() => onArgjendarsChanged?.()}
+            onPick={(name) => { set('argjendar_name', name); setShowArgManager(false) }}
+          />
+        )}
+    </Wrapper>
+  )
+}
+
+function ArgjendarManagerModal({ onClose, onChanged, onPick }) {
+  const [list, setList] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [newName, setNewName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const rows = await fetch('/api/argjendars').then(r => r.json())
+      setList(Array.isArray(rows) ? rows : [])
+    } catch { setList([]) }
+    setLoading(false)
+  }
+  useEffect(() => { load() }, [])
+
+  const add = async (e) => {
+    e.preventDefault()
+    const name = newName.trim()
+    if (!name) return
+    setSaving(true); setErr('')
+    try {
+      const res = await fetch('/api/argjendars', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error === 'already_exists' ? 'Ky emër ekziston tashmë.' : (data.error || 'Gabim'))
+      setNewName('')
+      await load(); onChanged?.()
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const remove = async (a) => {
+    if (!confirm(`Fshi "${a.name}"?\n\nRiparimet ekzistuese që e kanë këtë emër nuk ndryshohen.`)) return
+    try {
+      await fetch(`/api/argjendars/${a.id}`, { method: 'DELETE' })
+      await load(); onChanged?.()
+    } catch (e) { alert(e.message) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto">
+        <div className="modal-header">
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">⚙ Argjendarët</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Shto / fshi emrat që shfaqen në autocomplete.</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 text-xl">×</button>
+        </div>
+        <div className="p-4 space-y-4">
+          <form onSubmit={add} className="flex gap-2">
+            <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+              placeholder="Emri i argjendarit të ri" className="input-field flex-1" />
+            <button type="submit" disabled={saving || !newName.trim()} className="btn-primary disabled:opacity-50">
+              {saving ? '…' : '+ Shto'}
+            </button>
+          </form>
+          {err && <p className="text-xs text-rose-600">{err}</p>}
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Lista</h4>
+            {loading ? (
+              <p className="text-sm text-slate-400">Duke ngarkuar…</p>
+            ) : list.length === 0 ? (
+              <p className="text-sm text-slate-400 italic">Asnjë argjendar ende.</p>
+            ) : (
+              <div className="space-y-1">
+                {list.map(a => (
+                  <div key={a.id} className="flex items-center justify-between gap-2 p-2 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                    <button type="button" onClick={() => onPick?.(a.name)}
+                      className="flex-1 text-left font-semibold text-slate-800 dark:text-slate-100 hover:text-blue-600">
+                      {a.name}
+                    </button>
+                    <button type="button" onClick={() => remove(a)}
+                      className="text-xs px-2 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300">
+                      🗑
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button onClick={onClose} className="btn-secondary">Mbyll</button>
+        </div>
       </div>
     </div>
   )
@@ -353,27 +471,31 @@ export default function Riparimet() {
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [argjendarFilter, setArgjendarFilter] = useState('all')
   const [modal, setModal]       = useState(null)
   const [confirmDel, setConfirmDel] = useState(null)
   const [argjendars, setArgjendars] = useState([])
-  const [showArgHistory, setShowArgHistory] = useState(false)
+
+  const loadArgjendars = useCallback(async () => {
+    try {
+      const argRes = await fetch('/api/repairs/argjendars').then(r => r.json())
+      setArgjendars(Array.isArray(argRes) ? argRes : [])
+    } catch {}
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [repairsRes, argRes] = await Promise.all([
+      const [repairsRes] = await Promise.all([
         fetch('/api/repairs').then(r => r.json()),
-        fetch('/api/repairs/argjendars').then(r => r.json()).catch(() => []),
+        loadArgjendars(),
       ])
       setItems(Array.isArray(repairsRes) ? repairsRes : [])
-      setArgjendars(Array.isArray(argRes) ? argRes : [])
     } catch (_) {
       setItems([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadArgjendars])
 
   useEffect(() => { load() }, [load])
   useRealtimeSync('repairs', load)
@@ -399,7 +521,8 @@ export default function Riparimet() {
       body: JSON.stringify(data),
     })
     if (!res.ok) { const e = await res.json().catch(() => ({})); alert(apiError(e)); return false }
-    setModal(null)
+    // Edit mbyll modalin; krijim inline mban formën të hapur (resetohet brenda RepairModal).
+    if (isEdit) setModal(null)
     load()
     return true
   }
@@ -433,7 +556,6 @@ export default function Riparimet() {
     const q = search.toLowerCase().trim()
     return items
       .filter(r => statusFilter === 'all' ? true : r.status === statusFilter)
-      .filter(r => argjendarFilter === 'all' ? true : (r.argjendar_name || '') === argjendarFilter)
       .filter(r => !q ? true : (
         (r.customer_name || '').toLowerCase().includes(q) ||
         (r.customer_phone || '').toLowerCase().includes(q) ||
@@ -441,31 +563,12 @@ export default function Riparimet() {
         (r.issue_description || '').toLowerCase().includes(q) ||
         (r.argjendar_name || '').toLowerCase().includes(q)
       ))
-  }, [items, search, statusFilter, argjendarFilter])
+  }, [items, search, statusFilter])
 
   const counts = useMemo(() => {
     const c = { all: items.length, pranuar: 0, ne_pune: 0, gati: 0, dorezuar: 0 }
     for (const r of items) if (c[r.status] !== undefined) c[r.status]++
     return c
-  }, [items])
-
-  // Historiku sipas argjendari (nga TË GJITHA riparimet, jo filtruarat) — për
-  // secilin argjendar: total pagesa, paguar/pa paguar, të ndara për monedhë.
-  const argjendarHistory = useMemo(() => {
-    const map = new Map() // name → { name, byCur: { LEK: { paid, unpaid, paidCount, unpaidCount, totalCount } } }
-    for (const r of items) {
-      const name = (r.argjendar_name || '').trim()
-      if (!name) continue
-      const cur = r.currency || 'LEK'
-      const price = parseFloat(r.price) || 0
-      if (!map.has(name)) map.set(name, { name, byCur: {}, totalCount: 0 })
-      const g = map.get(name)
-      g.totalCount++
-      if (!g.byCur[cur]) g.byCur[cur] = { paid: 0, unpaid: 0, paidCount: 0, unpaidCount: 0 }
-      if (r.paid) { g.byCur[cur].paid += price; g.byCur[cur].paidCount++ }
-      else        { g.byCur[cur].unpaid += price; g.byCur[cur].unpaidCount++ }
-    }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
   }, [items])
 
   // Përmbledhje mbi setin e filtruar — reflekton pamjen aktuale (statusi + kërkimi).
@@ -490,84 +593,23 @@ export default function Riparimet() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Riparimet</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Punët e dërguara te argjendarët (pagesa dalin nga arka)</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowArgHistory(v => !v)} className="btn-secondary">
-            {showArgHistory ? '← Riparimet' : '📊 Historik Argjendarësh'}
-          </button>
-          <button onClick={() => setModal('add')} className="btn-primary">+ Riparim i Ri</button>
-        </div>
+      <div>
+        <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Riparimet</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Formulari për riparim të ri më poshtë; historiku i riparimeve të kaluara më poshtë. Grupimi sipas argjendari te zëri "💍 Argjendarët".
+        </p>
       </div>
 
-      {showArgHistory && (
-        <div className="card p-0 overflow-hidden">
-          <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Historik Sipas Argjendarit</h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">Të gjitha riparimet e dërguara — të paguara dhe borxh i papaguar</p>
-          </div>
-          {argjendarHistory.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">
-              Ende s'ka riparime me argjendar të vendosur.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
-                  <tr>
-                    <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Argjendari</th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Monedha</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">✓ Paguar</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Borxh (Pa Paguar)</th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Total Riparime</th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {argjendarHistory.map(g => {
-                    const curs = Object.entries(g.byCur).sort(([a],[b]) => a.localeCompare(b))
-                    return curs.map(([cur, s], idx) => (
-                      <tr key={`${g.name}-${cur}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="px-3 py-3 font-semibold text-slate-800 dark:text-slate-100">
-                          {idx === 0 ? g.name : ''}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">{cur}</span>
-                        </td>
-                        <td className="px-3 py-3 text-right tabular-nums text-emerald-700 dark:text-emerald-300">
-                          {fmtNum(s.paid)}
-                          <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">({s.paidCount})</span>
-                        </td>
-                        <td className={`px-3 py-3 text-right tabular-nums ${s.unpaid > 0.005 ? 'text-red-700 dark:text-red-300 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
-                          {s.unpaid > 0.005 ? fmtNum(s.unpaid) : '—'}
-                          {s.unpaidCount > 0 && <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">({s.unpaidCount})</span>}
-                        </td>
-                        <td className="px-3 py-3 text-center tabular-nums text-slate-700 dark:text-slate-200 font-semibold">
-                          {idx === 0 ? g.totalCount : ''}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          {idx === 0 && (
-                            <button onClick={() => { setArgjendarFilter(g.name); setShowArgHistory(false) }}
-                              className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-semibold">
-                              Shiko riparimet
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Formular inline — gjithmonë i hapur për riparim të ri */}
+      <RepairModal
+        repair={null}
+        onSave={save}
+        argjendars={argjendars}
+        onArgjendarsChanged={loadArgjendars}
+        inline
+      />
 
-
-      {!showArgHistory && (<>
+      <>
       {/* Filtra: status */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {[
@@ -594,16 +636,6 @@ export default function Riparimet() {
       <div className="card flex flex-wrap items-center gap-2">
         <input type="text" value={search} onChange={e => setSearch(e.target.value)}
           className="input-field flex-1 min-w-[200px]" placeholder="Kërko klient, telefon, argjendar, ose përshkrim..." />
-        {argjendars.length > 0 && (
-          <select value={argjendarFilter} onChange={e => setArgjendarFilter(e.target.value)}
-            className="input-field w-auto min-w-[180px]">
-            <option value="all">Të gjithë argjendarët</option>
-            {argjendars.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-        )}
-        {argjendarFilter !== 'all' && (
-          <button onClick={() => setArgjendarFilter('all')} className="btn-secondary text-xs">Pastro filtrin</button>
-        )}
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -798,7 +830,7 @@ export default function Riparimet() {
           )}
         </div>
       )}
-      </>)}
+      </>
 
       {modal && (
         <RepairModal
@@ -806,6 +838,7 @@ export default function Riparimet() {
           onClose={() => setModal(null)}
           onSave={save}
           argjendars={argjendars}
+          onArgjendarsChanged={loadArgjendars}
         />
       )}
 
