@@ -4467,6 +4467,73 @@ function buildAdjustPurchaseStockStmts(items, sign) {
   return out;
 }
 
+// Për PUT të faturës së blerjes: llogarit delta-n neto (new − old) për çdo
+// product_id dhe nxjerr një UPDATE të vetëm për produkt. Rrugë e vjetër
+// (buildAdjustPurchaseStockStmts(old,-1) + (new,+1)) ishte jo-idempotente kur
+// stoku ishte 0 (p.sh. blerë dhe shitur): floor-i `MAX(0, ...)` e bllokonte
+// hapin -1 por hapi +1 e rrisin stokun, duke krijuar një njësi fantazëm.
+function buildNetAdjustPurchaseStockStmts(oldItems, newItems) {
+  const delta = computePurchaseStockDelta(oldItems, newItems);
+  const out = [];
+  for (const [pid, d] of delta) {
+    if (d === 0) continue;
+    out.push({
+      sql: 'UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?',
+      args: [d, pid],
+    });
+  }
+  return out;
+}
+
+function computePurchaseStockDelta(oldItems, newItems) {
+  const delta = new Map();
+  for (const it of oldItems) {
+    if (!it.product_id || !it.qty) continue;
+    const q = parseInt(it.qty) || 0;
+    delta.set(it.product_id, (delta.get(it.product_id) || 0) - q);
+  }
+  for (const it of newItems) {
+    if (!it.product_id || !it.qty) continue;
+    const q = parseInt(it.qty) || 0;
+    delta.set(it.product_id, (delta.get(it.product_id) || 0) + q);
+  }
+  return delta;
+}
+
+// Verifiko që edit-i i faturës së blerjes nuk zbret stokun nën shitjet e bëra.
+// Nëse user-i fshin/zvogëlon një rresht për një produkt që tashmë është shitur,
+// stoku do bëhej negativ (shitje > blerje). Hedh Error me mesazh në shqip që
+// tregon se produkti është shitur dhe nuk mund të hiqet pa anuluar/kthyer
+// shitjen e tij.
+async function assertPurchaseDecreaseAllowed(oldItems, newItems) {
+  const delta = computePurchaseStockDelta(oldItems, newItems);
+  const decreasing = [...delta.entries()].filter(([, d]) => d < 0);
+  if (decreasing.length === 0) return;
+  const ids = decreasing.map(([pid]) => pid);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await queryAll(
+    `SELECT id, name, barcode, stock FROM products WHERE id IN (${placeholders})`,
+    ids
+  );
+  const byId = new Map(rows.map(r => [r.id, r]));
+  for (const [pid, d] of decreasing) {
+    const p = byId.get(pid);
+    if (!p) continue;
+    const cur = parseInt(p.stock) || 0;
+    const after = cur + d;
+    if (after < 0) {
+      const label = p.barcode ? `${p.barcode} (${p.name})` : p.name;
+      const soldOver = -after;
+      const err = new Error(
+        `Nuk mund të zvogëlohet sasia e ${label}: ${soldOver} njësi tashmë janë shitur. ` +
+        `Anulo/kthe shitjen së pari, ose mbaj sasinë e mjaftueshme në faturë.`
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+}
+
 // Rifresko `products.last_purchase_date` për produktet e prekura nga një
 // mutation blerjeje (POST/PUT/DELETE). Përdorim një statement të vetëm me
 // subquery të korreluar që shfrytëzon `idx_purchase_items_product_id`, kështu
@@ -5029,6 +5096,9 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     }
     const oldItems = await queryAll('SELECT * FROM purchase_items WHERE purchase_id = ?', [id]);
     const items = (d.items || []).map(it => ({ ...it, ...computePurchaseLineTotals(it) }));
+    // Bllokim: ndalo fshirjen/zvogëlimin e një rreshti për produkt që tashmë
+    // është shitur ndërkohë — do krijonte shitje > blerje (stok negativ).
+    await assertPurchaseDecreaseAllowed(oldItems, items);
     const sub = +items.reduce((s, it) => s + it.subtotal_no_vat, 0).toFixed(2);
     const vat = +items.reduce((s, it) => s + it.vat_amount,     0).toFixed(2);
     const tot = +items.reduce((s, it) => s + it.total_with_vat, 0).toFixed(2);
@@ -5095,7 +5165,6 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         args: [id, s.method, s.currency, s.amount, s.exchange_rate],
       });
     }
-    batch.push(...buildAdjustPurchaseStockStmts(oldItems, -1));
     batch.push({ sql: 'DELETE FROM purchase_items WHERE purchase_id = ?', args: [id] });
     for (const it of items) {
       batch.push({
@@ -5116,7 +5185,8 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
         ],
       });
     }
-    batch.push(...buildAdjustPurchaseStockStmts(items, +1));
+    // Delta neto për produkt — një UPDATE i vetëm, idempotent kur sasia s'ndryshon.
+    batch.push(...buildNetAdjustPurchaseStockStmts(oldItems, items));
     batch.push(...(await buildApplyProductPricesStmts(items)));
     // Rifresko last_purchase_date për produktet e prekura nga fatura (para dhe
     // pas edit-it) — data e faturës mund të ketë ndryshuar dhe/ose item-et.
@@ -5151,7 +5221,7 @@ app.put('/api/purchase-invoices/:id', async (req, res) => {
     if (batch.length) await batchWrite(batch);
 
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 app.delete('/api/purchase-invoices/:id', async (req, res) => {

@@ -779,6 +779,9 @@ const MIGRATIONS = [
   "CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supplier_nipt ON purchase_invoices(supplier_nipt)",
   "CREATE INDEX IF NOT EXISTS idx_invoice_items_barcode ON invoice_items(barcode)",
   "CREATE INDEX IF NOT EXISTS idx_invoice_items_product ON invoice_items(product_id)",
+  // Përdoret nga /api/products/stock-drift (korre subquery mbi mce.product_id)
+  // dhe nga rrugët e marketing-ut kur rikthehet/mbyllet kontrata.
+  "CREATE INDEX IF NOT EXISTS idx_marketing_contract_entries_product ON marketing_contract_entries(product_id)",
 
   // Kategoritë e materialit për Fatura Blerje — më parë hardcoded (flori/
   // diamant/ora). Tani CRUD me tabelë të veçantë. Slug ruhet te

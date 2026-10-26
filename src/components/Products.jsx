@@ -1795,20 +1795,27 @@ export default function Products() {
     } catch (e) { console.error(e) }
   }, [])
 
-  const load = useCallback(async () => {
+  const loadProductsOnly = useCallback(async () => {
     try {
       const data = await fetch('/api/products').then(r => r.json())
       setProducts(Array.isArray(data) ? data : [])
     } catch (e) { console.error(e) }
     setLoading(false)
+  }, [])
+
+  const load = useCallback(async () => {
+    await loadProductsOnly()
     loadHasDrift()
     loadStockDrift()
-  }, [loadHasDrift, loadStockDrift])
+  }, [loadProductsOnly, loadHasDrift, loadStockDrift])
 
   useEffect(() => { load() }, [load])
 
-  // Live-refresh when another PC creates/edits/deletes a product.
-  useRealtimeSync('products', load)
+  // Live-refresh kur një PC tjetër krijon/edit-on/fshin produkt — rifresko
+  // vetëm listën e produkteve, JO stock-drift / has-drift (query shumë të
+  // shtrenjta që s'kanë nevojë të ri-ekzekutohen në çdo mutation produkti).
+  // Drift-i rikalkulohet në reload të qëllimshëm (mount, F5, buton).
+  useRealtimeSync('products', loadProductsOnly)
 
   // Return product creation date as local YYYY-MM-DD. SQLite stores created_at
   // in UTC, so we parse it explicitly as UTC before reading the local day —
