@@ -546,7 +546,7 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
       setAmount(''); setPerson(''); setNote(''); setDate(today()); setShowForm(false)
       flash(dest === 'biba_investment'
         ? `✓ Tërheqje Biba — 30% zbriti borxhin e Dianës në ${currency}`
-        : `✓ Tërheqje Diana — iu rrit borxhi me ${fmt(n(amount))} ${currency}`)
+        : `✓ Tërheqje ${person.trim() || 'Diana'} — iu rrit borxhi me ${fmt(n(amount))} ${currency}`)
       await reload()
     } catch (e) { flash('✗ ' + e.message) }
   }
@@ -562,17 +562,26 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
   }
 
   // Totale per monedhë per lloj tërheqje.
+  // Për diana_debt, totalet grupohen për çdo emër borxhliu (person; default 'Diana').
   const totals = useMemo(() => {
-    const t = { biba_investment: {}, diana_debt: {} }
+    const bibaTotals = {}
+    const debtTotals = {}
     for (const w of withdrawals) {
-      const d = w.destination
-      if (!t[d]) continue
-      for (const c of CURRENCIES) {
-        const v = n(w[`amount_${c.toLowerCase()}`])
-        if (v > 0) t[d][c] = (t[d][c] || 0) + v
+      if (w.destination === 'biba_investment') {
+        for (const c of CURRENCIES) {
+          const v = n(w[`amount_${c.toLowerCase()}`])
+          if (v > 0) bibaTotals[c] = (bibaTotals[c] || 0) + v
+        }
+      } else if (w.destination === 'diana_debt') {
+        const name = (w.person || '').trim() || 'Diana'
+        if (!debtTotals[name]) debtTotals[name] = {}
+        for (const c of CURRENCIES) {
+          const v = n(w[`amount_${c.toLowerCase()}`])
+          if (v > 0) debtTotals[name][c] = (debtTotals[name][c] || 0) + v
+        }
       }
     }
-    return t
+    return { biba_investment: bibaTotals, diana_debt_by_name: debtTotals }
   }, [withdrawals])
 
   return (
@@ -586,7 +595,7 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
         <form onSubmit={submit} className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-amber-50/40 dark:bg-amber-900/10 grid gap-2 sm:grid-cols-6">
           <div className="sm:col-span-6 text-xs text-slate-500 dark:text-slate-400">
             <strong>Biba (nga investimi):</strong> 30% e tërheqjes zbret borxhin e Dianës NË TË NJËJTËN MONEDHË.{' '}
-            <strong>Diana (nga borxhi):</strong> krijon borxh të ri Diana→Biba në atë monedhë.
+            <strong>Borxh i Ri:</strong> krijon borxh të ri (Person)→Biba në atë monedhë. Nëse <em>Person</em> është bosh, default-i është Diana.
           </div>
           <label className="text-xs sm:col-span-3">
             <span className="block text-slate-500 mb-1">Lloji</span>
@@ -602,7 +611,7 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
                   dest === 'diana_debt'
                     ? 'bg-rose-100 border-rose-300 text-rose-800 dark:bg-rose-900/40'
                     : 'bg-white border-slate-200 text-slate-600 dark:bg-slate-800 dark:border-slate-700'
-                }`}>Diana — Borxh</button>
+                }`}>Borxh i Ri (Diana / Tjetër)</button>
             </div>
           </label>
           <label className="text-xs">
@@ -621,8 +630,11 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
             <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-field w-full" />
           </label>
           <label className="text-xs sm:col-span-2">
-            <span className="block text-slate-500 mb-1">Person (opsional)</span>
-            <input value={person} onChange={e => setPerson(e.target.value)} className="input-field w-full" />
+            <span className="block text-slate-500 mb-1">
+              {dest === 'diana_debt' ? 'Emri i borxhliut (opsional)' : 'Person (opsional)'}
+            </span>
+            <input value={person} onChange={e => setPerson(e.target.value)} className="input-field w-full"
+              placeholder={dest === 'diana_debt' ? 'default: Diana' : ''} />
           </label>
           <label className="text-xs sm:col-span-3">
             <span className="block text-slate-500 mb-1">Koment / sqarim</span>
@@ -662,12 +674,13 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
             const isBiba = w.destination === 'biba_investment'
             const bg = isBiba ? 'bg-indigo-50/40 dark:bg-indigo-900/10' : 'bg-rose-50/40 dark:bg-rose-900/10'
             const color = isBiba ? 'text-indigo-700 dark:text-indigo-300' : 'text-rose-700 dark:text-rose-300'
+            const debtorName = (w.person || '').trim() || 'Diana'
             return (
               <tr key={w.id} className={`border-b border-slate-100 dark:border-slate-800 ${bg}`}>
                 <td className="px-4 py-2.5 text-slate-700 dark:text-slate-200">
-                  <span className="font-semibold">{w.date} — {isBiba ? 'Biba (Investim)' : 'Diana (Borxh)'}</span>
+                  <span className="font-semibold">{w.date} — {isBiba ? 'Biba (Investim)' : `${debtorName} (Borxh)`}</span>
                   <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">
-                    {[w.person, w.note].filter(Boolean).join(' · ') || (isBiba ? '30% zbret borxhin' : 'rrit borxhin Diana→Biba')}
+                    {(isBiba ? [w.person, w.note] : [w.note]).filter(Boolean).join(' · ') || (isBiba ? '30% zbret borxhin' : `rrit borxhin ${debtorName}→Biba`)}
                   </span>
                 </td>
                 {activeCurs.map(c => (
@@ -701,20 +714,20 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
               <td></td>
             </tr>
           )}
-          {Object.keys(totals.diana_debt).length > 0 && (
-            <tr className="border-t border-slate-200 dark:border-slate-700 bg-rose-100/60 dark:bg-rose-900/30">
+          {Object.keys(totals.diana_debt_by_name).sort().map(name => (
+            <tr key={`debt-${name}`} className="border-t border-slate-200 dark:border-slate-700 bg-rose-100/60 dark:bg-rose-900/30">
               <td className="px-4 py-2 font-bold text-slate-700 dark:text-slate-200">
-                = Total Diana (Borxh)
-                <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">tërheqje që rritën borxhin Diana→Biba</span>
+                = Total {name} (Borxh)
+                <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">tërheqje që rritën borxhin {name}→Biba</span>
               </td>
               {activeCurs.map(c => (
                 <td key={c} className="px-3 py-2 text-right tabular-nums font-bold text-rose-800 dark:text-rose-200">
-                  {fmt(totals.diana_debt[c])}
+                  {fmt(totals.diana_debt_by_name[name][c])}
                 </td>
               ))}
               <td></td>
             </tr>
-          )}
+          ))}
         </tbody>
       </table>
     </Seksion>

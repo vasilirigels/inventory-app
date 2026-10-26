@@ -8389,12 +8389,13 @@ app.get('/api/safe-withdrawals', async (req, res) => {
 // monedhë me shumë > 0, krijohet statement veç. Nuk ka konvertim: investim USD
 // → tërheqje USD → zbret borxh USD. Nëse nuk ka borxh aktiv në atë monedhë te
 // 'biba_investment', hidhet gabim.
-async function investimiSideEffects(destination, amountsByCurrency, date, withdrawalId) {
+async function investimiSideEffects(destination, amountsByCurrency, date, withdrawalId, debtorName) {
   const stmts = [];
   const entries = Object.entries(amountsByCurrency || {})
     .map(([cur, v]) => [String(cur).toUpperCase(), Number(v) || 0])
     .filter(([, v]) => v > 0);
   if (entries.length === 0) return stmts;
+  const debtor = String(debtorName || '').trim() || 'Diana';
 
   if (destination === 'biba_investment') {
     // Për çdo monedhë me shumë > 0: 30% shkon si pagesë borxhi te borxhi më i
@@ -8439,13 +8440,13 @@ async function investimiSideEffects(destination, amountsByCurrency, date, withdr
       });
     }
   } else if (destination === 'diana_debt') {
-    // Për çdo monedhë me shumë > 0: krijon borxh të ri Diana→Biba në atë monedhë.
+    // Për çdo monedhë me shumë > 0: krijon borxh të ri <debtor>→Biba në atë monedhë.
     for (const [cur, amt] of entries) {
       const amtEurLegacy = cur === 'EUR' ? amt : 0;
       stmts.push({
         sql: `INSERT INTO partner_debts (debtor, creditor, amount, currency, initial_amount_eur, reason, date, source_withdrawal_id)
-              VALUES ('Diana', 'Biba', ?, ?, ?, ?, ?, ?)`,
-        args: [amt, cur, amtEurLegacy, `Tërheqje Diana nga kasaforta (${amt.toFixed(2)} ${cur})`, date, withdrawalId],
+              VALUES (?, 'Biba', ?, ?, ?, ?, ?, ?)`,
+        args: [debtor, amt, cur, amtEurLegacy, `Tërheqje ${debtor} nga kasaforta (${amt.toFixed(2)} ${cur})`, date, withdrawalId],
       });
     }
   }
@@ -8492,7 +8493,7 @@ app.post('/api/safe-withdrawals', async (req, res) => {
     // Efektet te Investimi: pagese borxhi (Biba Investim) ose borxh i ri (Diana Borxh).
     // Pa konvertim monedhash — për çdo monedhë me shumë > 0 krijohet statement veç.
     const amountsByCur = Object.fromEntries(CURS_SW.map(c => [c.toUpperCase(), amounts[c] || 0]));
-    const sideStmts = await investimiSideEffects(destination, amountsByCur, date, withdrawalId);
+    const sideStmts = await investimiSideEffects(destination, amountsByCur, date, withdrawalId, person);
     if (sideStmts.length) await batchWrite(sideStmts);
     await syncSafeWithdrawTotals(date);
     res.json({ success: true, id: withdrawalId });
@@ -8533,7 +8534,7 @@ app.put('/api/safe-withdrawals/:id', async (req, res) => {
     // Rikrijo efektet anesore: fshi te vjetrat, shto te rejat sipas destinacionit te ri.
     await clearInvestimiSideEffects(Number(id));
     const amountsByCur = Object.fromEntries(CURS_SW.map(c => [c.toUpperCase(), amounts[c] || 0]));
-    const sideStmts = await investimiSideEffects(destination, amountsByCur, date, Number(id));
+    const sideStmts = await investimiSideEffects(destination, amountsByCur, date, Number(id), person);
     if (sideStmts.length) await batchWrite(sideStmts);
     await syncSafeWithdrawTotals(existing.date);
     if (date !== existing.date) await syncSafeWithdrawTotals(date);
