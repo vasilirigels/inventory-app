@@ -2417,7 +2417,10 @@ app.get('/api/products/has-drift', async (req, res) => {
 // në marketing që nuk u zbritën automatikisht para fix-it atomik).
 app.get('/api/products/stock-drift', async (_req, res) => {
   try {
-    const rows = await queryAll(`
+    // Cache 60s: query 6-subquery mbi 929 produkte aktive = ~7.7K row reads.
+    // Pa cache, çdo F5/picker thërriste DB. Invalidohet automatikisht nga
+    // CACHE_INVALIDATION_RULES kur ndryshon products/invoices/purchase-invoices.
+    const rows = await cached('products:stock-drift', 60_000, () => queryAll(`
       SELECT p.id, p.name, p.barcode, p.stock AS stock_aktual,
              COALESCE((SELECT SUM(pit.qty) FROM purchase_items pit
                          JOIN purchase_invoices pi ON pi.id = pit.purchase_id
@@ -2447,7 +2450,7 @@ app.get('/api/products/stock-drift', async (_req, res) => {
              AS stock_sakte
         FROM products p
        WHERE p.active = 1
-    `);
+    `));
     const drift = rows.filter(r => Number(r.stock_aktual) !== Number(r.stock_sakte));
     res.json({
       count: drift.length,
