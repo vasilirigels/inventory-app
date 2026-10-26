@@ -331,34 +331,42 @@ function SeksionBorxhet({ data, flash, reload }) {
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'sq'))
   }, [data])
 
-  // Grupo borxhet sipas (debtor, creditor, currency) për rreshtat përmbledhës.
+  // Grupo borxhet sipas (debtor, creditor); monedhat ruhen si nën-grupe brenda
+  // rreshtit. Kështu Diana→Biba shfaqet si një rresht i vetëm me shumat
+  // vertikalisht për EUR, USD, etj. (pa konvertim).
   const groups = useMemo(() => {
     const g = {}
     for (const d of (data.debts || [])) {
-      const key = `${d.debtor}||${d.creditor}||${d.currency}`
+      const key = `${d.debtor}||${d.creditor}`
       if (!g[key]) g[key] = {
-        key, debtor: d.debtor, creditor: d.creditor, currency: d.currency,
-        total: 0, paid: 0, remaining: 0, debts: [],
+        key, debtor: d.debtor, creditor: d.creditor,
+        byCurrency: {}, debts: [],
       }
-      g[key].total     += n(d.amount)
-      g[key].paid      += n(d.paid)
-      g[key].remaining += n(d.remaining)
+      const cur = d.currency
+      if (!g[key].byCurrency[cur]) {
+        g[key].byCurrency[cur] = { total: 0, paid: 0, remaining: 0, debts: [] }
+      }
+      g[key].byCurrency[cur].total     += n(d.amount)
+      g[key].byCurrency[cur].paid      += n(d.paid)
+      g[key].byCurrency[cur].remaining += n(d.remaining)
+      g[key].byCurrency[cur].debts.push(d)
       g[key].debts.push(d)
     }
     return Object.values(g).sort((a, b) =>
       a.debtor.localeCompare(b.debtor, 'sq') ||
-      a.creditor.localeCompare(b.creditor, 'sq') ||
-      a.currency.localeCompare(b.currency))
+      a.creditor.localeCompare(b.creditor, 'sq'))
   }, [data])
 
-  // Totale per monedhë.
+  // Totale per monedhë (shumatorja përmbi të gjitha çiftet).
   const totalsByCur = useMemo(() => {
     const t = {}
     for (const g of groups) {
-      t[g.currency] = t[g.currency] || { total: 0, paid: 0, remaining: 0 }
-      t[g.currency].total     += g.total
-      t[g.currency].paid      += g.paid
-      t[g.currency].remaining += g.remaining
+      for (const [cur, sub] of Object.entries(g.byCurrency)) {
+        t[cur] = t[cur] || { total: 0, paid: 0, remaining: 0 }
+        t[cur].total     += sub.total
+        t[cur].paid      += sub.paid
+        t[cur].remaining += sub.remaining
+      }
     }
     return t
   }, [groups])
@@ -439,22 +447,37 @@ function SeksionBorxhet({ data, flash, reload }) {
         </thead>
         <tbody>
           {groups.map(g => {
-            const isActive = g.remaining > 0.005
-            const bg = isActive ? 'bg-rose-50/40 dark:bg-rose-900/10' : 'bg-emerald-50/40 dark:bg-emerald-900/10'
+            const currencies = Object.keys(g.byCurrency).sort()
+            const anyActive = currencies.some(c => g.byCurrency[c].remaining > 0.005)
+            const bg = anyActive ? 'bg-rose-50/40 dark:bg-rose-900/10' : 'bg-emerald-50/40 dark:bg-emerald-900/10'
             const nAuto = g.debts.filter(d => d.source_investment_id > 0 || d.source_withdrawal_id > 0).length
             return (
               <tr key={g.key} className={`border-b border-slate-100 dark:border-slate-800 ${bg}`}>
-                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-200">
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-200 align-top">
                   <span className="font-semibold">{g.debtor} → {g.creditor}</span>
                   <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">
                     {g.debts.length} zë{g.debts.length === 1 ? '' : 'ra'}{nAuto > 0 ? ` · ${nAuto} auto` : ''}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">{g.currency}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt(g.total)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(g.paid)}</td>
-                <td className={`px-3 py-2.5 text-right tabular-nums font-bold ${isActive ? 'text-rose-700 dark:text-rose-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
-                  {isActive ? fmt(g.remaining) : '✓'}
+                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 align-top">
+                  {currencies.map(c => <div key={c} className="leading-6">{c}</div>)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-200 align-top">
+                  {currencies.map(c => <div key={c} className="leading-6">{fmt(g.byCurrency[c].total)}</div>)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300 align-top">
+                  {currencies.map(c => <div key={c} className="leading-6">{fmt(g.byCurrency[c].paid)}</div>)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums font-bold align-top">
+                  {currencies.map(c => {
+                    const sub = g.byCurrency[c]
+                    const act = sub.remaining > 0.005
+                    return (
+                      <div key={c} className={`leading-6 ${act ? 'text-rose-700 dark:text-rose-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                        {act ? fmt(sub.remaining) : '✓'}
+                      </div>
+                    )
+                  })}
                 </td>
               </tr>
             )
