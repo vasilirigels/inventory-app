@@ -676,7 +676,7 @@ function EventRow({ label, subtitle, onDelete, busy, danger }) {
     <div className={`flex items-start justify-between gap-3 rounded-lg border ${danger ? 'border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40'} p-2`}>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 tabular-nums">{label}</p>
-        {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">{subtitle}</p>}
       </div>
       <button
         onClick={onDelete}

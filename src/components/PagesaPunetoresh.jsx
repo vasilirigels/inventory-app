@@ -603,43 +603,69 @@ export default function PagesaPunetoresh() {
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {statusRows.map(({ worker: w, payments: ps, total, paid }) => (
+                {statusRows.map(({ worker: w, payments: ps, total, paid }) => {
+                  const sortedPs = [...ps].sort((a, b) => (a.date_paid || '').localeCompare(b.date_paid || ''))
+                  return (
                   <div key={w.id}
-                    className={`rounded-lg border-2 px-3 py-2 flex items-center justify-between gap-2 ${
+                    className={`rounded-lg border-2 px-3 py-2 flex flex-col gap-1.5 ${
                       paid
                         ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/20'
                         : 'border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/20'
                     }`}>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-xs ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
-                          {paid ? '✓' : '✗'}
-                        </span>
-                        <span className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{w.name}</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
+                            {paid ? '✓' : '✗'}
+                          </span>
+                          <span className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{w.name}</span>
+                        </div>
+                        {paid ? (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 tabular-nums">
+                            <b>{fmtEUR(total)} EUR</b>
+                            {ps.length > 1 && <span className="opacity-70"> · {ps.length} pagesa</span>}
+                            {(w.base_salary_eur || 0) > 0 && total !== w.base_salary_eur && (
+                              <span className={`ml-1 text-[10px] ${total > w.base_salary_eur ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                ({total > w.base_salary_eur ? '+' : ''}{fmtEUR(total - w.base_salary_eur)})
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-red-700 dark:text-red-300 font-semibold">S'është paguar</div>
+                        )}
                       </div>
                       {paid ? (
-                        <div className="text-[11px] text-slate-600 dark:text-slate-300 tabular-nums">
-                          <b>{fmtEUR(total)} EUR</b>
-                          {ps.length > 1 && <span className="opacity-70"> · {ps.length} pagesa</span>}
-                          {(w.base_salary_eur || 0) > 0 && total !== w.base_salary_eur && (
-                            <span className={`ml-1 text-[10px] ${total > w.base_salary_eur ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                              ({total > w.base_salary_eur ? '+' : ''}{fmtEUR(total - w.base_salary_eur)})
-                            </span>
-                          )}
-                        </div>
+                        <button
+                          onClick={() => { setPaymentModal({}); setFilterWorker(String(w.id)) }}
+                          className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-[10px] font-bold whitespace-nowrap"
+                          title={`Shto pagesë tjetër parciale për ${w.name}`}
+                        >+ Pjesë</button>
                       ) : (
-                        <div className="text-[11px] text-red-700 dark:text-red-300 font-semibold">S'është paguar</div>
+                        <button
+                          onClick={() => { setPaymentModal({}); setFilterWorker(String(w.id)) }}
+                          className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-white text-[10px] font-bold whitespace-nowrap"
+                          title={`Regjistro pagesë për ${w.name}`}
+                        >💶 Paguaj</button>
                       )}
                     </div>
-                    {!paid && (
-                      <button
-                        onClick={() => { setPaymentModal({}); setFilterWorker(String(w.id)) }}
-                        className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-white text-[10px] font-bold whitespace-nowrap"
-                        title={`Regjistro pagesë për ${w.name}`}
-                      >💶 Paguaj</button>
+                    {paid && sortedPs.length > 0 && (
+                      <div className="border-t border-emerald-200/60 dark:border-emerald-800/60 pt-1.5 space-y-0.5">
+                        {sortedPs.map(p => (
+                          <button
+                            key={p.id}
+                            onClick={() => setPaymentModal(p)}
+                            className="w-full flex items-center justify-between gap-2 text-[11px] text-slate-700 dark:text-slate-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/30 rounded px-1 py-0.5 tabular-nums"
+                            title="Klik për të edituar këtë pagesë"
+                          >
+                            <span className="text-slate-500 dark:text-slate-400">{p.date_paid}</span>
+                            <span className="font-semibold">{fmtEUR(paymentTotal(p))} EUR</span>
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
