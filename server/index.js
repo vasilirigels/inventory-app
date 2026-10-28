@@ -1122,7 +1122,7 @@ app.get('/api/daily/:date', async (req, res) => {
         const closingLek = (p.opening_lek || 0)
           + (saleLek - retLek)
           + (p.conv_lek || 0) + (p.hurda_lek || 0) + (p.bank_withdraw_lek || 0)
-          + (p.debt_settlement_eur ? 0 : 0)
+          + (p.debt_settlement_lek || 0)
           - (p.expenses_lek || 0) - (p.biba_lek || 0) - (p.diana_lek || 0)
           - (p.bank_deposit_lek || 0) - (p.safe_deposit_lek || 0) + (p.safe_withdraw_lek || 0);
         const closingEur = (p.opening_eur || 0)
@@ -1185,7 +1185,7 @@ app.post('/api/daily/:date', async (req, res) => {
       'conv_lek', 'conv_eur', 'conv_usd', 'conv_gbp', 'conv_chf',
       'hurda_lek', 'hurda_eur', 'hurda_usd', 'hurda_gbp', 'hurda_chf', 'hurda_gram',
       'safe_deposit_lek', 'safe_deposit_eur', 'safe_withdraw_lek', 'safe_withdraw_eur',
-      'debt_settlement_eur', 'debt_settlement_usd', 'debt_settlement_gbp',
+      'debt_settlement_lek', 'debt_settlement_eur', 'debt_settlement_usd', 'debt_settlement_gbp',
       'debt_settlement_chf', 'debt_settlement_has'
     ];
 
@@ -1661,7 +1661,7 @@ app.get('/api/report', async (req, res) => {
         hurda_lek: sumD('hurda_lek'), hurda_eur: sumD('hurda_eur'), hurda_usd: sumD('hurda_usd'), hurda_gbp: sumD('hurda_gbp'), hurda_chf: sumD('hurda_chf'), hurda_gram: sumD('hurda_gram'),
         safe_deposit_lek:  sumD('safe_deposit_lek'),  safe_deposit_eur:  sumD('safe_deposit_eur'),
         safe_withdraw_lek: sumD('safe_withdraw_lek'), safe_withdraw_eur: sumD('safe_withdraw_eur'),
-        shlyerje_eur: sumD('debt_settlement_eur'), shlyerje_usd: sumD('debt_settlement_usd'), shlyerje_gbp: sumD('debt_settlement_gbp'), shlyerje_chf: sumD('debt_settlement_chf'), shlyerje_has: sumD('debt_settlement_has'),
+        shlyerje_lek: sumD('debt_settlement_lek'), shlyerje_eur: sumD('debt_settlement_eur'), shlyerje_usd: sumD('debt_settlement_usd'), shlyerje_gbp: sumD('debt_settlement_gbp'), shlyerje_chf: sumD('debt_settlement_chf'), shlyerje_has: sumD('debt_settlement_has'),
         borxhe_lek: borxhe.lek, borxhe_eur: borxhe.eur, borxhe_usd: borxhe.usd, borxhe_gbp: borxhe.gbp, borxhe_chf: borxhe.chf,
         kthim_borxhi_lek: kthimBorxhi.lek, kthim_borxhi_eur: kthimBorxhi.eur, kthim_borxhi_usd: kthimBorxhi.usd, kthim_borxhi_gbp: kthimBorxhi.gbp, kthim_borxhi_chf: kthimBorxhi.chf,
       },
@@ -2191,6 +2191,7 @@ app.get('/api/yearly/:year', async (req, res) => {
         biba_lek: sumD('biba_lek'), biba_eur: sumD('biba_eur'), biba_usd: sumD('biba_usd'), biba_gbp: sumD('biba_gbp'), biba_chf: sumD('biba_chf'), biba_gram: sumD('biba_gram'),
         diana_lek: sumD('diana_lek'), diana_eur: sumD('diana_eur'), diana_usd: sumD('diana_usd'), diana_gbp: sumD('diana_gbp'), diana_chf: sumD('diana_chf'), diana_hurda: sumD('diana_hurda'),
         // Shlyerje borxhi te produkteve
+        shlyerje_lek: sumD('debt_settlement_lek'),
         shlyerje_eur: sumD('debt_settlement_eur'),
         shlyerje_usd: sumD('debt_settlement_usd'),
         shlyerje_gbp: sumD('debt_settlement_gbp'),
@@ -11891,6 +11892,57 @@ app.put('/api/investimi/debts/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Monedhat e lejuara për efekt anësor te arka/banka (daily_records dhe
+// bank_movements kanë kolona vetëm për këto).
+const DP_SIDE_EFFECT_CURS = new Set(['LEK', 'EUR', 'USD', 'GBP', 'CHF']);
+
+// Ndërton statement-et për të aplikuar efektin anësor të një pagese borxhi
+// manuale te flukset reale. 'cash' → upsert te daily_records.debt_settlement_<cur>.
+// 'bank' → rresht i ri te bank_movements (direction='to_bank').
+// Pagesat auto (source_withdrawal_id > 0 — nga Biba Investim) NUK kanë efekt
+// anësor sepse janë thjesht hyrje virtuale kontabël, pa kesh real.
+function buildDebtPaymentSideEffects({ paymentId, amount, currency, date, payment_method, source_withdrawal_id, debtor }) {
+  if (!amount || amount <= 0) return [];
+  if (Number(source_withdrawal_id) > 0) return [];
+  const cur = String(currency || '').toUpperCase();
+  if (!DP_SIDE_EFFECT_CURS.has(cur)) return [];
+  const lc = cur.toLowerCase();
+  if (payment_method === 'bank') {
+    return [{
+      sql: `INSERT INTO bank_movements (date, direction, amount_${lc}, person, note, source_debt_payment_id)
+            VALUES (?, 'to_bank', ?, ?, ?, ?)`,
+      args: [date, amount, debtor || '', `Shlyerje borxhi #${paymentId}`, paymentId],
+    }];
+  }
+  // cash → upsert te daily_records
+  return [{
+    sql: `INSERT INTO daily_records (date, debt_settlement_${lc})
+          VALUES (?, ?)
+          ON CONFLICT(date) DO UPDATE SET debt_settlement_${lc} = COALESCE(debt_settlement_${lc}, 0) + excluded.debt_settlement_${lc}`,
+    args: [date, amount],
+  }];
+}
+
+// Statement-et për të kthyer mbrapsht efektin e aplikuar nga një pagesë
+// ekzistuese (në DELETE ose në fillim të PUT para rishtimit).
+function buildDebtPaymentReverse({ paymentId, amount, currency, date, payment_method, source_withdrawal_id }) {
+  if (!amount || amount <= 0) return [];
+  if (Number(source_withdrawal_id) > 0) return [];
+  const cur = String(currency || '').toUpperCase();
+  if (!DP_SIDE_EFFECT_CURS.has(cur)) return [];
+  const lc = cur.toLowerCase();
+  if (payment_method === 'bank') {
+    return [{
+      sql: `DELETE FROM bank_movements WHERE source_debt_payment_id = ?`,
+      args: [paymentId],
+    }];
+  }
+  return [{
+    sql: `UPDATE daily_records SET debt_settlement_${lc} = COALESCE(debt_settlement_${lc}, 0) - ? WHERE date = ?`,
+    args: [amount, date],
+  }];
+}
+
 app.post('/api/investimi/debt-payments', async (req, res) => {
   try {
     const { debt_id, amount, currency, date, note, payment_method } = req.body || {};
@@ -11906,7 +11958,14 @@ app.post('/api/investimi/debt-payments', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [did, amt, cur, amtEurLegacy, date, note || '', pm]
     );
-    res.json({ id: Number(r.lastInsertRowid), success: true });
+    const paymentId = Number(r.lastInsertRowid);
+    const debtRow = await queryOne(`SELECT debtor FROM partner_debts WHERE id = ?`, [did]);
+    const sideStmts = buildDebtPaymentSideEffects({
+      paymentId, amount: amt, currency: cur, date, payment_method: pm,
+      source_withdrawal_id: 0, debtor: debtRow?.debtor,
+    });
+    if (sideStmts.length) await batchWrite(sideStmts);
+    res.json({ id: paymentId, success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -11949,32 +12008,52 @@ app.post('/api/investimi/debt-payments/consolidated', async (req, res) => {
         error: `Shuma (${amt.toFixed(2)} ${cur}) tejkalon borxhin e mbetur (${totalRemaining.toFixed(2)} ${cur})`
       });
     }
-    // Shpërndaje FIFO.
+    // Shpërndaje FIFO. INSERT-et bëhen një nga një që të kemi ID-të e sapokrijuara
+    // për të lidhur bank_movements (source_debt_payment_id) kur payment_method='bank'.
     let remaining = amt;
-    const stmts = [];
     const applied = [];
+    const debtorForSide = String(debtor).trim();
+    const sideStmts = [];
     for (const d of activeRemaining) {
       if (remaining <= 0.005) break;
       const payNow = Math.min(remaining, d.remaining);
       const payRounded = +payNow.toFixed(2);
       if (payRounded <= 0) continue;
       const amtEurLegacy = cur === 'EUR' ? payRounded : 0;
-      stmts.push({
-        sql: `INSERT INTO partner_debt_payments (debt_id, amount, currency, amount_eur, date, note, payment_method)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: [d.id, payRounded, cur, amtEurLegacy, date, note || '', pm],
-      });
-      applied.push({ debt_id: d.id, amount: payRounded, currency: cur });
+      const r = await run(
+        `INSERT INTO partner_debt_payments (debt_id, amount, currency, amount_eur, date, note, payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [d.id, payRounded, cur, amtEurLegacy, date, note || '', pm]
+      );
+      const paymentId = Number(r.lastInsertRowid);
+      sideStmts.push(...buildDebtPaymentSideEffects({
+        paymentId, amount: payRounded, currency: cur, date, payment_method: pm,
+        source_withdrawal_id: 0, debtor: debtorForSide,
+      }));
+      applied.push({ id: paymentId, debt_id: d.id, amount: payRounded, currency: cur });
       remaining -= payRounded;
     }
-    await batchWrite(stmts);
+    if (sideStmts.length) await batchWrite(sideStmts);
     res.json({ success: true, payments: applied, total_applied: +(amt - remaining).toFixed(2) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/investimi/debt-payments/:id', async (req, res) => {
   try {
-    await run(`DELETE FROM partner_debt_payments WHERE id = ?`, [Number(req.params.id)]);
+    const id = Number(req.params.id);
+    const existing = await queryOne(
+      `SELECT amount, UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency,
+              date, payment_method, COALESCE(source_withdrawal_id, 0) AS src
+         FROM partner_debt_payments WHERE id = ?`, [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const stmts = buildDebtPaymentReverse({
+      paymentId: id, amount: existing.amount, currency: existing.currency,
+      date: existing.date, payment_method: existing.payment_method,
+      source_withdrawal_id: existing.src,
+    });
+    stmts.push({ sql: `DELETE FROM partner_debt_payments WHERE id = ?`, args: [id] });
+    await batchWrite(stmts);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -11989,6 +12068,7 @@ app.put('/api/investimi/debt-payments/:id', async (req, res) => {
     const existing = await queryOne(
       `SELECT COALESCE(source_withdrawal_id, 0) AS src,
               UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency,
+              amount AS old_amount, date AS old_date, payment_method AS old_pm,
               debt_id
          FROM partner_debt_payments WHERE id = ?`, [id]
     );
@@ -12003,12 +12083,25 @@ app.put('/api/investimi/debt-payments/:id', async (req, res) => {
     const pm = payment_method === 'bank' ? 'bank' : 'cash';
     const cur = existing.currency;
     const amtEurLegacy = cur === 'EUR' ? amt : 0;
-    await run(
-      `UPDATE partner_debt_payments
-          SET amount = ?, amount_eur = ?, date = ?, note = ?, payment_method = ?
-        WHERE id = ?`,
-      [amt, amtEurLegacy, date, note || '', pm, id]
-    );
+    const debtRow = await queryOne(`SELECT debtor FROM partner_debts WHERE id = ?`, [existing.debt_id]);
+    // Atomik: reverse efektin e vjetër, UPDATE pagesën, aplikim i efektit të ri.
+    const stmts = [
+      ...buildDebtPaymentReverse({
+        paymentId: id, amount: existing.old_amount, currency: cur,
+        date: existing.old_date, payment_method: existing.old_pm, source_withdrawal_id: 0,
+      }),
+      {
+        sql: `UPDATE partner_debt_payments
+                 SET amount = ?, amount_eur = ?, date = ?, note = ?, payment_method = ?
+               WHERE id = ?`,
+        args: [amt, amtEurLegacy, date, note || '', pm, id],
+      },
+      ...buildDebtPaymentSideEffects({
+        paymentId: id, amount: amt, currency: cur, date, payment_method: pm,
+        source_withdrawal_id: 0, debtor: debtRow?.debtor,
+      }),
+    ];
+    await batchWrite(stmts);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

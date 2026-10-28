@@ -1142,6 +1142,14 @@ const MIGRATIONS = [
   "ALTER TABLE partner_debts ADD COLUMN currency TEXT DEFAULT 'EUR'",
   "ALTER TABLE partner_debt_payments ADD COLUMN amount REAL DEFAULT 0",
   "ALTER TABLE partner_debt_payments ADD COLUMN currency TEXT DEFAULT 'EUR'",
+
+  // Shlyerjet manuale te Investimi (jo auto nga Biba Investim) tani prekin
+  // flukset reale: 'cash' → shtohet në arkë (debt_settlement_<cur>), 'bank' →
+  // krijon rresht në bank_movements. source_debt_payment_id lejon cascade kur
+  // editon/fshin pagesën. debt_settlement_lek plotëson skemën për LEK cash.
+  "ALTER TABLE bank_movements ADD COLUMN source_debt_payment_id INTEGER DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_bank_movements_src_dp ON bank_movements(source_debt_payment_id)",
+  "ALTER TABLE daily_records ADD COLUMN debt_settlement_lek REAL DEFAULT 0",
 ];
 
 async function initDB() {
