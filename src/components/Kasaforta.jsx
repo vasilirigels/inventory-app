@@ -208,11 +208,15 @@ export default function Kasaforta() {
                   }).map((c, idx, arr) => {
                     const cur = r[c] || {}
                     const convEvents = cur.conversions || []
+                    const depEvents  = cur.deposits    || []
                     const convTitle = convEvents
                       .map(ev => ev.direction === 'in'
                         ? `🔄 +${fmt(ev.amount)} ${c} ← ${fmt(ev.other_amount)} ${ev.other_cur} (1 ${ev.other_cur} = ${ev.rate} ${c})${ev.note ? ' · ' + ev.note : ''}`
                         : `🔄 −${fmt(ev.amount)} ${c} → ${fmt(ev.other_amount)} ${ev.other_cur} (1 ${c} = ${ev.rate} ${ev.other_cur})${ev.note ? ' · ' + ev.note : ''}`
                       ).join('\n')
+                    const depTitle = depEvents
+                      .map(ev => `${ev.source === 'bank' ? '🏦 Bankë→Kasafortë' : '💰 Derdhje direkte'}: +${fmt(ev.amount)} ${c}${ev.note ? ' · ' + ev.note : ''}`)
+                      .join('\n')
                     return (
                       <tr key={`${r.date}-${c}`} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                         <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-mono text-xs">
@@ -222,8 +226,21 @@ export default function Kasaforta() {
                         <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400" title="Gjendja në fillim të ditës">
                           {fmt(cur.balance_before)}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">
-                          {cur.deposit > 0 ? `+${fmt(cur.deposit)}` : '—'}
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300 align-top" title={depTitle || undefined}>
+                          {depEvents.length === 0 ? (
+                            cur.deposit > 0 ? `+${fmt(cur.deposit)}` : '—'
+                          ) : (
+                            <div className="space-y-1.5">
+                              {depEvents.map((ev, i) => (
+                                <div key={i} className="text-right">
+                                  <div className="font-semibold">+{fmt(ev.amount)}</div>
+                                  <div className="text-xs font-normal text-slate-500 dark:text-slate-400 whitespace-normal break-words leading-tight">
+                                    {ev.note || (ev.source === 'bank' ? 'Bankë→Kasafortë' : 'Derdhje direkte')}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
                           {cur.closeout_in > 0 ? `+${fmt(cur.closeout_in)}` : '—'}

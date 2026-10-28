@@ -8144,6 +8144,42 @@ app.get('/api/kasaforta', async (req, res) => {
     const sdByDate = {};
     for (const r of sdRows) sdByDate[r.date] = r;
 
+    // Ngjarjet individuale të derdhjeve: për çdo (datë, monedhë) ruajmë listën
+    // me shumë + shënim + burim, që UI të shfaqë çdo depozitim veç si tërheqjet.
+    const depEventsByDate = {}; // { date: { CUR: [{ amount, note, source }] } }
+    const ensureDepBucket = (d, c) => {
+      if (!depEventsByDate[d]) depEventsByDate[d] = {};
+      if (!depEventsByDate[d][c]) depEventsByDate[d][c] = [];
+      return depEventsByDate[d][c];
+    };
+    const sdEventRows = await queryAll(
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf, note
+         FROM safe_deposits
+         ORDER BY date ASC, id ASC`
+    );
+    for (const ev of sdEventRows) {
+      for (const c of CURS) {
+        const v = parseFloat(ev[`amount_${c.toLowerCase()}`]) || 0;
+        if (v > 0) ensureDepBucket(ev.date, c).push({
+          id: ev.id, amount: +v.toFixed(2), note: ev.note || '', source: 'direct',
+        });
+      }
+    }
+    const bmEventRows = await queryAll(
+      `SELECT id, date, amount_lek, amount_eur, amount_usd, amount_gbp, amount_chf, note
+         FROM bank_movements
+         WHERE direction = 'to_safe'
+         ORDER BY date ASC, id ASC`
+    );
+    for (const ev of bmEventRows) {
+      for (const c of CURS) {
+        const v = parseFloat(ev[`amount_${c.toLowerCase()}`]) || 0;
+        if (v > 0) ensureDepBucket(ev.date, c).push({
+          id: ev.id, amount: +v.toFixed(2), note: ev.note || '', source: 'bank',
+        });
+      }
+    }
+
     // Konvertimet e monedhës brenda kasafortës — për çdo (datë, monedhë)
     // llogarit conv_in / conv_out dhe listën e ngjarjeve për tooltip / detaje.
     const convRows = await queryAll(
@@ -8222,6 +8258,7 @@ app.get('/api/kasaforta', async (req, res) => {
           balance_before: +balanceBefore.toFixed(2),
           balance:  +running[c].toFixed(2),
           conversions: cv[c]?.events || [],
+          deposits: depEventsByDate[date]?.[c] || [],
         };
       }
       return { date, ...perCur };
