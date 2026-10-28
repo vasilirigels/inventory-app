@@ -11682,6 +11682,83 @@ app.delete('/api/investimi/investments/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// PUT: edito investimin. Kur ndryshon partner/amount/currency, rikrijohet
+// borxhi auto Diana→Biba. Nëse borxhi i vjetër auto ka pagesa, kthehet gabim —
+// user duhet të fshijë pagesat e para (ose të fshijë investimin dhe ta rikrijojë).
+app.put('/api/investimi/investments/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await queryOne(
+      `SELECT partner_name,
+              COALESCE(NULLIF(amount, 0), amount_eur, 0) AS amount,
+              UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency
+         FROM partner_investments WHERE id = ?`, [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    const { partner_name, amount, currency, date, note, payment_method } = req.body || {};
+    if (!partner_name || !date) return res.status(400).json({ error: 'partner_name and date required' });
+    const name = String(partner_name).trim();
+    const cur = String(currency || 'EUR').toUpperCase();
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount duhet > 0' });
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
+    const amtEurLegacy = cur === 'EUR' ? amt : 0;
+
+    const partnerChanged  = existing.partner_name.toLowerCase() !== name.toLowerCase();
+    const amountChanged   = Math.abs(existing.amount - amt) > 0.005;
+    const currencyChanged = existing.currency !== cur;
+    const wasBiba = existing.partner_name.toLowerCase() === 'biba';
+    const isBiba  = name.toLowerCase() === 'biba';
+    const mustRecomputeAutoDebt = (partnerChanged || amountChanged || currencyChanged) && (wasBiba || isBiba);
+
+    if (mustRecomputeAutoDebt && wasBiba) {
+      // Nëse borxhi auto i vjetër ka pagesa, nuk mund të rikrijohet pa humbur ato.
+      const paidRow = await queryOne(
+        `SELECT COUNT(*) AS cnt FROM partner_debt_payments
+          WHERE debt_id IN (SELECT id FROM partner_debts WHERE source_investment_id = ?)`,
+        [id]
+      );
+      if (Number(paidRow?.cnt) > 0) {
+        return res.status(400).json({
+          error: 'Borxhi auto i këtij investimi ka pagesa — fshi pagesat e para (ose fshi investimin dhe rikrijoje).'
+        });
+      }
+    }
+
+    const stmts = [{
+      sql: `UPDATE partner_investments
+               SET partner_name = ?, amount = ?, currency = ?, amount_eur = ?,
+                   date = ?, note = ?, payment_method = ?
+             WHERE id = ?`,
+      args: [name, amt, cur, amtEurLegacy, date, note || '', pm, id],
+    }];
+
+    let debtAutoCreated = null;
+    if (mustRecomputeAutoDebt) {
+      stmts.push({ sql: `DELETE FROM partner_debts WHERE source_investment_id = ?`, args: [id] });
+      if (isBiba) {
+        const debtAmt = +(amt * DIANA_DEBT_SHARE).toFixed(2);
+        if (debtAmt > 0) {
+          stmts.push({
+            sql: `INSERT INTO partner_debts (debtor, creditor, amount, currency, initial_amount_eur, reason, date, source_investment_id)
+                  VALUES ('Diana', 'Biba', ?, ?, ?, ?, ?, ?)`,
+            args: [debtAmt, cur, cur === 'EUR' ? debtAmt : 0,
+                   `${(DIANA_DEBT_SHARE * 100).toFixed(0)}% nga investimi i Bibës (${amt.toFixed(2)} ${cur})`,
+                   date, id],
+          });
+          debtAutoCreated = { amount: debtAmt, currency: cur };
+        }
+      }
+    } else if (isBiba) {
+      // Vetëm data/note/method ndryshuan: sinkronizo datën e borxhit auto me investimin.
+      stmts.push({ sql: `UPDATE partner_debts SET date = ? WHERE source_investment_id = ?`, args: [date, id] });
+    }
+
+    await batchWrite(stmts);
+    res.json({ success: true, debt_auto_created: debtAutoCreated });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/investimi/debts', async (req, res) => {
   try {
     const { debtor, creditor, amount, currency, reason, date } = req.body || {};
@@ -11707,6 +11784,72 @@ app.delete('/api/investimi/debts/:id', async (req, res) => {
       { sql: 'DELETE FROM partner_debt_payments WHERE debt_id = ?', args: [id] },
       { sql: 'DELETE FROM partner_debts WHERE id = ?', args: [id] },
     ]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT: edito borxhin. Borxhet auto (nga investim ose tërheqje) nuk editohen
+// drejtpërdrejt — edito burimin. Nëse shuma e re është më e vogël se e paguar,
+// kthen gabim (do krijonte paid > amount).
+app.put('/api/investimi/debts/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await queryOne(
+      `SELECT COALESCE(source_investment_id, 0) AS src_inv,
+              COALESCE(source_withdrawal_id, 0) AS src_wd,
+              UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency
+         FROM partner_debts WHERE id = ?`, [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    if (existing.src_inv > 0 || existing.src_wd > 0) {
+      return res.status(400).json({
+        error: 'Ky borxh është krijuar automatikisht nga investim ose tërheqje — edito burimin, jo borxhin.'
+      });
+    }
+    const { debtor, creditor, amount, currency, reason, date } = req.body || {};
+    if (!debtor || !creditor || !date) return res.status(400).json({ error: 'debtor, creditor dhe date kerkohen' });
+    if (String(debtor).trim() === String(creditor).trim()) {
+      return res.status(400).json({ error: 'debtor ≠ creditor' });
+    }
+    const cur = String(currency || 'EUR').toUpperCase();
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount duhet > 0' });
+    // Verifiko që shuma e re nuk bie nën të paguarën në monedhën e re.
+    const paidRow = await queryOne(
+      `SELECT COALESCE(SUM(COALESCE(NULLIF(amount, 0), amount_eur, 0)), 0) AS paid
+         FROM partner_debt_payments
+        WHERE debt_id = ?
+          AND UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) = ?`,
+      [id, cur]
+    );
+    const paid = Number(paidRow?.paid || 0);
+    if (amt < paid - 0.005) {
+      return res.status(400).json({
+        error: `Shuma e re (${amt.toFixed(2)} ${cur}) është më e vogël se e paguar (${paid.toFixed(2)} ${cur})`
+      });
+    }
+    // Nëse monedha ndryshon dhe ka pagesa në monedhën e vjetër, refuzo (do mbeteshin orfane).
+    if (cur !== existing.currency) {
+      const oldPaid = await queryOne(
+        `SELECT COUNT(*) AS cnt FROM partner_debt_payments
+          WHERE debt_id = ?
+            AND UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) = ?`,
+        [id, existing.currency]
+      );
+      if (Number(oldPaid?.cnt) > 0) {
+        return res.status(400).json({
+          error: `Borxhi ka pagesa në ${existing.currency}; fshi pagesat para se të ndryshosh monedhën.`
+        });
+      }
+    }
+    const amtEurLegacy = cur === 'EUR' ? amt : 0;
+    await run(
+      `UPDATE partner_debts
+          SET debtor = ?, creditor = ?, amount = ?, currency = ?,
+              initial_amount_eur = ?, reason = ?, date = ?
+        WHERE id = ?`,
+      [String(debtor).trim(), String(creditor).trim(), amt, cur, amtEurLegacy, reason || '', date, id]
+    );
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -11799,6 +11942,40 @@ app.delete('/api/investimi/debt-payments/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// PUT: edito pagesën. Monedha mbetet fiks ajo e borxhit — nuk lejohet të
+// ndryshohet këtu (pagesa duhet të jetë në të njëjtën monedhë me borxhin).
+// Pagesat auto (source_withdrawal_id > 0) nuk editohen manualisht — edito
+// tërheqjen burim.
+app.put('/api/investimi/debt-payments/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await queryOne(
+      `SELECT COALESCE(source_withdrawal_id, 0) AS src,
+              UPPER(COALESCE(NULLIF(currency, ''), 'EUR')) AS currency,
+              debt_id
+         FROM partner_debt_payments WHERE id = ?`, [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'not found' });
+    if (existing.src > 0) {
+      return res.status(400).json({ error: 'Kjo pagesë vjen nga një tërheqje — edito tërheqjen në vend të pagesës.' });
+    }
+    const { amount, date, note, payment_method } = req.body || {};
+    if (!date) return res.status(400).json({ error: 'date required' });
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
+    const pm = payment_method === 'bank' ? 'bank' : 'cash';
+    const cur = existing.currency;
+    const amtEurLegacy = cur === 'EUR' ? amt : 0;
+    await run(
+      `UPDATE partner_debt_payments
+          SET amount = ?, amount_eur = ?, date = ?, note = ?, payment_method = ?
+        WHERE id = ?`,
+      [amt, amtEurLegacy, date, note || '', pm, id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ============================================================
 // STATIC FRONTEND (only in production — dev uses Vite dev server)
 // ============================================================
@@ -11818,7 +11995,7 @@ if (fs.existsSync(distDir)) {
       }
     },
   }));
-  app.get(/^\/(?!api|uploads).*/, (req, res) => {
+  app.get(/^\/(?!api|uploads).*/, (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(distDir, 'index.html'));
   });

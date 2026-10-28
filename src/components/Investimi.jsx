@@ -100,12 +100,29 @@ function Seksion({ title, children, action }) {
 function SeksionInvestitoret({ data, activeCurs, flash, reload }) {
   const [showForm, setShowForm] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [editingId, setEditingId] = useState(null)
   const [partner, setPartner]   = useState('')
   const [amount, setAmount]     = useState('')
   const [currency, setCurrency] = useState('EUR')
   const [date, setDate]         = useState(today())
   const [note, setNote]         = useState('')
   const [method, setMethod]     = useState('cash')
+
+  const resetForm = () => {
+    setEditingId(null)
+    setPartner(''); setAmount(''); setNote(''); setDate(today()); setMethod('cash'); setCurrency('EUR')
+  }
+  const startEdit = (inv) => {
+    setEditingId(inv.id)
+    setPartner(inv.partner_name || '')
+    setAmount(String(inv.amount || ''))
+    setCurrency(inv.currency || 'EUR')
+    setDate(inv.date || today())
+    setNote(inv.note || '')
+    setMethod(inv.payment_method === 'bank' ? 'bank' : 'cash')
+    setShowForm(true)
+    setShowHistory(true)
+  }
 
   const partnerOptions = useMemo(() => {
     const set = new Set()
@@ -126,20 +143,24 @@ function SeksionInvestitoret({ data, activeCurs, flash, reload }) {
     e.preventDefault()
     if (!partner.trim()) { flash('⚠ Vendos emrin e ortakut'); return }
     if (n(amount) <= 0)  { flash('⚠ Vendos shumë > 0'); return }
+    const body = {
+      partner_name: partner.trim(), amount: n(amount), currency, date, note,
+      payment_method: method,
+    }
+    const url = editingId ? `/api/investimi/investments/${editingId}` : '/api/investimi/investments'
+    const httpMethod = editingId ? 'PUT' : 'POST'
     try {
-      const r = await fetch('/api/investimi/investments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          partner_name: partner.trim(), amount: n(amount), currency, date, note,
-          payment_method: method,
-        }),
+      const r = await fetch(url, {
+        method: httpMethod, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
       if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
       const resp = await r.json().catch(() => ({}))
-      setPartner(''); setAmount(''); setNote(''); setDate(today()); setMethod('cash'); setCurrency('EUR'); setShowForm(false)
+      const wasEdit = !!editingId
+      resetForm(); setShowForm(false)
       if (resp?.debt_auto_created) {
-        flash(`✓ Investimi u shtua · Borxh auto Diana→Biba ${fmt(resp.debt_auto_created.amount)} ${resp.debt_auto_created.currency} (30%)`)
-      } else flash('✓ Investimi u shtua')
+        flash(`✓ Investimi u ${wasEdit ? 'përditësua' : 'shtua'} · Borxh auto Diana→Biba ${fmt(resp.debt_auto_created.amount)} ${resp.debt_auto_created.currency} (30%)`)
+      } else flash(wasEdit ? '✓ Investimi u përditësua' : '✓ Investimi u shtua')
       await reload()
     } catch (e) { flash('✗ ' + e.message) }
   }
@@ -147,15 +168,22 @@ function SeksionInvestitoret({ data, activeCurs, flash, reload }) {
   return (
     <Seksion
       title="Investitorët — Kapitali"
-      action={<button onClick={() => setShowForm(v => !v)} className="btn-primary text-xs">
+      action={<button onClick={() => {
+        if (showForm) { resetForm(); setShowForm(false) } else setShowForm(true)
+      }} className="btn-primary text-xs">
         {showForm ? '✕ Mbyll' : '+ Investim i Ri'}
       </button>}
     >
       {showForm && (
         <form onSubmit={submit} className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-indigo-50/40 dark:bg-indigo-900/10 grid gap-2 sm:grid-cols-6">
+          {editingId && (
+            <div className="sm:col-span-6 text-xs text-amber-700 dark:text-amber-300">
+              ✎ Edit: ndryshimet e shumës/monedhës/ortakut rikrijojnë borxhin auto. Nëse borxhi auto ka pagesa, fshi pagesat e para.
+            </div>
+          )}
           {partner.trim().toLowerCase() === 'biba' && n(amount) > 0 && (
             <div className="sm:col-span-6 text-xs text-indigo-700 dark:text-indigo-300">
-              ℹ️ Automatikisht do krijohet borxh Diana→Biba me <strong>{fmt(n(amount) * 0.30)} {currency}</strong> (30%).
+              ℹ️ {editingId ? 'Borxhi auto Diana→Biba rikrijohet' : 'Automatikisht do krijohet borxh Diana→Biba'} me <strong>{fmt(n(amount) * 0.30)} {currency}</strong> (30%).
             </div>
           )}
           <datalist id="inv-partners">
@@ -192,8 +220,14 @@ function SeksionInvestitoret({ data, activeCurs, flash, reload }) {
             <span className="block text-slate-500 mb-1">Koment / sqarim</span>
             <input value={note} onChange={e => setNote(e.target.value)} className="input-field w-full" placeholder="opsional" />
           </label>
-          <div className="sm:col-span-1 flex items-end">
-            <button type="submit" className="btn-primary text-xs w-full">💾 Ruaj</button>
+          <div className="sm:col-span-1 flex items-end gap-1">
+            {editingId && (
+              <button type="button" onClick={() => { resetForm(); setShowForm(false) }}
+                className="btn-secondary text-xs flex-1" title="Anulo editimin">✕</button>
+            )}
+            <button type="submit" className="btn-primary text-xs flex-1">
+              {editingId ? '💾 Ruaj' : '💾 Ruaj'}
+            </button>
           </div>
         </form>
       )}
@@ -265,12 +299,12 @@ function SeksionInvestitoret({ data, activeCurs, flash, reload }) {
                 <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500">Mënyra</th>
                 <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">Shuma</th>
                 <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Koment</th>
-                <th className="px-3 py-2 w-10"></th>
+                <th className="px-3 py-2 w-16"></th>
               </tr>
             </thead>
             <tbody>
               {(data.investments || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(inv => (
-                <RreshtInvestimi key={inv.id} inv={inv} flash={flash} reload={reload} />
+                <RreshtInvestimi key={inv.id} inv={inv} flash={flash} reload={reload} onEdit={startEdit} />
               ))}
             </tbody>
           </table>
@@ -281,7 +315,7 @@ function SeksionInvestitoret({ data, activeCurs, flash, reload }) {
   )
 }
 
-function RreshtInvestimi({ inv, flash, reload }) {
+function RreshtInvestimi({ inv, flash, reload, onEdit }) {
   const pm = inv.payment_method === 'bank' ? 'bank' : 'cash'
   const badge = pm === 'bank'
     ? <span className="badge bg-blue-100 text-blue-700 dark:text-blue-300">🏦 Bankë</span>
@@ -304,7 +338,8 @@ function RreshtInvestimi({ inv, flash, reload }) {
         {fmt(inv.amount)} {inv.currency}
       </td>
       <td className="px-3 py-2 text-slate-600 dark:text-slate-400 text-xs">{inv.note || ''}</td>
-      <td className="px-3 py-2 text-right">
+      <td className="px-3 py-2 text-right whitespace-nowrap">
+        <button onClick={() => onEdit(inv)} className="text-indigo-600 hover:text-indigo-800 text-xs mr-2" title="Edito">✎</button>
         <button onClick={del} className="text-rose-600 hover:text-rose-800 text-xs" title="Fshi">🗑</button>
       </td>
     </tr>
@@ -314,12 +349,34 @@ function RreshtInvestimi({ inv, flash, reload }) {
 // ─── Seksion 2: Borxhet aktive mes ortakëve ───
 function SeksionBorxhet({ data, flash, reload }) {
   const [showForm, setShowForm] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [editingId, setEditingId] = useState(null)
   const [debtor, setDebtor]       = useState('')
   const [creditor, setCreditor]   = useState('')
   const [amount, setAmount]       = useState('')
   const [currency, setCurrency]   = useState('EUR')
   const [reason, setReason]       = useState('')
   const [date, setDate]           = useState(today())
+
+  const resetForm = () => {
+    setEditingId(null)
+    setDebtor(''); setCreditor(''); setAmount(''); setCurrency('EUR'); setReason(''); setDate(today())
+  }
+  const startEdit = (d) => {
+    if ((d.source_investment_id || 0) > 0 || (d.source_withdrawal_id || 0) > 0) {
+      flash('✗ Borxh auto — edito investimin ose tërheqjen burim')
+      return
+    }
+    setEditingId(d.id)
+    setDebtor(d.debtor || '')
+    setCreditor(d.creditor || '')
+    setAmount(String(d.amount || ''))
+    setCurrency(d.currency || 'EUR')
+    setReason(d.reason || '')
+    setDate(d.date || today())
+    setShowForm(true)
+    setShowHistory(true)
+  }
 
   const partnerOptions = useMemo(() => {
     const set = new Set()
@@ -376,27 +433,59 @@ function SeksionBorxhet({ data, flash, reload }) {
     if (!debtor.trim() || !creditor.trim()) { flash('⚠ Vendos emrat'); return }
     if (debtor.trim() === creditor.trim())  { flash('⚠ Debtor ≠ Creditor'); return }
     if (n(amount) <= 0) { flash('⚠ Shumë > 0'); return }
+    const body = { debtor: debtor.trim(), creditor: creditor.trim(),
+      amount: n(amount), currency, reason, date }
+    const url = editingId ? `/api/investimi/debts/${editingId}` : '/api/investimi/debts'
+    const httpMethod = editingId ? 'PUT' : 'POST'
     try {
-      const r = await fetch('/api/investimi/debts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ debtor: debtor.trim(), creditor: creditor.trim(),
-          amount: n(amount), currency, reason, date }),
+      const r = await fetch(url, {
+        method: httpMethod, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
       if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
-      setDebtor(''); setCreditor(''); setAmount(''); setReason(''); setDate(today()); setCurrency('EUR'); setShowForm(false)
-      flash('✓ Borxhi u shtua'); await reload()
+      const wasEdit = !!editingId
+      resetForm(); setShowForm(false)
+      flash(wasEdit ? '✓ Borxhi u përditësua' : '✓ Borxhi u shtua'); await reload()
     } catch (e) { flash('✗ ' + e.message) }
   }
+
+  const delDebt = async (d) => {
+    const auto = (d.source_investment_id || 0) > 0 || (d.source_withdrawal_id || 0) > 0
+    const msg = auto
+      ? 'Ky borxh u krijua automatikisht nga një investim/tërheqje. Fshi burimin për cascade. Të fshihet manualisht gjithsesi?'
+      : 'Të fshihet ky borxh? (Pagesat e lidhura fshihen gjithashtu.)'
+    const ok = await showConfirm(msg, { confirmLabel: 'Fshi', danger: true })
+    if (!ok) return
+    try {
+      const r = await fetch(`/api/investimi/debts/${d.id}`, { method: 'DELETE' })
+      if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
+      flash('✓ Borxhi u fshi'); await reload()
+    } catch (e) { flash('✗ ' + e.message) }
+  }
+
+  // Flat list i të gjitha borxheve (për historik), i renditur nga më i riu te më i vjetri.
+  const debtsList = useMemo(() => {
+    return (data.debts || []).slice().sort((a, b) =>
+      (b.date || '').localeCompare(a.date || '') || b.id - a.id
+    )
+  }, [data])
 
   return (
     <Seksion
       title="Borxhe Mes Ortakëve"
-      action={<button onClick={() => setShowForm(v => !v)} className="btn-secondary text-xs">
+      action={<button onClick={() => {
+        if (showForm) { resetForm(); setShowForm(false) } else setShowForm(true)
+      }} className="btn-secondary text-xs">
         {showForm ? '✕ Mbyll' : '+ Borxh i Ri'}
       </button>}
     >
       {showForm && (
         <form onSubmit={submit} className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-rose-50/40 dark:bg-rose-900/10 grid gap-2 sm:grid-cols-6">
+          {editingId && (
+            <div className="sm:col-span-6 text-xs text-amber-700 dark:text-amber-300">
+              ✎ Edit borxhi — nëse monedha ndryshon dhe ka pagesa, fshi pagesat e para.
+            </div>
+          )}
           <datalist id="debt-partners">
             {partnerOptions.map(name => <option key={name} value={name} />)}
           </datalist>
@@ -429,8 +518,12 @@ function SeksionBorxhet({ data, flash, reload }) {
             <span className="block text-slate-500 mb-1">Koment / sqarim</span>
             <input value={reason} onChange={e => setReason(e.target.value)} className="input-field w-full" placeholder="opsional" />
           </label>
-          <div className="sm:col-span-1 flex items-end">
-            <button type="submit" className="btn-primary text-xs w-full">💾 Ruaj</button>
+          <div className="sm:col-span-1 flex items-end gap-1">
+            {editingId && (
+              <button type="button" onClick={() => { resetForm(); setShowForm(false) }}
+                className="btn-secondary text-xs flex-1" title="Anulo editimin">✕</button>
+            )}
+            <button type="submit" className="btn-primary text-xs flex-1">💾 Ruaj</button>
           </div>
         </form>
       )}
@@ -501,6 +594,73 @@ function SeksionBorxhet({ data, flash, reload }) {
           ))}
         </tbody>
       </table>
+
+      {debtsList.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowHistory(v => !v)}
+            className="w-full px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/30 text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 transition flex items-center justify-between"
+          >
+            <h5 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {showHistory ? '▾' : '▸'} Historik borxhesh ({debtsList.length})
+            </h5>
+            <span className="text-[10px] text-slate-400">{showHistory ? 'kliko për të fshehur' : 'kliko për të shfaqur'}</span>
+          </button>
+          {showHistory && (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
+                <tr>
+                  <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Data</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Nga → Tek</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">Shuma</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">Paguar</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">Mbetet</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">Burimi / Koment</th>
+                  <th className="px-3 py-2 w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {debtsList.map(d => {
+                  const auto = (d.source_investment_id || 0) > 0 || (d.source_withdrawal_id || 0) > 0
+                  const srcLabel = (d.source_investment_id || 0) > 0 ? '🤖 auto nga investim'
+                    : (d.source_withdrawal_id || 0) > 0 ? '🤖 auto nga tërheqje'
+                    : ''
+                  const active = n(d.remaining) > 0.005
+                  return (
+                    <tr key={d.id} className={`border-b border-slate-100 dark:border-slate-800 ${active ? 'bg-rose-50/30 dark:bg-rose-900/10' : 'bg-emerald-50/30 dark:bg-emerald-900/10'}`}>
+                      <td className="px-4 py-2 text-slate-700 dark:text-slate-200">{d.date}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-200">
+                        {d.debtor} → {d.creditor}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">
+                        {fmt(d.amount)} {d.currency}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">
+                        {fmt(d.paid)}
+                      </td>
+                      <td className={`px-3 py-2 text-right tabular-nums font-bold ${active ? 'text-rose-700 dark:text-rose-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                        {active ? fmt(d.remaining) : '✓'}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                        {[srcLabel, d.reason].filter(Boolean).join(' · ')}
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {auto ? (
+                          <span className="text-slate-300 dark:text-slate-600 text-xs mr-2" title="Borxh auto — edito investimin/tërheqjen burim">✎</span>
+                        ) : (
+                          <button onClick={() => startEdit(d)} className="text-indigo-600 hover:text-indigo-800 text-xs mr-2" title="Edito">✎</button>
+                        )}
+                        <button onClick={() => delDebt(d)} className="text-rose-600 hover:text-rose-800 text-xs" title="Fshi">🗑</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
     </Seksion>
   )
 }
@@ -509,12 +669,31 @@ function SeksionBorxhet({ data, flash, reload }) {
 function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
   const [showForm, setShowForm] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [editingId, setEditingId] = useState(null)
   const [dest, setDest]         = useState('biba_investment')
   const [amount, setAmount]     = useState('')
   const [currency, setCurrency] = useState('EUR')
   const [date, setDate]         = useState(today())
   const [person, setPerson]     = useState('')
   const [note, setNote]         = useState('')
+
+  const resetForm = () => {
+    setEditingId(null)
+    setDest('biba_investment'); setAmount(''); setCurrency('EUR'); setDate(today()); setPerson(''); setNote('')
+  }
+  const startEdit = (w) => {
+    setEditingId(w.id)
+    setDest(w.destination || 'biba_investment')
+    // Gjej monedhën e vetme me shumë > 0 (çdo tërheqje ruan një monedhë).
+    const cur = CURRENCIES.find(c => n(w[`amount_${c.toLowerCase()}`]) > 0) || 'EUR'
+    setCurrency(cur)
+    setAmount(String(n(w[`amount_${cur.toLowerCase()}`]) || ''))
+    setDate(w.date || today())
+    setPerson(w.person || '')
+    setNote(w.note || '')
+    setShowForm(true)
+    setShowHistory(true)
+  }
 
   // Për destinacionin 'biba_investment', tregon vetëm monedhat që kanë borxh aktiv.
   const curWithActiveDebt = useMemo(() => {
@@ -537,16 +716,23 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
       amount_lek: 0, amount_eur: 0, amount_usd: 0, amount_gbp: 0, amount_chf: 0,
     }
     body[`amount_${currency.toLowerCase()}`] = n(amount)
+    const url = editingId ? `/api/safe-withdrawals/${editingId}` : '/api/safe-withdrawals'
+    const httpMethod = editingId ? 'PUT' : 'POST'
     try {
-      const r = await fetch('/api/safe-withdrawals', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const r = await fetch(url, {
+        method: httpMethod, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
       if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
-      setAmount(''); setPerson(''); setNote(''); setDate(today()); setShowForm(false)
-      flash(dest === 'biba_investment'
-        ? `✓ Tërheqje Biba — 30% zbriti borxhin e Dianës në ${currency}`
-        : `✓ Tërheqje ${person.trim() || 'Diana'} — iu rrit borxhi me ${fmt(n(amount))} ${currency}`)
+      const wasEdit = !!editingId
+      resetForm(); setShowForm(false)
+      if (wasEdit) {
+        flash('✓ Tërheqja u përditësua')
+      } else {
+        flash(dest === 'biba_investment'
+          ? `✓ Tërheqje Biba — 30% zbriti borxhin e Dianës në ${currency}`
+          : `✓ Tërheqje ${person.trim() || 'Diana'} — iu rrit borxhi me ${fmt(n(amount))} ${currency}`)
+      }
       await reload()
     } catch (e) { flash('✗ ' + e.message) }
   }
@@ -587,12 +773,19 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
   return (
     <Seksion
       title="Tërheqje nga Kasaforta (Investimi)"
-      action={<button onClick={() => setShowForm(v => !v)} className="btn-primary text-xs">
+      action={<button onClick={() => {
+        if (showForm) { resetForm(); setShowForm(false) } else setShowForm(true)
+      }} className="btn-primary text-xs">
         {showForm ? '✕ Mbyll' : '+ Tërheqje e Re'}
       </button>}
     >
       {showForm && (
         <form onSubmit={submit} className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-amber-50/40 dark:bg-amber-900/10 grid gap-2 sm:grid-cols-6">
+          {editingId && (
+            <div className="sm:col-span-6 text-xs text-amber-700 dark:text-amber-300">
+              ✎ Edit: efektet te borxhet rikrijohen automatikisht sipas vlerave të reja.
+            </div>
+          )}
           <div className="sm:col-span-6 text-xs text-slate-500 dark:text-slate-400">
             <strong>Biba (nga investimi):</strong> 30% e tërheqjes zbret borxhin e Dianës NË TË NJËJTËN MONEDHË.{' '}
             <strong>Borxh i Ri:</strong> krijon borxh të ri (Person)→Biba në atë monedhë. Nëse <em>Person</em> është bosh, default-i është Diana.
@@ -640,8 +833,12 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
             <span className="block text-slate-500 mb-1">Koment / sqarim</span>
             <input value={note} onChange={e => setNote(e.target.value)} className="input-field w-full" placeholder="opsional" />
           </label>
-          <div className="sm:col-span-1 flex items-end">
-            <button type="submit" className="btn-primary text-xs w-full">💾 Ruaj</button>
+          <div className="sm:col-span-1 flex items-end gap-1">
+            {editingId && (
+              <button type="button" onClick={() => { resetForm(); setShowForm(false) }}
+                className="btn-secondary text-xs flex-1" title="Anulo editimin">✕</button>
+            )}
+            <button type="submit" className="btn-primary text-xs flex-1">💾 Ruaj</button>
           </div>
         </form>
       )}
@@ -653,7 +850,7 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
             {activeCurs.map(c => (
               <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c}</th>
             ))}
-            <th className="px-3 py-2 w-10"></th>
+            <th className="px-3 py-2 w-16"></th>
           </tr>
         </thead>
         <tbody>
@@ -688,7 +885,8 @@ function SeksionTerheqjet({ data, withdrawals, activeCurs, flash, reload }) {
                     {fmtSigned(n(w[`amount_${c.toLowerCase()}`]), '−')}
                   </td>
                 ))}
-                <td className="px-3 py-2.5 text-right">
+                <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                  <button onClick={() => startEdit(w)} className="text-indigo-600 hover:text-indigo-800 text-xs mr-2" title="Edito">✎</button>
                   <button onClick={() => del(w.id)} className="text-rose-600 hover:text-rose-800 text-xs" title="Fshi">🗑</button>
                 </td>
               </tr>
@@ -743,6 +941,22 @@ function SeksionShlyerje({ data, activeCurs, flash, reload }) {
   const [payNote, setPayNote]     = useState('')
   const [payMethod, setPayMethod] = useState('cash')
   const [paying, setPaying]       = useState(false)
+  const [editingPay, setEditingPay] = useState(null) // {id, debtor, creditor, currency}
+
+  const startEditPay = (p) => {
+    const cur = p.currency || p.debt_currency
+    setEditingPay({ id: p.id, debtor: p.debtor, creditor: p.creditor, currency: cur })
+    setPayAmount(String(n(p.amount) || ''))
+    setPayDate(p.date || today())
+    setPayNote(p.note || '')
+    setPayMethod(p.payment_method === 'bank' ? 'bank' : 'cash')
+    setPayKey(null)
+    setShowHistory(true)
+  }
+  const cancelEditPay = () => {
+    setEditingPay(null)
+    setPayAmount(''); setPayDate(today()); setPayNote(''); setPayMethod('cash')
+  }
 
   // Grupo borxhet aktive sipas çiftit+monedhës për formën e pagesës FIFO.
   const activeGroups = useMemo(() => {
@@ -815,6 +1029,26 @@ function SeksionShlyerje({ data, activeCurs, flash, reload }) {
     } catch (e) { flash('✗ ' + e.message) }
   }
 
+  const submitEditPay = async (e) => {
+    e.preventDefault()
+    if (!editingPay)         { return }
+    if (n(payAmount) <= 0)   { flash('⚠ Shumë > 0'); return }
+    setPaying(true)
+    try {
+      const r = await fetch(`/api/investimi/debt-payments/${editingPay.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: n(payAmount), date: payDate, note: payNote, payment_method: payMethod,
+        }),
+      })
+      if (!r.ok) throw new Error((await r.json()).error || 'Gabim')
+      cancelEditPay()
+      flash('✓ Pagesa u përditësua')
+      await reload()
+    } catch (e) { flash('✗ ' + e.message) }
+    setPaying(false)
+  }
+
   return (
     <Seksion
       title="Shlyerje Borxhi (Historik)"
@@ -828,7 +1062,42 @@ function SeksionShlyerje({ data, activeCurs, flash, reload }) {
         </select>
       )}
     >
-      {payKey && activeGroup && (
+      {editingPay && (
+        <form onSubmit={submitEditPay} className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-amber-50/40 dark:bg-amber-900/10 grid gap-2 sm:grid-cols-6">
+          <div className="sm:col-span-6 text-xs text-amber-700 dark:text-amber-300">
+            ✎ Edito pagesën për <strong>{editingPay.debtor} → {editingPay.creditor} ({editingPay.currency})</strong> — monedha mbetet fiks.
+          </div>
+          <label className="text-xs sm:col-span-2">
+            <span className="block text-slate-500 mb-1">Shuma ({editingPay.currency})</span>
+            <input type="number" step="0.01" min="0" value={payAmount} onChange={e => setPayAmount(e.target.value)}
+              className="input-field w-full tabular-nums text-right" autoFocus />
+          </label>
+          <label className="text-xs">
+            <span className="block text-slate-500 mb-1">Data</span>
+            <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className="input-field w-full" />
+          </label>
+          <label className="text-xs">
+            <span className="block text-slate-500 mb-1">Mënyra</span>
+            <select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="input-field w-full">
+              <option value="cash">💵 Cash</option>
+              <option value="bank">🏦 Bankë</option>
+            </select>
+          </label>
+          <label className="text-xs sm:col-span-2">
+            <span className="block text-slate-500 mb-1">Koment / sqarim</span>
+            <input value={payNote} onChange={e => setPayNote(e.target.value)} className="input-field w-full" />
+          </label>
+          <div className="sm:col-span-5 flex gap-2 justify-end">
+            <button type="button" onClick={cancelEditPay} className="btn-secondary text-xs">Anulo</button>
+          </div>
+          <div className="sm:col-span-1 flex items-end">
+            <button type="submit" disabled={paying} className="btn-primary text-xs w-full">
+              {paying ? '…' : '💾 Ruaj'}
+            </button>
+          </div>
+        </form>
+      )}
+      {payKey && activeGroup && !editingPay && (
         <form onSubmit={submitPay} className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-emerald-50/40 dark:bg-emerald-900/10 grid gap-2 sm:grid-cols-6">
           <div className="sm:col-span-6 text-xs text-slate-600 dark:text-slate-300">
             Pagesë për <strong>{activeGroup.debtor} → {activeGroup.creditor} ({activeGroup.currency})</strong> — shpërndahet FIFO (më i vjetri i pari).
@@ -871,7 +1140,7 @@ function SeksionShlyerje({ data, activeCurs, flash, reload }) {
             {activeCurs.map(c => (
               <th key={c} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c}</th>
             ))}
-            <th className="px-3 py-2 w-10"></th>
+            <th className="px-3 py-2 w-16"></th>
           </tr>
         </thead>
         <tbody>
@@ -905,7 +1174,12 @@ function SeksionShlyerje({ data, activeCurs, flash, reload }) {
                     {c === cur ? fmtSigned(n(p.amount), '+') : '-'}
                   </td>
                 ))}
-                <td className="px-3 py-2.5 text-right">
+                <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                  {p.source_withdrawal_id > 0 ? (
+                    <span className="text-slate-300 dark:text-slate-600 text-xs mr-2" title="Pagesë nga tërheqje — edito tërheqjen">✎</span>
+                  ) : (
+                    <button onClick={() => startEditPay(p)} className="text-indigo-600 hover:text-indigo-800 text-xs mr-2" title="Edito">✎</button>
+                  )}
                   <button onClick={() => delPay(p.id)} className="text-rose-600 hover:text-rose-800 text-xs" title="Fshi">🗑</button>
                 </td>
               </tr>
