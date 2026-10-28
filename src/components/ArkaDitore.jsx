@@ -255,11 +255,18 @@ export default function ArkaDitore({ date, onNavigate }) {
             <tr className="border-t-2 border-slate-300 dark:border-slate-700 bg-emerald-100">
               <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">
                 = Kesh në Dispozicion
-                <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">Mbartje + Xhiro − Bankë − POS − Borxh</span>
+                <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">shuma e të gjitha hyrjeve më sipër</span>
               </td>
               {shownCurs.map(c => (
                 <td key={c} className="px-3 py-3 text-right tabular-nums font-bold text-emerald-800 dark:text-emerald-200 text-base">
-                  {fmt((data.opening_cash?.[c] || 0) + (data.cash_from_sales?.[c] || 0))}
+                  {fmt(
+                    (data.opening_cash?.[c] || 0)
+                    + (data.cash_from_sales?.[c] || 0)
+                    + (data.debt_repayments?.[c] || 0)
+                    + (data.porosi_deposits?.[c] || 0)
+                    + (data.safe_to_arka?.[c] || 0)
+                    + (data.investimi_debt_payments?.[c] || 0)
+                  )}
                 </td>
               ))}
             </tr>
