@@ -7582,8 +7582,8 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
     }
 
     // Lëvizje kesh nga Arka drejtpërdrejt në Bankë — zbresin nga sirtari.
-    // Përdor tabelën bank_movements me direction='to_bank' (të njëjtat regjistrime
-    // që krijohen nga faqja "Lëvizje e Re Banke").
+    // Përjashton rreshtat që janë efekt anësor i një shlyerjeje borxhi (ato
+    // janë kesh nga Diana që shkoi direkt në bankë — nuk kaloi nga arka).
     const arkaBankRows = await queryAll(
       `SELECT COALESCE(amount_lek, 0) AS LEK,
               COALESCE(amount_eur, 0) AS EUR,
@@ -7591,12 +7591,32 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
               COALESCE(amount_gbp, 0) AS GBP,
               COALESCE(amount_chf, 0) AS CHF
          FROM bank_movements
-        WHERE date = ? AND direction = 'to_bank'`,
+        WHERE date = ? AND direction = 'to_bank'
+          AND COALESCE(source_debt_payment_id, 0) = 0`,
       [date]
     );
     const arka_to_bank = zeroPerCur();
     for (const r of arkaBankRows) {
       for (const c of CURS) arka_to_bank[c] += (r[c] || 0);
+    }
+
+    // Shlyerje borxhi nga Investimi (cash) — kesh që hyn në arkë kur një ortak
+    // (Diana) i kthen keshin dyqanit (Biba/Champlate). Vetëm shlyerjet manuale
+    // (source_withdrawal_id = 0) kanë efekt real; ato auto (nga Biba Investim
+    // 30%) janë thjesht hyrje virtuale kontabël pa kesh.
+    const investimiCashRows = await queryAll(
+      `SELECT UPPER(COALESCE(NULLIF(p.currency, ''), 'EUR')) AS cur,
+              COALESCE(p.amount, p.amount_eur, 0)             AS amt
+         FROM partner_debt_payments p
+        WHERE p.date = ?
+          AND COALESCE(p.payment_method, 'cash') = 'cash'
+          AND COALESCE(p.source_withdrawal_id, 0) = 0`,
+      [date]
+    );
+    const investimi_debt_payments = zeroPerCur();
+    for (const r of investimiCashRows) {
+      const c = (r.cur || 'EUR').toUpperCase();
+      if (c in investimi_debt_payments) investimi_debt_payments[c] += Number(r.amt) || 0;
     }
 
     // Tërheqjet nga kasaforta me destinacion 'arka' — hyjnë si kesh në sirtar.
@@ -7657,6 +7677,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       if (c === 'EUR') cash_from_sales[c] += marketing_in_kind_eur;
       cash_balance[c]    = opening_cash[c] + cash_from_sales[c] + debt_repayments[c] + porosi_deposits[c]
                           + safe_to_arka[c]
+                          + investimi_debt_payments[c]
                           - expenses[c] - purchase_cash[c] - hurda_cash[c] - has_cash[c]
                           - worker_payments_cash[c]
                           - returns_cash[c]
@@ -7684,6 +7705,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
       repairs_cash:      fx(repairs_cash),
       arka_to_bank:      fx(arka_to_bank),
       safe_to_arka:      fx(safe_to_arka),
+      investimi_debt_payments: fx(investimi_debt_payments),
       worker_payments_cash: fx(worker_payments_cash),
       returns_gross:     fx(returns_gross),
       returns_cash:      fx(returns_cash),
@@ -7723,6 +7745,7 @@ app.get('/api/arka-ditore/:date', async (req, res) => {
         debt_repayments: debtPayRows.length,
         marketing_in_kind: mktProdRows.length + mktContractProdRows.length,
         safe_to_arka: safeToArkaRows.length,
+        investimi_debt_payments: investimiCashRows.length,
         worker_payments: worker_payments_count,
         repairs: repairs_count,
         arka_to_bank: arkaBankRows.length,
@@ -11897,49 +11920,39 @@ app.put('/api/investimi/debts/:id', async (req, res) => {
 const DP_SIDE_EFFECT_CURS = new Set(['LEK', 'EUR', 'USD', 'GBP', 'CHF']);
 
 // Ndërton statement-et për të aplikuar efektin anësor të një pagese borxhi
-// manuale te flukset reale. 'cash' → upsert te daily_records.debt_settlement_<cur>.
-// 'bank' → rresht i ri te bank_movements (direction='to_bank').
-// Pagesat auto (source_withdrawal_id > 0 — nga Biba Investim) NUK kanë efekt
-// anësor sepse janë thjesht hyrje virtuale kontabël, pa kesh real.
+// manuale te flukset reale për 'bank' — krijon rresht te bank_movements. Për
+// 'cash' NUK duhet statement (shih poshtë). Pagesat auto (source_withdrawal_id
+// > 0 — nga Biba Investim) nuk kanë efekt sepse janë thjesht virtuale kontabël.
+//
+// Pse jo cash side-effect te daily_records.debt_settlement_<cur>?
+// Faqja "Arka Ditore" (/api/arka-ditore/:date) NUK e lexon daily_records për
+// shlyerje; ajo llogarit nga burimet (fatura, bank_movements, etj.). Për
+// koherencë, shlyerjet partner (cash) agregohen te `/api/arka-ditore` direkt
+// nga `partner_debt_payments` — jo nga daily_records.
 function buildDebtPaymentSideEffects({ paymentId, amount, currency, date, payment_method, source_withdrawal_id, debtor }) {
   if (!amount || amount <= 0) return [];
   if (Number(source_withdrawal_id) > 0) return [];
+  if (payment_method !== 'bank') return [];
   const cur = String(currency || '').toUpperCase();
   if (!DP_SIDE_EFFECT_CURS.has(cur)) return [];
   const lc = cur.toLowerCase();
-  if (payment_method === 'bank') {
-    return [{
-      sql: `INSERT INTO bank_movements (date, direction, amount_${lc}, person, note, source_debt_payment_id)
-            VALUES (?, 'to_bank', ?, ?, ?, ?)`,
-      args: [date, amount, debtor || '', `Shlyerje borxhi #${paymentId}`, paymentId],
-    }];
-  }
-  // cash → upsert te daily_records
   return [{
-    sql: `INSERT INTO daily_records (date, debt_settlement_${lc})
-          VALUES (?, ?)
-          ON CONFLICT(date) DO UPDATE SET debt_settlement_${lc} = COALESCE(debt_settlement_${lc}, 0) + excluded.debt_settlement_${lc}`,
-    args: [date, amount],
+    sql: `INSERT INTO bank_movements (date, direction, amount_${lc}, person, note, source_debt_payment_id)
+          VALUES (?, 'to_bank', ?, ?, ?, ?)`,
+    args: [date, amount, debtor || '', `Shlyerje borxhi #${paymentId}`, paymentId],
   }];
 }
 
-// Statement-et për të kthyer mbrapsht efektin e aplikuar nga një pagesë
-// ekzistuese (në DELETE ose në fillim të PUT para rishtimit).
-function buildDebtPaymentReverse({ paymentId, amount, currency, date, payment_method, source_withdrawal_id }) {
+// Reverse për DELETE/PUT — vetëm për bank (cash s'ka efekt që duhet rikthyer).
+function buildDebtPaymentReverse({ paymentId, amount, currency, payment_method, source_withdrawal_id }) {
   if (!amount || amount <= 0) return [];
   if (Number(source_withdrawal_id) > 0) return [];
+  if (payment_method !== 'bank') return [];
   const cur = String(currency || '').toUpperCase();
   if (!DP_SIDE_EFFECT_CURS.has(cur)) return [];
-  const lc = cur.toLowerCase();
-  if (payment_method === 'bank') {
-    return [{
-      sql: `DELETE FROM bank_movements WHERE source_debt_payment_id = ?`,
-      args: [paymentId],
-    }];
-  }
   return [{
-    sql: `UPDATE daily_records SET debt_settlement_${lc} = COALESCE(debt_settlement_${lc}, 0) - ? WHERE date = ?`,
-    args: [amount, date],
+    sql: `DELETE FROM bank_movements WHERE source_debt_payment_id = ?`,
+    args: [paymentId],
   }];
 }
 

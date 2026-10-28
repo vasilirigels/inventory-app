@@ -192,6 +192,7 @@ export default function ArkaDitore({ date, onNavigate }) {
     { label: 'Pagesë Borxhi',                   src: 'debt_repayments',   sign: '+', color: 'text-teal-700',    bg: 'bg-teal-50',    detail: `${data.counts.debt_repayments || 0} pagesa kesh nga fatura të vjetra (jo pjesë e xhiros)` },
     { label: 'Kapari (Porosi)',                 src: 'porosi_deposits',   sign: '+', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50', detail: `${data.counts.porosi_deposits || 0} kapar(ë) kesh nga porositë (hyn direkt në arkë)` },
     { label: 'Tërheqje nga Kasaforta',          src: 'safe_to_arka',      sign: '+', color: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-900/30', detail: `${data.counts?.safe_to_arka || 0} tërheqje me destinacion arkë` },
+    { label: 'Shlyerje Borxhi (Investimi)',     src: 'investimi_debt_payments', sign: '+', color: 'text-teal-700 dark:text-teal-300', bg: 'bg-teal-50 dark:bg-teal-900/30', detail: `${data.counts?.investimi_debt_payments || 0} shlyerje kesh nga Investimi (ortak i kthen keshin dyqanit)` },
   ]
   const outRows = [
     { label: 'Kthime Shitjesh (Kesh)',          src: 'returns_cash',      sign: '−', color: 'text-red-700 dark:text-red-300',      bg: 'bg-red-50 dark:bg-red-900/30',       detail: `${nCredit} kreditore · rimbursim kesh (dalje nga sirtari)` },
