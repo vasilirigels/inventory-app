@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRealtimeSync } from '../hooks/useRealtimeSync.js'
+import { RepairModal } from './Riparimet.jsx'
+import { showConfirm } from './ConfirmDialog.jsx'
 
 const STATUS_META = {
   pranuar:  { label: 'Pranuar',   cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200' },
@@ -13,11 +15,20 @@ function fmt(v) { return (parseFloat(v) || 0).toLocaleString('sq-AL', { minimumF
 export default function Argjendaret() {
   const [repairs, setRepairs] = useState([])
   const [argjendars, setArgjendars] = useState([])
+  const [argjendarNames, setArgjendarNames] = useState([])  // për datalist te RepairModal
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  const [editing, setEditing] = useState(null)   // repair që po editohet në RepairModal
+
+  const loadArgjendarNames = useCallback(async () => {
+    try {
+      const names = await fetch('/api/repairs/argjendars').then(r => r.json())
+      setArgjendarNames(Array.isArray(names) ? names : [])
+    } catch { /* lista e emrave është vetëm hint për datalist — s'është kritike */ }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -25,15 +36,51 @@ export default function Argjendaret() {
       const [rRes, aRes] = await Promise.all([
         fetch('/api/repairs').then(r => r.json()),
         fetch('/api/argjendars').then(r => r.json()).catch(() => []),
+        loadArgjendarNames(),
       ])
       setRepairs(Array.isArray(rRes) ? rRes : [])
       setArgjendars(Array.isArray(aRes) ? aRes : [])
     } catch {
       setRepairs([]); setArgjendars([])
     } finally { setLoading(false) }
-  }, [])
+  }, [loadArgjendarNames])
   useEffect(() => { load() }, [load])
   useRealtimeSync('repairs', load)
+
+  // Mesazhet e API-t për users — përkthim i kodeve nga backend-i (si te Riparimet).
+  const ERR_LABEL = {
+    product_reserved: 'Produkti është rezervuar tashmë nga një riparim tjetër aktiv.',
+    already_converted: 'Ky riparim është konvertuar në faturë; ndryshimet janë të bllokuara.',
+    has_invoice: 'Fshirja nuk lejohet: riparimi është konvertuar në faturë. Anulo faturën fillimisht.',
+    conversion_failed: 'Konvertimi në faturë dështoi. Kontrollo çmimin dhe stokun e produktit.',
+    price_required_for_conversion: 'Vendos çmimin para se ta dorëzosh një riparim të lidhur me produkt.',
+    product_not_found: 'Produkti i lidhur nuk u gjet në inventar.',
+  }
+  const apiError = (e) => ERR_LABEL[e?.error] || e?.detail || e?.error || 'Gabim'
+
+  const saveEdit = async (data) => {
+    if (!data?.id) return false
+    const res = await fetch(`/api/repairs/${data.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) { const e = await res.json().catch(() => ({})); alert(apiError(e)); return false }
+    setEditing(null)
+    load()
+    return true
+  }
+
+  const removeRepair = async (r) => {
+    const label = r.customer_name || r.item_description || `#${r.id}`
+    const ok = await showConfirm(
+      `Fshi riparimin e "${label}"?\n\nKy veprim s'ka kthim.`,
+      { confirmLabel: 'Fshi', danger: true }
+    )
+    if (!ok) return
+    const res = await fetch(`/api/repairs/${r.id}`, { method: 'DELETE' })
+    if (!res.ok) { const e = await res.json().catch(() => ({})); alert(apiError(e)); return }
+    load()
+  }
 
   const grouped = useMemo(() => {
     // Grupon riparimet sipas argjendar_name. Përfshin edhe argjendarët nga tabela
@@ -137,15 +184,27 @@ export default function Argjendaret() {
           {visible.map(g => (
             <ArgjendarCard key={g.name} group={g}
               onRemove={() => removeArgjendar(g.name, g.savedId)}
+              onEditRepair={setEditing}
+              onDeleteRepair={removeRepair}
               onChanged={load} />
           ))}
         </div>
+      )}
+
+      {editing && (
+        <RepairModal
+          repair={editing}
+          onClose={() => setEditing(null)}
+          onSave={saveEdit}
+          argjendars={argjendarNames}
+          onArgjendarsChanged={loadArgjendarNames}
+        />
       )}
     </div>
   )
 }
 
-function ArgjendarCard({ group, onRemove, onChanged }) {
+function ArgjendarCard({ group, onRemove, onEditRepair, onDeleteRepair, onChanged }) {
   const [expanded, setExpanded] = useState(false)
   const [paying, setPaying] = useState(null) // repair.id që po paguhet
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -324,6 +383,18 @@ function ArgjendarCard({ group, onRemove, onChanged }) {
                   )}
                 </div>
               )}
+              <div className="shrink-0 flex items-center gap-1">
+                <button
+                  onClick={() => onEditRepair?.(r)}
+                  className="text-[10px] px-2 py-1 rounded-md bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 dark:bg-slate-800 dark:hover:bg-blue-900/30 dark:text-slate-300 dark:hover:text-blue-300"
+                  title="Modifiko riparimin"
+                >✏️</button>
+                <button
+                  onClick={() => onDeleteRepair?.(r)}
+                  className="text-[10px] px-2 py-1 rounded-md bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-900/30 dark:text-slate-300 dark:hover:text-rose-300"
+                  title="Fshi riparimin"
+                >🗑</button>
+              </div>
             </div>
           ))}
         </div>

@@ -124,7 +124,7 @@ function ProductPicker({ product, exceptRepairId, onPick, onClear }) {
   )
 }
 
-function RepairModal({ repair, onClose, onSave, argjendars = [], onArgjendarsChanged, inline = false }) {
+export function RepairModal({ repair, onClose, onSave, argjendars = [], onArgjendarsChanged, inline = false }) {
   const [form, setForm] = useState(() => repair ? { ...EMPTY(), ...repair } : EMPTY())
   const [showArgManager, setShowArgManager] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -176,22 +176,34 @@ function RepairModal({ repair, onClose, onSave, argjendars = [], onArgjendarsCha
     }
     handleSave(form)
   }
-  const Wrapper = inline
-    ? ({ children }) => <div className="card p-0 overflow-hidden">{children}</div>
-    : ({ children }) => (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-          <div className="modal-box max-w-2xl">{children}</div>
-        </div>
-      )
-  return (
-    <Wrapper>
+  // Përmbajtjen e form-ës e vendosim brenda një JSX fragment, pastaj e vendosim
+  // në wrapper sipas mode-s. SHËNIM: NUK krijojmë komponent `Wrapper` brenda
+  // body-t të funksionit — kjo do krijonte tip të ri komponenti në çdo render
+  // dhe do shkaktonte re-mount të subtree-s, çka aktivizon përsëri `autoFocus`
+  // dhe vjedh fokusin nga fusha ku përdoruesi po shkruan.
+  const body = (
+      <>
         <div className={inline ? 'px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-between' : 'modal-header'}>
           <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">
             {repair?.id ? `Edito Riparimin #${repair.id}` : '🛠️ Riparim i Ri'}
           </h3>
           {!inline && <button type="button" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 text-xl">×</button>}
         </div>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} onKeyDown={e => {
+          // Enter në fushë teksti/numër/datë → kalo te fusha pasardhëse (jo submit).
+          // Vetëm butoni "Ruaj" dhe Ctrl+Enter submit-on. Shmang submit-in e
+          // paqëllimtë që reseton formën dhe kthen fokusin te emri i klientit.
+          if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey) return
+          const tag = e.target.tagName
+          if (tag === 'TEXTAREA' || tag === 'BUTTON') return
+          if (tag === 'INPUT' && e.target.type === 'submit') return
+          e.preventDefault()
+          const focusables = Array.from(
+            e.currentTarget.querySelectorAll('input:not([disabled]), select:not([disabled]), textarea:not([disabled])')
+          ).filter(el => el.offsetParent !== null)
+          const idx = focusables.indexOf(e.target)
+          if (idx >= 0 && idx < focusables.length - 1) focusables[idx + 1].focus()
+        }}>
           <div className={inline ? 'p-4' : 'modal-body'}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -366,7 +378,14 @@ function RepairModal({ repair, onClose, onSave, argjendars = [], onArgjendarsCha
             onPick={(name) => { set('argjendar_name', name); setShowArgManager(false) }}
           />
         )}
-    </Wrapper>
+      </>
+    )
+  return inline ? (
+    <div className="card p-0 overflow-hidden">{body}</div>
+  ) : (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box max-w-2xl">{body}</div>
+    </div>
   )
 }
 

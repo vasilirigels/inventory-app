@@ -477,6 +477,90 @@ function BilanciSection({ pnl }) {
         <p className="text-xs opacity-80 mt-2">= Shitje − Kosto artikujsh. Shpenzimet operative më poshtë s'janë zbritur këtu.</p>
       </div>
 
+      {/* ── 2b. RAPORTI FITIM / HUMBJE — Fitim Bruto − Shpenzime = Neto ── */}
+      {(() => {
+        const expenseKeys = ['daily', 'transport', 'marketing', 'workers']
+        const totalExpensesByCur = {}
+        for (const c of cols) {
+          totalExpensesByCur[c] = expenseKeys.reduce(
+            (s, k) => s + ((expenses[k] || {})[c] || 0), 0
+          )
+        }
+        const netByCur = {}
+        for (const c of cols) {
+          netByCur[c] = (totalProfit[c] || 0) - (totalExpensesByCur[c] || 0)
+        }
+        // Rezultati global: shuma e neto > 0 → FITIM, ndryshe → HUMBJE.
+        // Konvertimi në LEK për badge-in bëhet në frontend duke mbledhur
+        // vetëm LEK + EUR (çmimi tregtar kryesor). Monedha të tjera shfaqen
+        // veçmas në tabelë por nuk afektojnë badge-in.
+        const activeCurs = cols.filter(c =>
+          Math.abs(totalProfit[c] || 0) > 0.5 || Math.abs(totalExpensesByCur[c] || 0) > 0.5
+        )
+        if (activeCurs.length === 0) return null
+        return (
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border-2 border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+                  📊 Raporti Fitim / Humbje
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Fitim nga Shitjet − Shpenzime (ditore + transport + marketing + punëtorët)
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                    <th className="text-left px-2 py-1.5 text-xs font-semibold uppercase">Monedha</th>
+                    <th className="text-right px-2 py-1.5 text-xs font-semibold uppercase bg-emerald-50/60 dark:bg-emerald-900/20">Fitimi Bruto</th>
+                    <th className="text-right px-2 py-1.5 text-xs font-semibold uppercase bg-rose-50/60 dark:bg-rose-900/20">Shpenzime</th>
+                    <th className="text-right px-2 py-1.5 text-xs font-semibold uppercase bg-blue-50/60 dark:bg-blue-900/20">Neto</th>
+                    <th className="text-center px-2 py-1.5 text-xs font-semibold uppercase">Rezultati</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeCurs.map(c => {
+                    const profit = totalProfit[c] || 0
+                    const exp = totalExpensesByCur[c] || 0
+                    const net = netByCur[c] || 0
+                    const isProfit = net >= 0
+                    return (
+                      <tr key={c} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="px-2 py-2 font-bold text-slate-700 dark:text-slate-200">{c}</td>
+                        <td className="px-2 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">
+                          {Math.abs(profit) > 0.5 ? fmt(profit) : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-rose-700 dark:text-rose-300">
+                          {Math.abs(exp) > 0.5 ? `−${fmt(exp)}` : '—'}
+                        </td>
+                        <td className={`px-2 py-2 text-right tabular-nums font-bold text-base ${isProfit ? 'text-emerald-800 dark:text-emerald-200' : 'text-red-800 dark:text-red-200'}`}>
+                          {fmt(net)}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
+                            isProfit
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+                          }`}>
+                            {isProfit ? '✅ FITIM' : '🔻 HUMBJE'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 italic mt-2">
+              Vlerat ndahen sipas monedhës <strong>origjinale</strong> (pa konvertim). Fitimi Bruto = Shitje − Kosto artikujsh. Pagesat e punëtorëve janë në EUR.
+            </p>
+          </div>
+        )
+      })()}
+
       {/* ── 3. GJENDJA E BIZNESIT: Borxhet & Marketing (snapshot aktual) ── */}
       <div>
         <h3 className="text-base font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
