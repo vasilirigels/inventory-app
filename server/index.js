@@ -1690,8 +1690,9 @@ app.get('/api/pnl', async (req, res) => {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
 
-    // v6 = + grupim mujor i Fitim/Humbje (monthly[])
-    const cacheKey = `pnl:v6:${from}:${to}`;
+    // v7 = marketing me produkte llogaritet me kosto (cost_price × qty),
+    //      jo me çmimin e shitjes që ruhet te amount_eur
+    const cacheKey = `pnl:v7:${from}:${to}`;
     const hit = cache.get(cacheKey);
     if (hit) return res.json(hit);
 
@@ -1794,18 +1795,29 @@ app.get('/api/pnl', async (req, res) => {
     // Marketing nga kontratat — përfshi BOTH 'cash' (pagesa në para) DHE
     // 'product' (produkte të dhëna si marketing — kostoja në EUR). Të dyja
     // reduktojnë fitimin real, prandaj futen te shpenzimet marketing të periudhës.
-    const mktAllRows = await queryAll(
-      `SELECT COALESCE(type, '') AS type, COALESCE(amount_eur, 0) AS amt
+    //
+    // Për 'product': marketing_contract_entries.amount_eur ruan ÇMIMIN E SHITJES
+    // (sell_price × qty × (1 + vat)) si vlerë referuese për klientin. Por kostoja
+    // reale për dyqanin është `cost_price × qty` (ose fallback te purchase_price_no_vat).
+    // P&L e përdor kostoja reale — e njëjta logjikë si për fitimin e shitjeve.
+    const mktCashSum = await queryOne(
+      `SELECT COALESCE(SUM(amount_eur), 0) AS total
          FROM marketing_contract_entries
-        WHERE date BETWEEN ? AND ?`,
+        WHERE type = 'cash' AND date BETWEEN ? AND ?`,
       [from, to]
     );
-    let mktPeriodCash = 0, mktPeriodProduct = 0;
-    for (const r of mktAllRows) {
-      const v = Number(r.amt) || 0;
-      if (r.type === 'cash') mktPeriodCash += v;
-      else if (r.type === 'product') mktPeriodProduct += v;
-    }
+    const mktProductSum = await queryOne(
+      `SELECT COALESCE(SUM(
+                COALESCE(mce.product_qty, 1) *
+                COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0)
+              ), 0) AS total
+         FROM marketing_contract_entries mce
+         LEFT JOIN products p ON p.id = mce.product_id
+        WHERE mce.type = 'product' AND mce.date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const mktPeriodCash = Number(mktCashSum?.total) || 0;
+    const mktPeriodProduct = Number(mktProductSum?.total) || 0;
 
     // Marketing jashtë kontratave — tabela `marketing_expenses` përmban
     // shpenzime ad-hoc marketing që NUK janë të lidhura me ndonjë kontratë
@@ -2027,6 +2039,9 @@ app.get('/api/pnl', async (req, res) => {
     //   - Kontratat sipas `start_date` (data kur u hap kontrata)
     //   - Hyrjet (cash/product/extra) sipas `date`
     // Totalet "gjithë kohës" ruhen veçmas si referencë.
+    // Totalet për produktet marketing: llogariten me `cost_price × qty` (jo me
+    // amount_eur që ruan çmimin e shitjes). Përputhet me mktPeriodProduct dhe
+    // monthly product calculations për konsistencë në të gjithë P&L.
     const mktSummary = await queryOne(
       `SELECT
          (SELECT COUNT(*) FROM marketing_contracts WHERE status = 'open'   AND start_date BETWEEN ? AND ?) AS open_contracts,
@@ -2034,7 +2049,13 @@ app.get('/api/pnl', async (req, res) => {
          (SELECT COALESCE(SUM(total_amount_eur), 0) FROM marketing_contracts WHERE status = 'open'   AND start_date BETWEEN ? AND ?) AS open_budget_eur,
          (SELECT COALESCE(SUM(total_amount_eur), 0) FROM marketing_contracts WHERE status = 'closed' AND start_date BETWEEN ? AND ?) AS closed_budget_eur,
          (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'cash'    AND date BETWEEN ? AND ?) AS paid_cash_total,
-         (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'product' AND date BETWEEN ? AND ?) AS paid_product_total,
+         (SELECT COALESCE(SUM(
+                 COALESCE(mce.product_qty, 1) *
+                 COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0)
+               ), 0)
+            FROM marketing_contract_entries mce
+            LEFT JOIN products p ON p.id = mce.product_id
+           WHERE mce.type = 'product' AND mce.date BETWEEN ? AND ?) AS paid_product_total,
          (SELECT COUNT(*)                       FROM marketing_contract_entries WHERE type = 'product' AND date BETWEEN ? AND ?) AS product_entries_count,
          (SELECT COALESCE(SUM(COALESCE(amount_eur, amount, 0)), 0) FROM marketing_expenses WHERE date BETWEEN ? AND ?) AS paid_extra_total,
          (SELECT COUNT(*)                       FROM marketing_expenses WHERE date BETWEEN ? AND ?) AS extra_entries_count,
@@ -2042,7 +2063,13 @@ app.get('/api/pnl', async (req, res) => {
          (SELECT COUNT(*) FROM marketing_contracts WHERE status = 'open')   AS all_open_contracts,
          (SELECT COALESCE(SUM(total_amount_eur), 0) FROM marketing_contracts WHERE status = 'open') AS all_open_budget_eur,
          (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'cash')    AS all_paid_cash,
-         (SELECT COALESCE(SUM(amount_eur), 0) FROM marketing_contract_entries WHERE type = 'product') AS all_paid_product,
+         (SELECT COALESCE(SUM(
+                 COALESCE(mce.product_qty, 1) *
+                 COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0)
+               ), 0)
+            FROM marketing_contract_entries mce
+            LEFT JOIN products p ON p.id = mce.product_id
+           WHERE mce.type = 'product') AS all_paid_product,
          (SELECT COALESCE(SUM(COALESCE(amount_eur, amount, 0)), 0) FROM marketing_expenses)           AS all_paid_extra`,
       [from, to, from, to, from, to, from, to, from, to, from, to, from, to, from, to, from, to]
     );
@@ -2137,14 +2164,29 @@ app.get('/api/pnl', async (req, res) => {
       touchMonth(r.ym).expenses[cur] += Number(r.amt) || 0;
     }
 
-    const mktMonthlyRows = await queryAll(
+    // Cash: amount_eur direkt. Product: cost_price × qty nga JOIN (jo amount_eur
+    // që është sell_price × qty × (1+vat)). Konsistent me totalin e sipërm.
+    const mktCashMonthly = await queryAll(
       `SELECT substr(date, 1, 7) AS ym, SUM(COALESCE(amount_eur, 0)) AS amt
          FROM marketing_contract_entries
-        WHERE date BETWEEN ? AND ? AND type IN ('cash','product')
+        WHERE type = 'cash' AND date BETWEEN ? AND ?
         GROUP BY ym`,
       [from, to]
     );
-    for (const r of mktMonthlyRows) touchMonth(r.ym).expenses.EUR += Number(r.amt) || 0;
+    for (const r of mktCashMonthly) touchMonth(r.ym).expenses.EUR += Number(r.amt) || 0;
+
+    const mktProductMonthly = await queryAll(
+      `SELECT substr(mce.date, 1, 7) AS ym,
+              SUM(COALESCE(mce.product_qty, 1) *
+                  COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0)
+              ) AS amt
+         FROM marketing_contract_entries mce
+         LEFT JOIN products p ON p.id = mce.product_id
+        WHERE mce.type = 'product' AND mce.date BETWEEN ? AND ?
+        GROUP BY ym`,
+      [from, to]
+    );
+    for (const r of mktProductMonthly) touchMonth(r.ym).expenses.EUR += Number(r.amt) || 0;
 
     const mktExtraMonthlyRows = await queryAll(
       `SELECT substr(date, 1, 7) AS ym,
