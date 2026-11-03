@@ -1690,8 +1690,8 @@ app.get('/api/pnl', async (req, res) => {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
 
-    // v5 = + HAS te detyrimet (klientë + furnitorë), proporcional me borxhin
-    const cacheKey = `pnl:v5:${from}:${to}`;
+    // v6 = + grupim mujor i Fitim/Humbje (monthly[])
+    const cacheKey = `pnl:v6:${from}:${to}`;
     const hit = cache.get(cacheKey);
     if (hit) return res.json(hit);
 
@@ -2086,6 +2086,100 @@ app.get('/api/pnl', async (req, res) => {
       },
     };
 
+    // ── Grupim mujor i Fitim / Humbje ────────────────────────────────────
+    // Një rresht për çdo muaj në periudhë, me:
+    //   - profit per currency = Σ (revenue − cost) nga shitjet e muajit
+    //   - expenses per currency = daily + transport + marketing + punëtorët
+    //     (ndjek të njëjtën logjikë agregimi si totalet e mësipërme)
+    //   - net = profit − expenses
+    // Përdoret në UI për tabelën "Fitim / Humbje Mujore" kur periudha
+    // mbulon ≥ 2 muaj.
+    const monthlyMap = new Map();  // ym → { profit:zeroCur, expenses:zeroCur }
+    const touchMonth = (ym) => {
+      if (!monthlyMap.has(ym)) monthlyMap.set(ym, { profit: zeroCur(), expenses: zeroCur() });
+      return monthlyMap.get(ym);
+    };
+
+    const salesMonthlyRows = await queryAll(
+      `SELECT substr(i.date, 1, 7) AS ym,
+              COALESCE(i.currency, 'LEK') AS cur,
+              COALESCE(i.is_credit_note, 0) AS is_credit,
+              SUM(COALESCE(ii.total_with_vat, 0)) AS revenue,
+              SUM(COALESCE(ii.qty, 0) *
+                  COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.purchase_price_no_vat, 0), 0)
+              ) AS cost
+         FROM invoices i
+         JOIN invoice_items ii ON ii.invoice_id = i.id
+         LEFT JOIN products p ON p.id = ii.product_id
+        WHERE i.date BETWEEN ? AND ? AND COALESCE(i.cancelled, 0) = 0
+        GROUP BY ym, cur, is_credit`,
+      [from, to]
+    );
+    for (const r of salesMonthlyRows) {
+      const cur = (r.cur || 'LEK').toUpperCase();
+      if (!(cur in zeroCur())) continue;
+      const sign = r.is_credit ? -1 : 1;
+      touchMonth(r.ym).profit[cur] += sign * ((r.revenue || 0) - (r.cost || 0));
+    }
+
+    const expMonthlyRows = await queryAll(
+      `SELECT substr(date, 1, 7) AS ym,
+              COALESCE(currency, 'LEK') AS cur,
+              SUM(COALESCE(amount, 0)) AS amt
+         FROM expense_entries
+        WHERE date BETWEEN ? AND ?
+        GROUP BY ym, cur`,
+      [from, to]
+    );
+    for (const r of expMonthlyRows) {
+      const cur = (r.cur || 'LEK').toUpperCase();
+      if (!(cur in zeroCur())) continue;
+      touchMonth(r.ym).expenses[cur] += Number(r.amt) || 0;
+    }
+
+    const mktMonthlyRows = await queryAll(
+      `SELECT substr(date, 1, 7) AS ym, SUM(COALESCE(amount_eur, 0)) AS amt
+         FROM marketing_contract_entries
+        WHERE date BETWEEN ? AND ? AND type IN ('cash','product')
+        GROUP BY ym`,
+      [from, to]
+    );
+    for (const r of mktMonthlyRows) touchMonth(r.ym).expenses.EUR += Number(r.amt) || 0;
+
+    const mktExtraMonthlyRows = await queryAll(
+      `SELECT substr(date, 1, 7) AS ym,
+              COALESCE(currency, 'LEK') AS cur,
+              SUM(COALESCE(amount, 0)) AS amt
+         FROM marketing_expenses
+        WHERE date BETWEEN ? AND ?
+        GROUP BY ym, cur`,
+      [from, to]
+    );
+    for (const r of mktExtraMonthlyRows) {
+      const cur = (r.cur || 'LEK').toUpperCase();
+      if (!(cur in zeroCur())) continue;
+      touchMonth(r.ym).expenses[cur] += Number(r.amt) || 0;
+    }
+
+    const wpMonthlyRows = await queryAll(
+      `SELECT substr(date_paid, 1, 7) AS ym,
+              SUM(COALESCE(salary_cash_eur, 0) + COALESCE(bonus_cash_eur, 0)
+                + COALESCE(salary_bank_eur, 0) + COALESCE(bonus_bank_eur, 0)) AS eur
+         FROM worker_payments
+        WHERE date_paid BETWEEN ? AND ?
+        GROUP BY ym`,
+      [from, to]
+    );
+    for (const r of wpMonthlyRows) touchMonth(r.ym).expenses.EUR += Number(r.eur) || 0;
+
+    const monthly = Array.from(monthlyMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([ym, { profit, expenses }]) => {
+        const net = zeroCur();
+        for (const c of CURS) net[c] = profit[c] - expenses[c];
+        return { ym, profit: roundCur(profit), expenses: roundCur(expenses), net: roundCur(net) };
+      });
+
     const payload = {
       from, to,
       byCategory,
@@ -2098,6 +2192,7 @@ app.get('/api/pnl', async (req, res) => {
         workers:   roundCur(workerPayments),
       },
       totalProfit: roundCur(totalProfit),
+      monthly,
       // Borxhet filtruar sipas datës së faturës (periudha) + totale gjithë kohës
       // për referencë. UI mund të tregojë të dyja.
       debts: {

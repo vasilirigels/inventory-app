@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 
 const ALBANIAN_MONTHS = [
   '', 'Janar', 'Shkurt', 'Mars', 'Prill', 'Maj', 'Qershor',
@@ -557,6 +557,116 @@ function BilanciSection({ pnl }) {
             <p className="text-[11px] text-slate-400 dark:text-slate-500 italic mt-2">
               Vlerat ndahen sipas monedhës <strong>origjinale</strong> (pa konvertim). Fitimi Bruto = Shitje − Kosto artikujsh. Pagesat e punëtorëve janë në EUR.
             </p>
+
+            {Array.isArray(pnl.monthly) && pnl.monthly.length >= 2 && (() => {
+              const monthlyActiveCurs = CUR_ORDER.filter(c =>
+                pnl.monthly.some(m =>
+                  Math.abs(m.profit[c] || 0) > 0.5 || Math.abs(m.expenses[c] || 0) > 0.5
+                )
+              )
+              if (monthlyActiveCurs.length === 0) return null
+              const ymLabel = (ym) => {
+                const [yy, mm] = ym.split('-').map(Number)
+                return `${ALBANIAN_MONTHS[mm]} ${yy}`
+              }
+              return (
+                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700">
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">
+                    📅 Fitim / Humbje Mujore
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                          <th rowSpan={2} className="text-left px-2 py-1.5 text-xs font-semibold uppercase align-bottom">Muaji</th>
+                          {monthlyActiveCurs.map(c => (
+                            <th key={c} colSpan={3} className="text-center px-2 py-1 text-xs font-semibold uppercase border-l border-slate-200 dark:border-slate-700">{c}</th>
+                          ))}
+                          <th rowSpan={2} className="text-center px-2 py-1.5 text-xs font-semibold uppercase align-bottom border-l border-slate-200 dark:border-slate-700">Rezultati</th>
+                        </tr>
+                        <tr className="text-[11px] text-slate-400 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                          {monthlyActiveCurs.map(c => (
+                            <Fragment key={c}>
+                              <th className="text-right px-2 py-1 font-semibold uppercase bg-emerald-50/60 dark:bg-emerald-900/20 border-l border-slate-200 dark:border-slate-700">Fitim</th>
+                              <th className="text-right px-2 py-1 font-semibold uppercase bg-rose-50/60 dark:bg-rose-900/20">Shpenz.</th>
+                              <th className="text-right px-2 py-1 font-semibold uppercase bg-blue-50/60 dark:bg-blue-900/20">Neto</th>
+                            </Fragment>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pnl.monthly.map(m => {
+                          const sumNet = monthlyActiveCurs.reduce((s, c) => s + (m.net[c] || 0), 0)
+                          const isProfit = sumNet >= 0
+                          const hasActivity = monthlyActiveCurs.some(c =>
+                            Math.abs(m.profit[c] || 0) > 0.5 || Math.abs(m.expenses[c] || 0) > 0.5
+                          )
+                          return (
+                            <tr key={m.ym} className="border-b border-slate-100 dark:border-slate-800">
+                              <td className="px-2 py-1.5 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{ymLabel(m.ym)}</td>
+                              {monthlyActiveCurs.map(c => {
+                                const p = m.profit[c] || 0
+                                const e = m.expenses[c] || 0
+                                const n = m.net[c] || 0
+                                const netProfit = n >= 0
+                                return (
+                                  <Fragment key={c}>
+                                    <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-300 border-l border-slate-100 dark:border-slate-800">
+                                      {Math.abs(p) > 0.5 ? fmt(p) : '—'}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums text-rose-700 dark:text-rose-300">
+                                      {Math.abs(e) > 0.5 ? `−${fmt(e)}` : '—'}
+                                    </td>
+                                    <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${netProfit ? 'text-emerald-800 dark:text-emerald-200' : 'text-red-800 dark:text-red-200'}`}>
+                                      {Math.abs(n) > 0.5 ? fmt(n) : '—'}
+                                    </td>
+                                  </Fragment>
+                                )
+                              })}
+                              <td className="px-2 py-1.5 text-center border-l border-slate-100 dark:border-slate-800">
+                                {hasActivity ? (
+                                  <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                                    isProfit
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                                      : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+                                  }`}>
+                                    {isProfit ? '✅' : '🔻'}
+                                  </span>
+                                ) : <span className="text-slate-300">—</span>}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {/* Rreshti i totalit — shuma e muajve = totalet e periudhës */}
+                        <tr className="font-bold border-t-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                          <td className="px-2 py-1.5 text-slate-800 dark:text-slate-100">TOTAL</td>
+                          {monthlyActiveCurs.map(c => {
+                            const p = pnl.monthly.reduce((s, m) => s + (m.profit[c] || 0), 0)
+                            const e = pnl.monthly.reduce((s, m) => s + (m.expenses[c] || 0), 0)
+                            const n = p - e
+                            const netProfit = n >= 0
+                            return (
+                              <Fragment key={c}>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-emerald-800 dark:text-emerald-200 border-l border-slate-200 dark:border-slate-700">
+                                  {Math.abs(p) > 0.5 ? fmt(p) : '—'}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-rose-800 dark:text-rose-200">
+                                  {Math.abs(e) > 0.5 ? `−${fmt(e)}` : '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-right tabular-nums ${netProfit ? 'text-emerald-900 dark:text-emerald-100' : 'text-red-900 dark:text-red-100'}`}>
+                                  {Math.abs(n) > 0.5 ? fmt(n) : '—'}
+                                </td>
+                              </Fragment>
+                            )
+                          })}
+                          <td className="px-2 py-1.5 border-l border-slate-200 dark:border-slate-700"></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )
       })()}
